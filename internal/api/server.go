@@ -30,11 +30,3 @@ func (s *Server) Handler() http.Handler {
 	})
 	return mux
 }
-
-// Placeholder handler replaced in Task 11. Registered now so the route
-// table is complete and tested once.
-func (s *Server) logConsistency(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
-
-func notImplemented(w http.ResponseWriter) {
-	writeErr(w, http.StatusInternalServerError, "INTERNAL", "not implemented")
-}

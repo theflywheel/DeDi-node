@@ -82,8 +82,20 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	s.respondLookup(w, r, "Record retrieved successfully", recordData(e, versions, s.TTL), e)
 }
 
-// respondLookup emits the plain envelope; Task 11 extends it with
-// ?proof=inclusion handling.
+// respondLookup emits the plain envelope, or attaches an inclusion proof
+// when the caller passes ?proof=inclusion.
 func (s *Server) respondLookup(w http.ResponseWriter, r *http.Request, msg string, data any, e store.Entry) {
-	ok(w, msg, data)
+	switch r.URL.Query().Get("proof") {
+	case "":
+		ok(w, msg, data)
+	case "inclusion":
+		p, err := s.buildProof(r, e)
+		if err != nil {
+			internal(w, err)
+			return
+		}
+		okProof(w, msg, data, p)
+	default:
+		badRequest(w, "proof must be 'inclusion'")
+	}
 }
