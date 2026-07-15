@@ -21,7 +21,7 @@ func testStore(t *testing.T) *Store {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := s.pool.Exec(ctx, `TRUNCATE log_entries, tree_hashes, checkpoints`); err != nil {
+	if err := s.TruncateForTest(ctx); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return s
