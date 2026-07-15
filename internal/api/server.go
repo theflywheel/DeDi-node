@@ -31,11 +31,8 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Placeholder handlers replaced in Tasks 8–11. Registered now so the route
+// Placeholder handlers replaced in Tasks 9–11. Registered now so the route
 // table is complete and tested once.
-func (s *Server) lookupNamespace(w http.ResponseWriter, r *http.Request)   { notImplemented(w) }
-func (s *Server) lookupRegistry(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
-func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request)      { notImplemented(w) }
 func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
 func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request)     { notImplemented(w) }
 func (s *Server) versionsNamespace(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
