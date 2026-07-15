@@ -69,12 +69,21 @@ func TestOfflineProofVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("checkpoint signature: %v", err)
 	}
-	_, cpSize, cpRoot, err := merkle.ParseCheckpoint(n.Text)
+	origin, cpSize, cpRoot, err := merkle.ParseCheckpoint(n.Text)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cpSize != pr.Proof.TreeSize {
 		t.Fatalf("checkpoint size %d != proof tree_size %d", cpSize, pr.Proof.TreeSize)
+	}
+	if origin != "test.dedi.local/log" {
+		t.Fatalf("checkpoint origin = %q, want test.dedi.local/log", origin)
+	}
+
+	// 1b. Proven leaf identifies the exact resource that was requested.
+	if pr.Proof.Leaf.EntryType != "record" || pr.Proof.Leaf.Namespace != "flywheel" ||
+		pr.Proof.Leaf.Registry != "participants" || pr.Proof.Leaf.RecordName != "bap.example.com" {
+		t.Fatalf("proof leaf identity does not match requested resource: %+v", pr.Proof.Leaf)
 	}
 
 	// 2. Served payload bytes hash to the leaf's digest.

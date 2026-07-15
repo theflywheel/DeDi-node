@@ -95,8 +95,12 @@ func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, total, err := s.Store.QueryRegistries(r.Context(), ns, f)
+	if errors.Is(err, store.ErrInvalidFilter) {
+		badRequest(w, err.Error())
+		return
+	}
 	if err != nil {
-		badRequest(w, err.Error()) // only filter validation errors surface here
+		internal(w, err)
 		return
 	}
 	regs := make([]registrySummaryDTO, 0, len(rows))
@@ -154,8 +158,12 @@ func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, total, err := s.Store.QueryRecords(r.Context(), ns, reg, f)
-	if err != nil {
+	if errors.Is(err, store.ErrInvalidFilter) {
 		badRequest(w, err.Error())
+		return
+	}
+	if err != nil {
+		internal(w, err)
 		return
 	}
 	recs := make([]recordSummaryDTO, 0, len(rows))

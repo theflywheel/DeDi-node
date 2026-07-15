@@ -2,11 +2,16 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrInvalidFilter marks query filter validation errors (e.g. an unknown
+// sort key) so callers can distinguish them from genuine store failures.
+var ErrInvalidFilter = errors.New("invalid query filter")
 
 type QueryFilters struct {
 	Name     *string
@@ -41,7 +46,7 @@ var sortExprs = map[string]string{
 func (f *QueryFilters) normalize() (orderBy string, limit, offset int, err error) {
 	orderBy, okSort := sortExprs[f.Sort]
 	if !okSort {
-		return "", 0, 0, fmt.Errorf("invalid sort %q", f.Sort)
+		return "", 0, 0, fmt.Errorf("invalid sort %q: %w", f.Sort, ErrInvalidFilter)
 	}
 	if f.Page < 1 {
 		f.Page = 1

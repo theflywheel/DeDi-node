@@ -11,7 +11,7 @@ Design: [docs/design.md](docs/design.md). Status: M1 (core node) in progress.
     DEDI_KEY_FILE=keys/dedid.key go run ./cmd/dedid serve &   # read plane on :8080
     go run ./cmd/dedid seed -file examples/beckn-seed.json
 
-    curl -s localhost:8080/dedi/lookup/flywheel-net/participants/bap.demo.theflywheel.in?proof=inclusion | jq .
+    curl -s "localhost:8080/dedi/lookup/flywheel-net/participants/bap.demo.theflywheel.in?proof=inclusion" | jq .
     curl -s localhost:8080/dedi/log/checkpoint
 
 Or fully containerized: `make keygen && docker compose up --build`.

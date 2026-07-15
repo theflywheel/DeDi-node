@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,8 +98,8 @@ func serve() error {
 	if interval <= 0 {
 		return fmt.Errorf("DEDI_CHECKPOINT_INTERVAL must be positive")
 	}
-	var ttl int
-	if _, err := fmt.Sscanf(envOr("DEDI_TTL", "300"), "%d", &ttl); err != nil {
+	ttl, err := strconv.Atoi(envOr("DEDI_TTL", "300"))
+	if err != nil {
 		return fmt.Errorf("DEDI_TTL: %w", err)
 	}
 
@@ -113,7 +114,12 @@ func serve() error {
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl}
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
-	return http.ListenAndServe(listen, srv.Handler())
+	server := &http.Server{
+		Addr:              listen,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 type seedFile struct {
