@@ -90,3 +90,19 @@ func TestQueryFiltersAndPagination(t *testing.T) {
 	// unknown namespace
 	getJSON(t, srv.URL+"/dedi/query/nope", http.StatusNotFound)
 }
+
+func TestQueryPageSizeCapEchoedCorrectly(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedQuery(t, s)
+	m := getJSON(t, srv.URL+"/dedi/query/flywheel/participants?page_size=1000", http.StatusOK)
+	data := m["data"].(map[string]any)
+	if data["page_size"].(float64) != float64(100) {
+		t.Fatalf("page_size: %v", data["page_size"])
+	}
+	if data["total_pages"].(float64) != float64(1) {
+		t.Fatalf("total_pages: %v", data["total_pages"])
+	}
+	if data["total_records"].(float64) != float64(3) {
+		t.Fatalf("total_records: %v", data["total_records"])
+	}
+}

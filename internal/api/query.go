@@ -75,11 +75,15 @@ func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err.Error())
 		return
 	}
-	if f.Page == 0 {
+	// mirror store normalize() so the echoed page_size/total_pages match the applied LIMIT
+	if f.Page < 1 {
 		f.Page = 1
 	}
-	if f.PageSize == 0 {
+	if f.PageSize < 1 {
 		f.PageSize = 25
+	}
+	if f.PageSize > 100 {
+		f.PageSize = 100
 	}
 	nsEntry, err := s.Store.Resolve(r.Context(), "namespace", ns, "", "", nil, f.AsOn)
 	if errors.Is(err, store.ErrNotFound) {
@@ -131,11 +135,14 @@ func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err.Error())
 		return
 	}
-	if f.Page == 0 {
+	if f.Page < 1 {
 		f.Page = 1
 	}
-	if f.PageSize == 0 {
+	if f.PageSize < 1 {
 		f.PageSize = 25
+	}
+	if f.PageSize > 100 {
+		f.PageSize = 100
 	}
 	regEntry, err := s.Store.Resolve(r.Context(), "registry", ns, reg, "", nil, f.AsOn)
 	if errors.Is(err, store.ErrNotFound) {
