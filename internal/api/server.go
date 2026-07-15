@@ -35,9 +35,6 @@ func (s *Server) Handler() http.Handler {
 // table is complete and tested once.
 func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
 func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request)     { notImplemented(w) }
-func (s *Server) versionsNamespace(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
-func (s *Server) versionsRegistry(w http.ResponseWriter, r *http.Request)  { notImplemented(w) }
-func (s *Server) versionsRecord(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
 func (s *Server) logConsistency(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
 
 func notImplemented(w http.ResponseWriter) {
