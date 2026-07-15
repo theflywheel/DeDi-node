@@ -1,0 +1,20 @@
+{
+  "namespace": "flywheel-net",
+  "payload": {"description": "Flywheel Beckn network (dev)", "domain": "netofnet.theflywheel.in"},
+  "registries": [
+    {
+      "name": "participants",
+      "payload": {"description": "Beckn network participants", "schema": {"type": "object", "required": ["subscriber_id", "role", "signing_public_key", "encr_public_key", "subscriber_url"]}},
+      "records": [
+        {
+          "name": "bap.demo.theflywheel.in",
+          "payload": {"subscriber_id": "bap.demo.theflywheel.in", "role": "BAP", "signing_public_key": "REPLACE_ED25519_B64", "encr_public_key": "REPLACE_X25519_B64", "subscriber_url": "https://bap.demo.theflywheel.in/beckn", "domain": "retail", "status": "SUBSCRIBED"}
+        },
+        {
+          "name": "bpp.demo.theflywheel.in",
+          "payload": {"subscriber_id": "bpp.demo.theflywheel.in", "role": "BPP", "signing_public_key": "REPLACE_ED25519_B64", "encr_public_key": "REPLACE_X25519_B64", "subscriber_url": "https://bpp.demo.theflywheel.in/beckn", "domain": "retail", "status": "SUBSCRIBED"}
+        }
+      ]
+    }
+  ]
+}

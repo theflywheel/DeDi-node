@@ -15,5 +15,19 @@ services:
       timeout: 2s
       retries: 15
 
+  dedid:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DEDI_DB_URL: postgres://dedi:dedi@postgres:5432/dedi?sslmode=disable
+      DEDI_KEY_FILE: /keys/dedid.key
+      DEDI_ORIGIN: dev.dedi.local/log
+    volumes:
+      - ./keys:/keys:ro
+    ports:
+      - "8080:8080"
+
 volumes:
   pgdata:
