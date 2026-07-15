@@ -8,14 +8,14 @@ import (
 )
 
 type versionsDTO struct {
-	RegistryName string         `json:"registry_name,omitempty"`
-	CreatedBy    string         `json:"created_by"`
-	Schema       map[string]any `json:"schema,omitempty"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
-	TotalVersions int           `json:"total_versions"`
-	Versions     []string       `json:"versions"`
-	TTL          int            `json:"ttl"`
+	RegistryName  string   `json:"registry_name,omitempty"`
+	CreatedBy     string   `json:"created_by"`
+	Schema        any      `json:"schema,omitempty"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
+	TotalVersions int      `json:"total_versions"`
+	Versions      []string `json:"versions"`
+	TTL           int      `json:"ttl"`
 }
 
 func (s *Server) versionsFor(w http.ResponseWriter, r *http.Request, entryType, ns, reg, rec, what string) ([]store.Entry, bool) {
@@ -54,12 +54,17 @@ func (s *Server) versionsNamespace(w http.ResponseWriter, r *http.Request) {
 }
 
 // registrySchema fetches the latest registry version's schema for decoration.
-func (s *Server) registrySchema(r *http.Request, ns, reg string) map[string]any {
+// A missing registry degrades to an empty schema; any other Resolve error is
+// surfaced to the caller as a genuine failure.
+func (s *Server) registrySchema(r *http.Request, ns, reg string) (map[string]any, error) {
 	e, err := s.Store.Resolve(r.Context(), "registry", ns, reg, "", nil, nil)
-	if err != nil {
-		return map[string]any{}
+	if errors.Is(err, store.ErrNotFound) {
+		return map[string]any{}, nil
 	}
-	return parseMeta(e.PayloadRaw).Schema
+	if err != nil {
+		return nil, err
+	}
+	return parseMeta(e.PayloadRaw).Schema, nil
 }
 
 func (s *Server) versionsRegistry(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +75,12 @@ func (s *Server) versionsRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	dto := buildVersionsDTO(versions, s.TTL)
 	dto.RegistryName = reg
-	dto.Schema = s.registrySchema(r, ns, reg)
+	schema, err := s.registrySchema(r, ns, reg)
+	if err != nil {
+		internal(w, err)
+		return
+	}
+	dto.Schema = schema
 	ok(w, "Registry versions retrieved successfully", dto)
 }
 
@@ -81,6 +91,11 @@ func (s *Server) versionsRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := buildVersionsDTO(versions, s.TTL)
-	dto.Schema = s.registrySchema(r, ns, reg)
+	schema, err := s.registrySchema(r, ns, reg)
+	if err != nil {
+		internal(w, err)
+		return
+	}
+	dto.Schema = schema
 	ok(w, "Record versions retrieved successfully", dto)
 }

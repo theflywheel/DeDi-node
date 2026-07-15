@@ -33,9 +33,9 @@ func (s *Server) Handler() http.Handler {
 
 // Placeholder handlers replaced in Tasks 9–11. Registered now so the route
 // table is complete and tested once.
-func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
-func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request)     { notImplemented(w) }
-func (s *Server) logConsistency(w http.ResponseWriter, r *http.Request)    { notImplemented(w) }
+func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
+func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request)  { notImplemented(w) }
+func (s *Server) logConsistency(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
 
 func notImplemented(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, "INTERNAL", "not implemented")
