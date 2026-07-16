@@ -34,6 +34,22 @@ func parseMeta(raw []byte) payloadMeta {
 	return p
 }
 
+// parseNetworkMemberships pulls the payload's top-level network_memberships
+// string array (ONIX dediregistry reads it beside details, not inside).
+func parseNetworkMemberships(raw []byte) []string {
+	var p struct {
+		NetworkMemberships []any `json:"network_memberships"`
+	}
+	json.Unmarshal(raw, &p)
+	out := make([]string, 0, len(p.NetworkMemberships))
+	for _, v := range p.NetworkMemberships {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 type namespaceDTO struct {
 	NamespaceID  string         `json:"namespace_id"`
 	Name         string         `json:"name"`
@@ -90,25 +106,26 @@ func registryData(e store.Entry, versions []store.Entry, ttl int) registryDTO {
 }
 
 type recordDTO struct {
-	RecordID     string          `json:"record_id"`
-	RecordName   string          `json:"record_name"`
-	RegistryID   string          `json:"registry_id"`
-	RegistryName string          `json:"registry_name"`
-	NamespaceID  string          `json:"namespace_id"`
-	Namespace    string          `json:"namespace"`
-	Description  string          `json:"description"`
-	Digest       string          `json:"digest"`
-	Details      json.RawMessage `json:"details"` // payload bytes verbatim
-	Meta         map[string]any  `json:"meta"`
-	Version      string          `json:"version"`
-	VersionCount int             `json:"version_count"`
-	Genesis      string          `json:"genesis"`
-	CreatedAt    string          `json:"created_at"`
-	UpdatedAt    string          `json:"updated_at"`
-	CreatedBy    string          `json:"created_by"`
-	State        string          `json:"state"`
-	ValidTill    *string         `json:"valid_till"`
-	TTL          int             `json:"ttl"`
+	RecordID           string          `json:"record_id"`
+	RecordName         string          `json:"record_name"`
+	RegistryID         string          `json:"registry_id"`
+	RegistryName       string          `json:"registry_name"`
+	NamespaceID        string          `json:"namespace_id"`
+	Namespace          string          `json:"namespace"`
+	Description        string          `json:"description"`
+	Digest             string          `json:"digest"`
+	Details            json.RawMessage `json:"details"` // payload bytes verbatim
+	Meta               map[string]any  `json:"meta"`
+	NetworkMemberships []string        `json:"network_memberships,omitempty"`
+	Version            string          `json:"version"`
+	VersionCount       int             `json:"version_count"`
+	Genesis            string          `json:"genesis"`
+	CreatedAt          string          `json:"created_at"`
+	UpdatedAt          string          `json:"updated_at"`
+	CreatedBy          string          `json:"created_by"`
+	State              string          `json:"state"`
+	ValidTill          *string         `json:"valid_till"`
+	TTL                int             `json:"ttl"`
 }
 
 func recordData(e store.Entry, versions []store.Entry, ttl int) recordDTO {
@@ -119,7 +136,8 @@ func recordData(e store.Entry, versions []store.Entry, ttl int) recordDTO {
 		NamespaceID: e.Namespace, Namespace: e.Namespace,
 		Description: "", Digest: hex.EncodeToString(e.Digest),
 		Details: json.RawMessage(e.PayloadRaw), Meta: map[string]any{},
-		Version: versionID(e.Seq), VersionCount: len(versions),
+		NetworkMemberships: parseNetworkMemberships(e.PayloadRaw),
+		Version:            versionID(e.Seq), VersionCount: len(versions),
 		Genesis:   versionID(versions[0].Seq),
 		CreatedAt: fmtTime(versions[0].CreatedAt), UpdatedAt: fmtTime(e.CreatedAt),
 		CreatedBy: e.CreatedBy, State: e.State, ValidTill: nil, TTL: ttl,

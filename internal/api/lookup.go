@@ -73,10 +73,32 @@ func (s *Server) lookupRegistry(w http.ResponseWriter, r *http.Request) {
 	s.respondLookup(w, r, "Registry retrieved successfully", registryData(e, versions, s.TTL), e)
 }
 
+// becknWildcardRegistry is ONIX dediregistry's hardcoded "search all
+// registries" segment (beckn-onix pkg/plugin/implementation/dediregistry).
+const becknWildcardRegistry = "subscribers.beckn.one"
+
 func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
-	e, versions, okRes := s.resolveWithVersions(w, r, "record", ns, reg, rec, "record")
-	if !okRes {
+	vid, asOn, err := parseLookupParams(r)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	e, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, vid, asOn)
+	if errors.Is(err, store.ErrNotFound) && reg == becknWildcardRegistry && vid == nil && asOn == nil {
+		e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		notFound(w, "record")
+		return
+	}
+	if err != nil {
+		internal(w, err)
+		return
+	}
+	versions, err := s.Store.Versions(r.Context(), "record", e.Namespace, e.Registry, e.RecordName)
+	if err != nil {
+		internal(w, err)
 		return
 	}
 	s.respondLookup(w, r, "Record retrieved successfully", recordData(e, versions, s.TTL), e)
