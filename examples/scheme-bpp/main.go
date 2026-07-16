@@ -1,15 +1,16 @@
 // scheme-bpp is a minimal Beckn BPP application that makes India's myScheme
 // dataset searchable over a Beckn network. It plugs in where the starter kit's
-// sandbox-bpp sits: the ONIX adapter forwards an inbound action to /api/webhook,
-// and this app answers a `search` by posting an `on_search` catalog of matching
-// schemes back to the adapter's caller endpoint (which signs + routes it).
+// sandbox-bpp sits: the ONIX adapter forwards an inbound action to
+// /api/webhook/<action>, and this app answers a `discover`/`search` by posting
+// an `on_discover` catalog of matching schemes to the adapter's caller endpoint
+// (which signs + routes it). Search is fuzzy (typo-tolerant).
 //
 // Pure stdlib. Config via env:
 //
 //	SCHEME_INDEX     path to schemes-index.json (default /schemes-index.json)
 //	BPP_CALLER_URL   adapter caller base (default http://beckn-router:9000/bpp/caller)
 //	LISTEN           listen address (default :3002)
-//	MAX_RESULTS      max schemes per on_search (default 10)
+//	MAX_RESULTS      max schemes per callback (default 50)
 package main
 
 import (
@@ -34,13 +35,19 @@ type scheme struct {
 	State         string   `json:"state"`
 	Level         string   `json:"level"`
 	Beneficiaries []string `json:"beneficiaries"`
-	hay           string   // lowercased searchable blob
+
+	hay       string   // lowercased searchable blob
+	nameLower string   // lowercased name
+	tokens    []string // distinct words across all fields (for fuzzy matching)
 }
 
 var (
 	schemes    []scheme
 	callerURL  = envOr("BPP_CALLER_URL", "http://beckn-router:9000/bpp/caller")
-	maxResults = atoiOr("MAX_RESULTS", 10)
+	maxResults = atoiOr("MAX_RESULTS", 50)
+	stopwords  = map[string]bool{"for": true, "the": true, "and": true, "of": true, "to": true,
+		"a": true, "an": true, "in": true, "on": true, "with": true, "jsonpath": true,
+		"type": true, "expression": true, "scheme": true, "schemes": true}
 )
 
 func envOr(k, d string) string {
@@ -54,6 +61,21 @@ func atoiOr(k string, d int) int {
 		return v
 	}
 	return d
+}
+
+func tokenize(s string) []string {
+	fields := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range fields {
+		if len(w) >= 3 && !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func loadIndex(path string) {
@@ -70,14 +92,67 @@ func loadIndex(path string) {
 		parts = append(parts, s.Category...)
 		parts = append(parts, s.Subcategory...)
 		parts = append(parts, s.Beneficiaries...)
-		s.hay = strings.ToLower(strings.Join(parts, " "))
+		blob := strings.Join(parts, " ")
+		s.hay = strings.ToLower(blob)
+		s.nameLower = strings.ToLower(s.Name)
+		s.tokens = tokenize(blob)
 	}
 	log.Printf("loaded %d schemes", len(schemes))
 }
 
-// search ranks schemes by how many query terms appear, with a name-match boost.
-func search(query string) []scheme {
-	terms := strings.Fields(strings.ToLower(query))
+// lev is a bounded Levenshtein distance: returns a value > max as soon as the
+// edit distance is known to exceed max (cheap early exit for fuzzy matching).
+func lev(a, b string, max int) int {
+	la, lb := len(a), len(b)
+	if la-lb > max || lb-la > max {
+		return max + 1
+	}
+	prev := make([]int, lb+1)
+	cur := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		cur[0] = i
+		best := cur[0]
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min3(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if cur[j] < best {
+				best = cur[j]
+			}
+		}
+		if best > max {
+			return max + 1
+		}
+		prev, cur = cur, prev
+	}
+	return prev[lb]
+}
+
+func min3(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
+}
+
+// search ranks schemes: substring hits score high (name boosted), and terms not
+// found verbatim fall back to a bounded-edit-distance (fuzzy) token match.
+// Returns the page of results plus the total number of matches.
+func search(query string) ([]scheme, int) {
+	var terms []string
+	for _, t := range strings.Fields(strings.ToLower(query)) {
+		if len(t) >= 2 && !stopwords[t] {
+			terms = append(terms, t)
+		}
+	}
 	type scored struct {
 		s     scheme
 		score int
@@ -85,20 +160,36 @@ func search(query string) []scheme {
 	var hits []scored
 	for _, s := range schemes {
 		score := 0
-		nameLower := strings.ToLower(s.Name)
 		for _, t := range terms {
 			if strings.Contains(s.hay, t) {
-				score++
-				if strings.Contains(nameLower, t) {
-					score += 2
+				score += 2
+				if strings.Contains(s.nameLower, t) {
+					score += 3
+				}
+				continue
+			}
+			k := 1
+			if len(t) > 6 {
+				k = 2
+			}
+			for _, tok := range s.tokens {
+				if lev(t, tok, k) <= k {
+					score++
+					break
 				}
 			}
 		}
-		if len(terms) == 0 || score > 0 {
+		if score > 0 || len(terms) == 0 {
 			hits = append(hits, scored{s, score})
 		}
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		return hits[i].s.Name < hits[j].s.Name
+	})
+	total := len(hits)
 	out := make([]scheme, 0, maxResults)
 	for i, h := range hits {
 		if i >= maxResults {
@@ -106,7 +197,7 @@ func search(query string) []scheme {
 		}
 		out = append(out, h.s)
 	}
-	return out
+	return out, total
 }
 
 // collectStrings walks arbitrary JSON collecting string values — used to pull a
@@ -138,44 +229,48 @@ func queryFromIntent(msg map[string]any) string {
 	return strings.Join(terms, " ")
 }
 
-func tag(name, value string) map[string]any {
-	return map[string]any{"descriptor": map[string]any{"name": name}, "value": value}
-}
-
-func onSearchCatalog(results []scheme) map[string]any {
-	items := make([]map[string]any, 0, len(results))
-	for _, s := range results {
-		tags := []map[string]any{}
-		if len(s.Category) > 0 {
-			tags = append(tags, tag("category", strings.Join(s.Category, ", ")))
-		}
-		if s.State != "" {
-			tags = append(tags, tag("state", s.State))
-		}
-		if s.Level != "" {
-			tags = append(tags, tag("level", s.Level))
-		}
-		if len(s.Tags) > 0 {
-			tags = append(tags, tag("tags", strings.Join(s.Tags, ", ")))
-		}
-		items = append(items, map[string]any{
-			"id": s.ID,
-			"descriptor": map[string]any{
-				"name":       s.Name,
-				"code":       s.Short,
-				"short_desc": strings.Join(append(s.Category, s.State), " · "),
-			},
-			"tags": tags,
-		})
+// schemeResource maps one scheme to a Beckn Resource (id + descriptor).
+func schemeResource(s scheme) map[string]any {
+	meta := []string{}
+	if len(s.Category) > 0 {
+		meta = append(meta, strings.Join(s.Category, ", "))
+	}
+	if s.State != "" {
+		meta = append(meta, s.State)
+	}
+	if s.Level != "" {
+		meta = append(meta, s.Level)
 	}
 	return map[string]any{
-		"descriptor": map[string]any{"name": "myScheme registry"},
-		"providers": []map[string]any{{
+		"id": s.ID,
+		"descriptor": map[string]any{
+			"name":      s.Name,
+			"code":      s.Short,
+			"shortDesc": strings.Join(meta, " · "),
+			"longDesc":  strings.Join(s.Tags, ", "),
+		},
+	}
+}
+
+// onDiscoverCatalogs builds the message.catalogs array for an on_discover.
+func onDiscoverCatalogs(results []scheme, total int) []map[string]any {
+	resources := make([]map[string]any, 0, len(results))
+	for _, s := range results {
+		resources = append(resources, schemeResource(s))
+	}
+	return []map[string]any{{
+		"id":       "myscheme-registry",
+		"isActive": true,
+		"descriptor": map[string]any{
+			"name":      "myScheme registry",
+			"shortDesc": strconv.Itoa(total) + " matching schemes",
+		},
+		"provider": map[string]any{
 			"id":         "schemes.india.gov.in",
 			"descriptor": map[string]any{"name": "Government of India — myScheme"},
-			"items":      items,
-		}},
-	}
+		},
+		"resources": resources,
+	}}
 }
 
 func webhook(w http.ResponseWriter, r *http.Request) {
@@ -196,10 +291,9 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 		return // this demo answers discovery only
 	}
 	q := queryFromIntent(msg)
-	results := search(q)
-	log.Printf("%s %q -> %d schemes", action, q, len(results))
+	results, total := search(q)
+	log.Printf("%s %q -> %d/%d schemes", action, q, len(results), total)
 
-	// Build the on_<action> callback: echo the context, flip the action.
 	onAction := "on_" + action
 	onCtx := map[string]any{}
 	for k, v := range ctx {
@@ -209,7 +303,7 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 	onCtx["timestamp"] = time.Now().UTC().Format(time.RFC3339)
 	body, _ := json.Marshal(map[string]any{
 		"context": onCtx,
-		"message": map[string]any{"catalog": onSearchCatalog(results)},
+		"message": map[string]any{"catalogs": onDiscoverCatalogs(results, total)},
 	})
 	resp, err := http.Post(callerURL+"/"+onAction, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -232,10 +326,13 @@ func main() {
 	// the adapter posts to /api/webhook/<action>; the action also arrives in the body
 	mux.HandleFunc("POST /api/webhook", webhook)
 	mux.HandleFunc("POST /api/webhook/{action}", webhook)
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"message": "OK!", "schemes": len(schemes)}) })
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"message": "OK!", "schemes": len(schemes)})
+	})
 	// direct search for quick manual testing (not part of the Beckn path)
 	mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, search(r.URL.Query().Get("q")))
+		results, total := search(r.URL.Query().Get("q"))
+		writeJSON(w, 200, map[string]any{"total": total, "results": results})
 	})
 	listen := envOr("LISTEN", ":3002")
 	log.Printf("scheme-bpp listening on %s, caller=%s", listen, callerURL)
