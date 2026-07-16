@@ -129,13 +129,14 @@ type recordDTO struct {
 }
 
 func recordData(e store.Entry, versions []store.Entry, ttl int) recordDTO {
+	p := parseMeta(e.PayloadRaw)
 	return recordDTO{
 		RecordID:   e.Namespace + "/" + e.Registry + "/" + e.RecordName,
 		RecordName: e.RecordName,
 		RegistryID: e.Namespace + "/" + e.Registry, RegistryName: e.Registry,
 		NamespaceID: e.Namespace, Namespace: e.Namespace,
-		Description: "", Digest: hex.EncodeToString(e.Digest),
-		Details: json.RawMessage(e.PayloadRaw), Meta: map[string]any{},
+		Description: p.Description, Digest: hex.EncodeToString(e.Digest),
+		Details: json.RawMessage(e.PayloadRaw), Meta: p.Meta,
 		NetworkMemberships: parseNetworkMemberships(e.PayloadRaw),
 		Version:            versionID(e.Seq), VersionCount: len(versions),
 		Genesis:   versionID(versions[0].Seq),

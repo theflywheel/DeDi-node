@@ -80,3 +80,28 @@ func TestBecknWildcardLookupWithProof(t *testing.T) {
 	}
 	_ = vkey // full offline verification is covered by e2e_test.go; this test pins presence + identity on the wildcard path
 }
+
+func TestBecknRecordMetaAndDescriptionHoisted(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedBeckn(t, s)
+	if _, err := s.Append(context.Background(), store.AppendInput{
+		EntryType: "record", Namespace: "beckn-testnet", Registry: "subscribers.beckn.one", RecordName: "bpp.node.example.com",
+		PayloadRaw: []byte(`{"subscriber_id":"bpp.node.example.com","description":"node record","meta":{"manifestUrl":"http://x/manifest.json"}}`),
+		CreatedBy:  "seed"}); err != nil {
+		t.Fatal(err)
+	}
+	m := getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/bpp.node.example.com", http.StatusOK)
+	data := m["data"].(map[string]any)
+	meta, ok := data["meta"].(map[string]any)
+	if !ok || meta["manifestUrl"] != "http://x/manifest.json" {
+		t.Fatalf("meta not hoisted to data.meta: %v", data["meta"])
+	}
+	if data["description"] != "node record" {
+		t.Fatalf("description not hoisted: %v", data["description"])
+	}
+	// record without meta still yields empty object, not missing key
+	m = getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/key-bap-1", http.StatusOK)
+	if _, ok := m["data"].(map[string]any)["meta"].(map[string]any); !ok {
+		t.Fatalf("empty meta must still be an object: %v", m["data"])
+	}
+}
