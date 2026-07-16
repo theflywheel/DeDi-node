@@ -61,3 +61,22 @@ func TestBecknWildcardLookupUnknown404(t *testing.T) {
 	// wildcard fallback must NOT trigger for ordinary registry names
 	getJSON(t, srv.URL+"/dedi/lookup/bap.example.com/participants/key-bap-1", http.StatusNotFound)
 }
+
+func TestBecknWildcardLookupWithProof(t *testing.T) {
+	srv, s, vkey := testServer(t)
+	seedBeckn(t, s)
+	m := getJSON(t, srv.URL+"/dedi/lookup/bap.example.com/subscribers.beckn.one/key-bap-1?proof=inclusion", http.StatusOK)
+	proof, ok := m["proof"].(map[string]any)
+	if !ok {
+		t.Fatalf("proof missing on wildcard hit: %v", m)
+	}
+	leaf := proof["leaf"].(map[string]any)
+	// proof leaf must carry the FOUND record's real identity, not the request path
+	if leaf["namespace"] != "beckn-testnet" || leaf["registry"] != "subscribers.beckn.one" || leaf["record_name"] != "key-bap-1" {
+		t.Fatalf("proof leaf identity: %v", leaf)
+	}
+	if proof["checkpoint"].(string) == "" || len(proof["path"].([]any)) == 0 && proof["tree_size"].(float64) > 1 {
+		t.Fatalf("degenerate proof: %v", proof)
+	}
+	_ = vkey // full offline verification is covered by e2e_test.go; this test pins presence + identity on the wildcard path
+}
