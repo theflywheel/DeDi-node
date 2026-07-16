@@ -78,10 +78,76 @@ For an ONIX adapter, the registry **base URL** to configure is
 
 ## Level 2 — Full Beckn network E2E (starter kit)
 
-> **STATUS: documented, NOT yet executed.** The steps below are the plan derived from
-> reading `beckn/starter-kit` and `beckn/beckn-onix`; they have not been run end to end.
-> Treat this as the procedure to follow, not a verified transcript. When it is run, replace
-> this banner with the results.
+> **STATUS: EXECUTED — works end to end (2026-07-16, on `mh-iterations`).** The Beckn
+> `select → init → confirm` flow runs green with **dedid serving every registry lookup** and
+> `fabric.nfh.global` entirely out of the loop; the negative test rejects a tampered key with
+> 401. Verified log evidence is in the Results block below. The steps here are the real
+> procedure that was run.
+
+### Results (verified transcript)
+- `select`/`init`/`confirm` → **200 ACK**, and `on_select`/`on_init`/`on_confirm` all landed
+  at `sandbox-bap` — the full async round-trip completed.
+- **dedid served every lookup, fabric served none:** `onix-bpp` looked up `bap.example.com`'s
+  key against `https://dedi.proto.theflywheel.in/dedi/...` to validate the BAP signature on each
+  message; `onix-bap` looked up `bpp.example.com`'s key against dedid to validate the ACK
+  signatures; **0** requests hit `fabric.nfh.global/registry`.
+- **Negative test:** appended a version of `bap.example.com`'s key record in dedid with a
+  *different* signing key, flushed the shared redis cache, reran `select` → **401 Unauthorized**,
+  `onix-bpp` logged `validateSign failed: signature verification failed`. Restored the correct
+  key → green again. Proves dedid *gates* trust with no fallback to fabric.
+- The lock bypass worked: `onix-bap`/`onix-bpp` boot logging
+  `BecknConstants: locked "dediregistry"."url" overridden via env (=https://dedi.proto.theflywheel.in/dedi)`.
+
+### Gotchas found during the run (save yourself the debugging)
+1. **`docker-compose-generic-local.yml` omits `beckn-router`** (the caddy proxy). The Postman
+   flow routes through `http://beckn-router:9000`, so on that compose `select` 502s at the
+   router. Fix: run the **full** `docker-compose-generic.yml` with an override that only swaps
+   the adapter image + adds the env (below), so the router and sandboxes are present.
+2. **The `dediregistry` lookup cache is redis-backed and shared** — restarting an adapter does
+   NOT invalidate it. To force a fresh lookup (e.g. for the negative test), run
+   `docker exec redis redis-cli FLUSHALL`, not a container restart.
+3. **The flow also looks up the gateway identity `fabric.nfh.global`** (type `DS`, for
+   `validateAckSign`). dedid must serve it too — mirror it from the real registry
+   (`curl https://fabric.nfh.global/registry/dedi/lookup/fabric.nfh.global/subscribers.beckn.one/<its-keyId>`)
+   and seed it, alongside `bap.example.com` and `bpp.example.com`.
+4. **`publish` NACKs on the kit's own schema drift** (`property "publishDirectives" is
+   unsupported`) — unrelated to the registry; a starter-kit payload bug.
+
+### The override that worked
+`starter-kit/generic-devkit/install/dedi-override.yml`, run as
+`docker compose -f docker-compose-generic.yml -f dedi-override.yml up -d`:
+```yaml
+services:
+  onix-bap:
+    image: beckn-onix:latest          # our patched build
+    environment:
+      ONIX_OVERRIDE_DEDIREGISTRY_URL: https://dedi.proto.theflywheel.in/dedi
+  onix-bpp:
+    image: beckn-onix:latest
+    environment:
+      ONIX_OVERRIDE_DEDIREGISTRY_URL: https://dedi.proto.theflywheel.in/dedi
+```
+
+### The patch that unlocks the registry URL
+`pkg/plugin/manager.go`, in `applyConstants`, inside the `locked` loop — an env escape hatch
+`ONIX_OVERRIDE_<PLUGINID>_<KEY>` that lets an operator point at a self-hosted registry (this is
+the upstream PR). Currently applied to the clone at `/opt/dedi-node/beckn/beckn-onix`
+(uncommitted — needs a fork + PR; the server's `gh` token is expired):
+```go
+if locked, ok := m.constants.Locked[pluginID]; ok {
+    for key, canonical := range locked {
+        if ov := os.Getenv("ONIX_OVERRIDE_" + strings.ToUpper(pluginID) + "_" + strings.ToUpper(key)); ov != "" {
+            log.Warnf(ctx, "BecknConstants: locked %q.%q overridden via env (=%q)", pluginID, key, ov)
+            cfg.Config[key] = ov
+            continue
+        }
+        if userVal, exists := cfg.Config[key]; exists && userVal != canonical {
+            return fmt.Errorf("plugin %q: key %q is a locked beckn constant ...", pluginID, key, canonical)
+        }
+        cfg.Config[key] = canonical
+    }
+}
+```
 
 ### The one hard blocker: the locked registry URL
 A **stock** ONIX adapter will not talk to a self-hosted registry by configuration alone.
