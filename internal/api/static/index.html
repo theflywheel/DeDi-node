@@ -6,120 +6,45 @@
 <meta name="dedi-verifier-key" content="{{VERIFIER_KEY}}">
 <title>DeDi Node Explorer</title>
 <style>
-  :root {
-    --bg: #fbfbfa; --panel: #ffffff; --ink: #1a1a17; --muted: #6b6b63;
-    --line: #e7e7e1; --accent: #2f6f4f; --accent-weak: #e6f0ea;
-    --bad: #a23c2c; --bad-weak: #f6e7e3; --mono: ui-monospace,SFMono-Regular,Menlo,monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#16171a; --panel:#1e2024; --ink:#e8e8e4; --muted:#9a9a92;
-      --line:#2e3138; --accent:#63b98c; --accent-weak:#1c2b23; --bad:#e08a76; --bad-weak:#2c1f1c; }
-  }
-  :root[data-theme="light"] { --bg:#fbfbfa; --panel:#fff; --ink:#1a1a17; --muted:#6b6b63; --line:#e7e7e1; --accent:#2f6f4f; --accent-weak:#e6f0ea; --bad:#a23c2c; --bad-weak:#f6e7e3; }
-  :root[data-theme="dark"] { --bg:#16171a; --panel:#1e2024; --ink:#e8e8e4; --muted:#9a9a92; --line:#2e3138; --accent:#63b98c; --accent-weak:#1c2b23; --bad:#e08a76; --bad-weak:#2c1f1c; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink);
-    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  a { color:var(--accent); }
-  header { border-bottom:1px solid var(--line); padding:18px 22px; background:var(--panel); }
-  .wrap { max-width:1100px; margin:0 auto; }
-  h1 { font-size:19px; margin:0; letter-spacing:-0.01em; }
-  h1 span { color:var(--muted); font-weight:400; }
-  .sub { color:var(--muted); font-size:13px; margin-top:3px; }
-  .ck { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:14px; font-size:13px; }
-  .chip { border:1px solid var(--line); border-radius:999px; padding:4px 11px; background:var(--bg);
-    font-family:var(--mono); font-size:12px; display:inline-flex; gap:6px; align-items:center; }
-  .badge { border-radius:999px; padding:4px 11px; font-size:12px; font-weight:600; }
-  .ok { background:var(--accent-weak); color:var(--accent); }
-  .no { background:var(--bad-weak); color:var(--bad); }
-  main { max-width:1100px; margin:0 auto; padding:22px; }
-  .bar { display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap; }
-  input { border:1px solid var(--line); background:var(--panel); color:var(--ink);
-    border-radius:8px; padding:9px 12px; font-size:14px; min-width:240px; }
-  button { border:1px solid var(--line); background:var(--panel); color:var(--ink);
-    border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
-  button:hover { border-color:var(--accent); color:var(--accent); }
-  button.pri { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button.pri:hover { filter:brightness(1.06); color:#fff; }
-  .cols { display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:14px; align-items:start; }
-  @media (max-width:820px) { .cols { grid-template-columns:1fr; } }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
-    margin:0; padding:12px 14px; border-bottom:1px solid var(--line); }
-  .list { max-height:420px; overflow:auto; }
-  .row { padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px;
-    display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
-  .row:last-child { border-bottom:0; }
-  .row:hover { background:var(--accent-weak); }
-  .row.sel { background:var(--accent-weak); box-shadow:inset 3px 0 0 var(--accent); }
-  .row .n { font-family:var(--mono); font-size:13px; word-break:break-all; }
-  .row .m { color:var(--muted); font-size:12px; white-space:nowrap; }
-  .st { font-size:11px; padding:1px 7px; border-radius:999px; background:var(--bg); border:1px solid var(--line); }
-  .st.live { color:var(--accent); border-color:var(--accent); }
-  .st.revoked { color:var(--bad); border-color:var(--bad); }
-  .detail { padding:14px; }
-  .kv { display:grid; grid-template-columns:130px 1fr; gap:6px 12px; font-size:13px; margin-bottom:14px; }
-  .kv dt { color:var(--muted); }
-  .kv dd { margin:0; font-family:var(--mono); font-size:12.5px; word-break:break-all; }
-  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px;
-    overflow-x:auto; font-family:var(--mono); font-size:12.5px; margin:0 0 14px; }
-  .empty { padding:22px 14px; color:var(--muted); font-size:13px; text-align:center; }
-  .verify { border-top:1px solid var(--line); padding:14px; }
-  .vresult { margin-top:10px; font-size:13px; }
-  .vline { display:flex; gap:8px; align-items:baseline; margin:4px 0; }
-  .vok { color:var(--accent); } .vno { color:var(--bad); } .vmut { color:var(--muted); }
-  .foot { color:var(--muted); font-size:12px; margin-top:20px; text-align:center; line-height:1.7; }
-  .toggle { float:right; font-size:12px; }
+  body { font-family: monospace; max-width: 46em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.3em; }
+  h2 { font-size: 1.05em; margin: 1.2em 0 .3em; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  ul { margin: .3em 0; padding-left: 1.4em; }
+  li { margin: .15em 0; }
+  a { cursor: pointer; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
 </style>
 </head>
 <body>
-<header><div class="wrap">
-  <button class="toggle" onclick="toggleTheme()" title="Toggle theme">◐</button>
-  <h1>DeDi Node Explorer <span id="origin"></span></h1>
-  <div class="sub">Public, tamper-evident directory over a Merkle transparency log. Read-only — everything here is publicly verifiable.</div>
-  <div class="ck" id="checkpoint"><span class="chip">loading checkpoint…</span></div>
-</div></header>
 
-<main>
-  <div class="bar">
-    <input id="ns" value="beckn-testnet" placeholder="namespace" spellcheck="false">
-    <button class="pri" onclick="loadNamespace()">Browse</button>
-  </div>
+<h1>DeDi Node Explorer</h1>
+<p id="node" class="mut">loading&hellip;</p>
+<p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
+checkpoint signature are checked in your browser &mdash; the server is trusted for neither.</p>
 
-  <div class="cols">
-    <div class="card">
-      <h2>Registries</h2>
-      <div class="list" id="registries"><div class="empty">Enter a namespace and Browse.</div></div>
-    </div>
-    <div class="card">
-      <h2>Records</h2>
-      <div class="list" id="records"><div class="empty">Pick a registry.</div></div>
-    </div>
-    <div class="card">
-      <h2>Record</h2>
-      <div id="record"><div class="empty">Pick a record.</div></div>
-    </div>
-  </div>
+<hr>
 
-  <div class="foot">
-    Node identity key signs the checkpoint; every record lookup can return an inclusion proof.
-    Inclusion is recomputed in your browser (SHA-256, RFC 6962) and the checkpoint signature is
-    checked with WebCrypto Ed25519 — the server is not trusted for either.
-    <br>API: <code>/dedi/lookup</code> · <code>/dedi/query</code> · <code>/dedi/versions</code> · <code>/dedi/log/checkpoint</code>
-  </div>
-</main>
+<form onsubmit="return browse()">
+  namespace:
+  <input id="ns" value="beckn-testnet" spellcheck="false" size="24">
+  <button type="submit">browse</button>
+</form>
+
+<div id="registries"></div>
+<div id="records"></div>
+<div id="record"></div>
+
+<hr>
+<p class="mut">API: <code>/dedi/lookup</code> &middot; <code>/dedi/query</code> &middot;
+<code>/dedi/versions</code> &middot; <code>/dedi/log/checkpoint</code></p>
 
 <script>
 const $ = id => document.getElementById(id);
-let CK = null; // {origin, size, root(Uint8Array), rootB64, note, sigOK}
+let CK = null, CUR = null;
 let VKEY = document.querySelector('meta[name="dedi-verifier-key"]').content.trim();
-if (VKEY.startsWith('{{')) VKEY = ''; // unsubstituted placeholder
-
-function toggleTheme(){
-  const cur = document.documentElement.getAttribute('data-theme')
-    || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
-}
+if (VKEY.startsWith('{{')) VKEY = '';
 
 // ---- crypto helpers ----
 const te = new TextEncoder();
@@ -150,8 +75,8 @@ function leafBytes(L){
     L.version_num, L.digest, L.created_by, L.created_at ]));
 }
 
-// Parse a sumdb/note: returns {body, sigB64}. Signed bytes = body (text incl. its
-// trailing \n); signatures follow a blank line as "— <name> <base64>".
+// Parse a sumdb/note: signed bytes = body (text incl. trailing \n); signatures
+// follow a blank line as "— <name> <base64>".
 function parseNote(txt){
   const m = txt.indexOf('\n\n— ');
   if(m < 0) return null;
@@ -164,15 +89,13 @@ function parseCheckpointBody(body){
   const L = body.split('\n');
   return { origin:L[0], size:parseInt(L[1],10), rootB64:L[2], root:b64d(L[2]) };
 }
-
 async function verifyCheckpointSig(note, vkey){
   if(!vkey || !crypto.subtle) return null;
   try {
     const i1=vkey.indexOf('+'), i2=vkey.indexOf('+', i1+1);
-    const pubFull = b64d(vkey.slice(i2+1)); // 1 alg byte + 32 pub
-    const pub = pubFull.slice(1);
+    const pub = b64d(vkey.slice(i2+1)).slice(1); // drop 1 alg byte -> 32-byte pub
     const parsed = parseNote(note);
-    const sig = b64d(parsed.sigB64).slice(4); // 4-byte keyhash prefix + 64 sig
+    const sig = b64d(parsed.sigB64).slice(4);    // 4-byte keyhash prefix + 64 sig
     const key = await crypto.subtle.importKey('raw', pub, {name:'Ed25519'}, false, ['verify']);
     return await crypto.subtle.verify('Ed25519', key, sig, te.encode(parsed.body));
   } catch(e){ return null; }
@@ -181,7 +104,7 @@ async function verifyCheckpointSig(note, vkey){
 // ---- data ----
 async function jget(path){
   const r = await fetch(path);
-  if(!r.ok) throw new Error('HTTP '+r.status+' for '+path);
+  if(!r.ok) throw new Error('HTTP '+r.status);
   return r.json();
 }
 async function loadCheckpoint(){
@@ -190,109 +113,84 @@ async function loadCheckpoint(){
   const cb = parseCheckpointBody(p.body);
   const sigOK = await verifyCheckpointSig(txt, VKEY);
   CK = {...cb, note:txt, sigOK};
-  $('origin').textContent = '· ' + cb.origin.replace('/log','');
-  let sig = '';
-  if(sigOK === true) sig = '<span class="badge ok">signature verified ✓</span>';
-  else if(sigOK === false) sig = '<span class="badge no">signature INVALID ✗</span>';
-  else sig = '<span class="badge no" title="no verifier key configured or Ed25519 unsupported here">signature unchecked</span>';
-  $('checkpoint').innerHTML =
-    '<span class="chip">tree size <b>'+cb.size+'</b></span>' +
-    '<span class="chip" title="root hash">root '+cb.rootB64.slice(0,16)+'…</span>' + sig;
+  let sig;
+  if(sigOK === true) sig = '<span class="ok">signature verified &check;</span>';
+  else if(sigOK === false) sig = '<span class="no">signature INVALID</span>';
+  else sig = '<span class="mut">signature unchecked</span>';
+  $('node').innerHTML = 'node: <b>'+cb.origin.replace('/log','')+'</b> &mdash; '+
+    'checkpoint: tree size '+cb.size+', root '+cb.rootB64.slice(0,20)+'&hellip; ('+sig+')';
 }
 
-function stateTag(s){ return '<span class="st '+(s||'')+'">'+(s||'?')+'</span>'; }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function jarg(s){ return String(s).replace(/'/g,"\\'"); }
 
-async function loadNamespace(){
-  const ns = $('ns').value.trim(); if(!ns) return;
-  $('records').innerHTML = '<div class="empty">Pick a registry.</div>';
-  $('record').innerHTML = '<div class="empty">Pick a record.</div>';
-  $('registries').innerHTML = '<div class="empty">loading…</div>';
-  try {
-    const d = (await jget('/dedi/query/'+encodeURIComponent(ns))).data;
-    const regs = d.registries || [];
-    if(!regs.length){ $('registries').innerHTML = '<div class="empty">No registries in this namespace.</div>'; return; }
-    $('registries').innerHTML = regs.map(r =>
-      '<div class="row" onclick="loadRecords(this,\''+ns+'\',\''+r.registry_name+'\')">'+
-      '<span class="n">'+r.registry_name+'</span>'+
-      '<span class="m">'+(r.record_count||0)+' rec '+stateTag(r.state)+'</span></div>').join('');
-  } catch(e){ $('registries').innerHTML = '<div class="empty">'+e.message+'</div>'; }
+function browse(){
+  const ns = $('ns').value.trim();
+  $('records').innerHTML = ''; $('record').innerHTML = '';
+  $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">loading&hellip;</p>';
+  jget('/dedi/query/'+encodeURIComponent(ns)).then(j => {
+    const regs = j.data.registries || [];
+    if(!regs.length){ $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">none.</p>'; return; }
+    $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><ul>' + regs.map(r =>
+      '<li><a onclick="loadRecords(\''+jarg(ns)+'\',\''+jarg(r.registry_name)+'\')">'+esc(r.registry_name)+
+      '</a> <span class="mut">('+(r.record_count||0)+' records, '+esc(r.state||'?')+')</span></li>').join('') + '</ul>';
+  }).catch(e => $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="no">'+e.message+'</p>');
+  return false;
 }
 
-async function loadRecords(el, ns, reg){
-  document.querySelectorAll('#registries .row').forEach(x=>x.classList.remove('sel'));
-  el.classList.add('sel');
-  $('record').innerHTML = '<div class="empty">Pick a record.</div>';
-  $('records').innerHTML = '<div class="empty">loading…</div>';
-  try {
-    const d = (await jget('/dedi/query/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg))).data;
-    const recs = d.records || [];
-    if(!recs.length){ $('records').innerHTML = '<div class="empty">No records.</div>'; return; }
-    $('records').innerHTML = recs.map(r =>
-      '<div class="row" onclick="loadRecord(this,\''+ns+'\',\''+reg+'\',\''+r.record_name+'\')">'+
-      '<span class="n">'+r.record_name+'</span><span class="m">'+stateTag(r.state)+'</span></div>').join('');
-  } catch(e){ $('records').innerHTML = '<div class="empty">'+e.message+'</div>'; }
+function loadRecords(ns, reg){
+  $('record').innerHTML = '';
+  $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">loading&hellip;</p>';
+  jget('/dedi/query/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)).then(j => {
+    const recs = j.data.records || [];
+    if(!recs.length){ $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">none.</p>'; return; }
+    $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><ul>' + recs.map(r =>
+      '<li><a onclick="loadRecord(\''+jarg(ns)+'\',\''+jarg(reg)+'\',\''+jarg(r.record_name)+'\')">'+esc(r.record_name)+
+      '</a> <span class="mut">('+esc(r.state||'?')+')</span></li>').join('') + '</ul>';
+  }).catch(e => $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="no">'+e.message+'</p>');
 }
 
-let CUR = null;
-async function loadRecord(el, ns, reg, rec){
-  document.querySelectorAll('#records .row').forEach(x=>x.classList.remove('sel'));
-  if(el) el.classList.add('sel');
-  $('record').innerHTML = '<div class="empty">loading…</div>';
-  try {
-    const j = await jget('/dedi/lookup/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)+'/'+encodeURIComponent(rec)+'?proof=inclusion');
+function loadRecord(ns, reg, rec){
+  $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="mut">loading&hellip;</p>';
+  jget('/dedi/lookup/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)+'/'+encodeURIComponent(rec)+'?proof=inclusion').then(j => {
     CUR = j;
-    const d = j.data, det = d.details || {};
-    const nm = (d.network_memberships||[]).join(', ') || '—';
-    let kv = '<dl class="kv">'+
-      '<dt>record</dt><dd>'+d.record_name+'</dd>'+
-      '<dt>version</dt><dd>'+d.version+' ('+d.version_count+' total)</dd>'+
-      '<dt>state</dt><dd>'+stateTag(d.state)+'</dd>'+
-      '<dt>digest</dt><dd>'+d.digest.slice(0,32)+'…</dd>'+
-      '<dt>networks</dt><dd>'+nm+'</dd></dl>';
-    $('record').innerHTML =
-      '<div class="detail">'+kv+
-      '<div style="color:var(--muted);font-size:12px;margin-bottom:4px">details (verbatim signed bytes)</div>'+
-      '<pre>'+JSON.stringify(det, null, 2)+'</pre></div>'+
-      '<div class="verify"><button onclick="verifyInclusion()">Verify inclusion proof in-browser</button>'+
-      '<div class="vresult" id="vresult"></div></div>';
-  } catch(e){ $('record').innerHTML = '<div class="empty">'+e.message+'</div>'; }
+    const d = j.data, nm = (d.network_memberships||[]).join(', ') || '—';
+    $('record').innerHTML = '<h2>'+esc(rec)+'</h2>' +
+      '<p class="mut">version '+esc(d.version)+' &middot; state '+esc(d.state)+' &middot; networks '+esc(nm)+
+      '<br>digest '+esc(d.digest)+'</p>' +
+      '<pre>'+esc(JSON.stringify(d.details, null, 2))+'</pre>' +
+      '<button onclick="verifyInclusion()">verify inclusion proof</button>' +
+      '<div id="proof"></div>';
+  }).catch(e => $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="no">'+e.message+'</p>');
 }
 
 async function verifyInclusion(){
-  const box = $('vresult'); box.innerHTML = '<span class="vmut">verifying…</span>';
+  const box = $('proof'); box.innerHTML = '<span class="mut">verifying&hellip;</span>';
   try {
     const p = CUR.proof;
-    if(!p){ box.innerHTML = '<span class="vno">no proof returned</span>'; return; }
-    // 1. leaf bytes → digest of served payload must match the leaf digest
-    const detBytes = te.encode(JSON.stringify(CUR.data.details)); // for display only
-    // 2. recompute inclusion root from the proof leaf + audit path
-    const lb = leafBytes(p.leaf);
-    const lh = await leafHash(lb);
-    const path = p.path.map(b64d);
-    const root = await proofRoot(path, p.tree_size, p.leaf_index, lh);
-    // 3. checkpoint embedded in the proof
-    const note = parseNote(p.checkpoint);
-    const cb = parseCheckpointBody(note.body);
+    if(!p){ box.innerHTML = '<span class="no">no proof returned</span>'; return; }
+    const lh = await leafHash(leafBytes(p.leaf));
+    const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, lh);
+    const cb = parseCheckpointBody(parseNote(p.checkpoint).body);
     const rootMatch = eq(root, cb.root);
+    const sizeMatch = cb.size === p.tree_size;
     const sigOK = await verifyCheckpointSig(p.checkpoint, VKEY);
-    let out = '';
-    out += line(rootMatch, 'Leaf '+p.leaf_index+' is included in the tree of size '+p.tree_size,
-                'recomputed root ≠ checkpoint root');
-    out += line(cb.size === p.tree_size, 'Proof binds to checkpoint size '+cb.size, 'size mismatch');
-    if(sigOK === true) out += line(true, 'Checkpoint signed by '+cb.origin.replace('/log',''), '');
-    else if(sigOK === false) out += line(false, '', 'checkpoint signature INVALID');
-    else out += '<div class="vline vmut">○ checkpoint signature unchecked (no key / unsupported browser)</div>';
-    const allOK = rootMatch && cb.size===p.tree_size && sigOK !== false;
-    out = '<div class="vline '+(allOK?'vok':'vno')+'"><b>'+(allOK?'✓ Verified against the signed tree':'✗ Verification failed')+'</b></div>' + out;
-    box.innerHTML = out;
-  } catch(e){ box.innerHTML = '<span class="vno">✗ '+e.message+'</span>'; }
+    const allOK = rootMatch && sizeMatch && sigOK !== false;
+    let out = '<p class="'+(allOK?'ok':'no')+'"><b>'+(allOK?'&check; verified against the signed tree':'&#10007; verification failed')+'</b></p><ul>';
+    out += li(rootMatch, 'leaf '+p.leaf_index+' is included in the tree of size '+p.tree_size, 'recomputed root does not match checkpoint');
+    out += li(sizeMatch, 'proof binds to checkpoint size '+cb.size, 'proof size / checkpoint size mismatch');
+    if(sigOK === true) out += li(true, 'checkpoint signed by '+esc(cb.origin.replace('/log','')), '');
+    else if(sigOK === false) out += li(false, '', 'checkpoint signature invalid');
+    else out += '<li class="mut">checkpoint signature unchecked (no key / unsupported browser)</li>';
+    box.innerHTML = out + '</ul>';
+  } catch(e){ box.innerHTML = '<span class="no">&#10007; '+esc(e.message)+'</span>'; }
 }
-function line(ok, okMsg, noMsg){
-  return '<div class="vline '+(ok?'vok':'vno')+'">'+(ok?'✓ '+okMsg:'✗ '+noMsg)+'</div>';
+function li(ok, okMsg, noMsg){
+  return '<li class="'+(ok?'ok':'no')+'">'+(ok?'&check; '+esc(okMsg):'&#10007; '+esc(noMsg))+'</li>';
 }
 
-loadCheckpoint().catch(e => $('checkpoint').innerHTML = '<span class="chip">checkpoint error: '+e.message+'</span>');
-loadNamespace();
+loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint error: '+esc(e.message)+'</span>');
+browse();
 </script>
 </body>
 </html>
