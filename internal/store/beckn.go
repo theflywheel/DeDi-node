@@ -23,7 +23,7 @@ WITH latest AS (
 )
 SELECT ` + entryCols + ` FROM latest
 WHERE state='live' AND (namespace=$1 OR payload->>'subscriber_id'=$1)
-ORDER BY (namespace=$1) DESC, created_at DESC
+ORDER BY (namespace=$1) DESC, created_at DESC, seq DESC
 LIMIT 1`
 	e, err := scanEntry(s.pool.QueryRow(ctx, q, subject, recordName))
 	if errors.Is(err, pgx.ErrNoRows) {

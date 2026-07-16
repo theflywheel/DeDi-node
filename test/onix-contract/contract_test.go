@@ -21,11 +21,21 @@ import (
 )
 
 const (
-	listenAddr = "127.0.0.1:18080"
-	baseURL    = "http://127.0.0.1:18080/dedi"
-	bapKeyID   = "76EU7LZ7gfqj13dWDKR1Uitnim11mCoxWBPdzLxUpAMBPVdANKgyFM"
-	bapPubKey  = "g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo="
+	bapKeyID  = "76EU7LZ7gfqj13dWDKR1Uitnim11mCoxWBPdzLxUpAMBPVdANKgyFM"
+	bapPubKey = "g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo="
 )
+
+var (
+	listenAddr = envOr("DEDID_TEST_ADDR", "127.0.0.1:18080")
+	baseURL    = "http://" + listenAddr + "/dedi"
+)
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 // memCache satisfies definition.Cache (Get/Set/Delete/Clear over strings).
 // Note: beckn-onix@v1.8.0's definition.Cache interface adds a Clear(ctx) error

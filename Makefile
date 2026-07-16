@@ -16,7 +16,7 @@ build:
 	go build -o bin/dedid ./cmd/dedid
 
 contract-test: build
-	cd test/onix-contract && DEDID_BIN=$(CURDIR)/bin/dedid go test -v ./...
+	cd test/onix-contract && DEDID_BIN=$(CURDIR)/bin/dedid go test -count=1 -v ./...
 
 keygen:
 	mkdir -p keys && go run ./cmd/dedid keygen -out keys/dedid.key -name dev.dedi.local
