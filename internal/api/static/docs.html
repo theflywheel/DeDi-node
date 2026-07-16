@@ -68,6 +68,44 @@ sequenceDiagram
 <p class="mut" style="margin-top:1.2em">Witnessed checkpoints are browsable in the
 <a href="/">Explorer</a> under the <code>_witness</code> namespace.</p>
 
+<h2>API</h2>
+<p>All read endpoints, relative to this node. Everything is a plain <code>GET</code>; no auth.</p>
+<table>
+<tr><th>Endpoint</th><th>Returns</th></tr>
+<tr><td><code>/dedi/lookup/{namespace}/{registry}/{record}</code></td><td>latest live version of a record</td></tr>
+<tr><td><code>/dedi/lookup/{namespace}/{registry}</code></td><td>registry metadata</td></tr>
+<tr><td><code>/dedi/lookup/{namespace}</code></td><td>namespace metadata</td></tr>
+<tr><td><code>/dedi/query/{namespace}[/{registry}]</code></td><td>filtered search over records</td></tr>
+<tr><td><code>/dedi/versions/{namespace}[/{registry}[/{record}]]</code></td><td>full version history</td></tr>
+<tr><td><code>/dedi/log/checkpoint</code></td><td>signed tree head (C2SP checkpoint)</td></tr>
+<tr><td><code>/dedi/log/proof/consistency?old=&amp;new=</code></td><td>append-only proof between two tree sizes</td></tr>
+</table>
+<p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
+signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
+<code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against the public
+reference node (seeded with Beckn identities — on your own node, use your host and a record you seeded):</p>
+<pre><code>curl -s "https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
+
+<h2>Run your own node</h2>
+<p>dedid is self-hostable: one binary, one Postgres. Requires Docker and Go&nbsp;&ge;&nbsp;1.25.</p>
+<pre><code>git clone https://github.com/theflywheel/DeDi-node.git && cd DeDi-node
+make keygen                # writes keys/dedid.key, prints your public verifier key
+docker compose up -d       # postgres + dedid on http://localhost:8080
+curl -s localhost:8080/dedi/log/checkpoint   # your own signed tree head</code></pre>
+<p class="mut">Load records with <code>go run ./cmd/dedid seed -file examples/beckn-seed.json</code>
+(set <code>DEDI_DB_URL=postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable</code>).
+Distribute your verifier key; anyone — including another dedid node acting as a witness —
+can then verify your log independently.</p>
+
+<h2>Protocol &amp; references</h2>
+<ul>
+<li><a href="https://github.com/LF-Decentralized-Trust-labs/DeDi">LFDT DeDi specification</a> — the Decentralized Directory protocol this node implements (<a href="https://dedi.global">dedi.global</a> is the hosted platform)</li>
+<li><a href="https://becknprotocol.io">Beckn protocol</a> · <a href="https://github.com/beckn-one/beckn-onix">beckn-onix</a> — the adapter whose <code>dediregistry</code> plugin (<code>pkg/plugin/implementation/dediregistry</code>) this node serves, proven over the wire</li>
+<li><a href="https://c2sp.org/tlog-checkpoint">C2SP tlog-checkpoint</a> · <a href="https://c2sp.org/signed-note">C2SP signed-note</a> — the checkpoint and signature formats</li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6962">RFC 6962</a> (Certificate Transparency) — the Merkle tree proofs; implemented via Go's <a href="https://pkg.go.dev/golang.org/x/mod/sumdb/tlog">golang.org/x/mod/sumdb/tlog</a></li>
+<li><a href="https://github.com/theflywheel/DeDi-node">Source — theflywheel/DeDi-node</a></li>
+</ul>
+
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
   mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });

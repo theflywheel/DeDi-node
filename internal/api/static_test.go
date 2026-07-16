@@ -47,6 +47,24 @@ func TestDocsServed(t *testing.T) {
 	if !strings.Contains(string(body), "sequenceDiagram") || !strings.Contains(string(body), "Test cases") {
 		t.Fatal("docs page missing diagram or test cases")
 	}
+	// expanded sections: API reference, self-host quickstart, protocol references
+	for _, want := range []string{
+		"/dedi/lookup/{namespace}/{registry}/{record}",
+		"/dedi/log/proof/consistency?old=",
+		"proof=inclusion",
+		"Run your own node",
+		"github.com/theflywheel/DeDi-node",
+		"https://github.com/LF-Decentralized-Trust-labs/DeDi",
+		"https://github.com/beckn-one/beckn-onix",
+		"https://c2sp.org/tlog-checkpoint",
+		"https://c2sp.org/signed-note",
+		"rfc6962",
+		"golang.org/x/mod/sumdb/tlog",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("docs page missing %q", want)
+		}
+	}
 }
 
 func TestUnknownRouteStill404AfterExplorer(t *testing.T) {
