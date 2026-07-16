@@ -1,0 +1,228 @@
+// Package witness lets one dedid node independently verify that another node's
+// log is append-only, using the target's signed checkpoints and consistency
+// proofs. This is the decentralised-trust primitive: a relying party no longer
+// has to trust the target's operator alone — an independent witness will detect
+// any attempt to rewrite history. Each verification is itself recorded in the
+// witness's own append-only log, under the reserved `_witness` namespace.
+package witness
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"golang.org/x/mod/sumdb/note"
+	"golang.org/x/mod/sumdb/tlog"
+
+	"github.com/theflywheel/DeDi-node/internal/merkle"
+	"github.com/theflywheel/DeDi-node/internal/store"
+)
+
+const witnessNS = "_witness"
+
+// Witness periodically verifies a target node and records the verdict.
+type Witness struct {
+	Store     *store.Store
+	TargetURL string // target base URL including /dedi, e.g. https://a.example/dedi
+	TargetKey string // target node verifier key (sumdb/note format)
+	Origin    string // stable label for the target; used as the registry name
+	Interval  time.Duration
+	Client    *http.Client
+}
+
+// Result is the outcome of a single verification.
+type Result struct {
+	Size          int64
+	Root          string // base64
+	ConsistencyOK bool
+	Fresh         bool // the target's checkpoint advanced since last time
+}
+
+func (w *Witness) httpClient() *http.Client {
+	if w.Client != nil {
+		return w.Client
+	}
+	return &http.Client{Timeout: 15 * time.Second}
+}
+
+func (w *Witness) get(ctx context.Context, path string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.TargetURL+path, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	return b, resp.StatusCode, err
+}
+
+// verifyCheckpoint fetches the target checkpoint and verifies its signature.
+func (w *Witness) verifyCheckpoint(ctx context.Context) (int64, tlog.Hash, error) {
+	body, code, err := w.get(ctx, "/log/checkpoint")
+	if err != nil {
+		return 0, tlog.Hash{}, err
+	}
+	if code != http.StatusOK {
+		return 0, tlog.Hash{}, fmt.Errorf("checkpoint status %d", code)
+	}
+	verifier, err := note.NewVerifier(w.TargetKey)
+	if err != nil {
+		return 0, tlog.Hash{}, fmt.Errorf("target verifier key: %w", err)
+	}
+	n, err := note.Open(body, note.VerifierList(verifier))
+	if err != nil {
+		return 0, tlog.Hash{}, fmt.Errorf("checkpoint signature: %w", err)
+	}
+	_, size, root, err := merkle.ParseCheckpoint(n.Text)
+	return size, root, err
+}
+
+// lastWitnessed returns the size and root this witness last recorded for the target.
+func (w *Witness) lastWitnessed(ctx context.Context) (int64, tlog.Hash, bool) {
+	e, err := w.Store.Resolve(ctx, "record", witnessNS, w.Origin, "checkpoint", nil, nil)
+	if err != nil {
+		return 0, tlog.Hash{}, false
+	}
+	var rec struct {
+		Size int64  `json:"size"`
+		Root string `json:"root"`
+	}
+	if json.Unmarshal(e.PayloadRaw, &rec) != nil {
+		return 0, tlog.Hash{}, false
+	}
+	rb, err := base64.StdEncoding.DecodeString(rec.Root)
+	if err != nil || len(rb) != len(tlog.Hash{}) {
+		return 0, tlog.Hash{}, false
+	}
+	var h tlog.Hash
+	copy(h[:], rb)
+	return rec.Size, h, true
+}
+
+func (w *Witness) fetchConsistency(ctx context.Context, old, size int64) (tlog.TreeProof, error) {
+	body, code, err := w.get(ctx, fmt.Sprintf("/log/proof/consistency?old=%d&new=%d", old, size))
+	if err != nil {
+		return nil, err
+	}
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("consistency status %d", code)
+	}
+	var env struct {
+		Data struct {
+			Proof []string `json:"proof"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, err
+	}
+	proof := make(tlog.TreeProof, len(env.Data.Proof))
+	for i, s := range env.Data.Proof {
+		hb, err := base64.StdEncoding.DecodeString(s)
+		if err != nil || len(hb) != len(tlog.Hash{}) {
+			return nil, fmt.Errorf("bad consistency proof hash")
+		}
+		copy(proof[i][:], hb)
+	}
+	return proof, nil
+}
+
+// ensureParents creates the _witness namespace and target registry on first use.
+func (w *Witness) ensureParents(ctx context.Context) error {
+	if _, err := w.Store.Resolve(ctx, "namespace", witnessNS, "", "", nil, nil); errors.Is(err, store.ErrNotFound) {
+		if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: witnessNS,
+			PayloadRaw: []byte(`{"description":"checkpoints this node has independently witnessed"}`), CreatedBy: "witness"}); err != nil {
+			return err
+		}
+	}
+	if _, err := w.Store.Resolve(ctx, "registry", witnessNS, w.Origin, "", nil, nil); errors.Is(err, store.ErrNotFound) {
+		p, _ := json.Marshal(map[string]any{"description": "witnessed checkpoints of " + w.Origin, "target": w.TargetURL})
+		if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS, Registry: w.Origin,
+			PayloadRaw: p, CreatedBy: "witness"}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// VerifyOnce checks the target's latest checkpoint; if it advanced, verifies
+// append-only consistency against the last witnessed state and records the
+// verdict in this node's own log. A detected inconsistency is recorded with
+// state `revoked` so it surfaces as a broken witness.
+func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
+	size, root, err := w.verifyCheckpoint(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	rootB64 := base64.StdEncoding.EncodeToString(root[:])
+	last, lastRoot, have := w.lastWitnessed(ctx)
+
+	if have && size == last {
+		return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
+	}
+
+	consistencyOK := true
+	if have {
+		if size < last {
+			consistencyOK = false // target shrank — impossible for an append-only log
+		} else {
+			proof, err := w.fetchConsistency(ctx, last, size)
+			if err != nil {
+				return Result{}, err
+			}
+			if err := tlog.CheckTree(proof, size, root, last, lastRoot); err != nil {
+				consistencyOK = false
+			}
+		}
+	}
+
+	if err := w.ensureParents(ctx); err != nil {
+		return Result{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": consistencyOK,
+	})
+	state := "live"
+	if !consistencyOK {
+		state = "revoked"
+	}
+	if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS, Registry: w.Origin,
+		RecordName: "checkpoint", PayloadRaw: payload, State: state, CreatedBy: "witness"}); err != nil {
+		return Result{}, err
+	}
+	return Result{Size: size, Root: rootB64, ConsistencyOK: consistencyOK, Fresh: true}, nil
+}
+
+// Run verifies on Interval until ctx is done.
+func (w *Witness) Run(ctx context.Context) {
+	verify := func() {
+		r, err := w.VerifyOnce(ctx)
+		switch {
+		case err != nil:
+			log.Printf("witness(%s): %v", w.Origin, err)
+		case r.Fresh && r.ConsistencyOK:
+			log.Printf("witness(%s): verified append-only at size %d", w.Origin, r.Size)
+		case r.Fresh && !r.ConsistencyOK:
+			log.Printf("witness(%s): ALARM — consistency FAILED at size %d", w.Origin, r.Size)
+		}
+	}
+	verify()
+	t := time.NewTicker(w.Interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			verify()
+		}
+	}
+}

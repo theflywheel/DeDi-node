@@ -33,6 +33,22 @@ func TestExplorerServedAtRoot(t *testing.T) {
 	}
 }
 
+func TestDocsServed(t *testing.T) {
+	srv, _, _ := testServer(t)
+	resp, err := http.Get(srv.URL + "/docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /docs status %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "sequenceDiagram") || !strings.Contains(string(body), "Test cases") {
+		t.Fatal("docs page missing diagram or test cases")
+	}
+}
+
 func TestUnknownRouteStill404AfterExplorer(t *testing.T) {
 	srv, _, _ := testServer(t)
 	resp, err := http.Get(srv.URL + "/not-a-route")

@@ -19,6 +19,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/store"
+	"github.com/theflywheel/DeDi-node/internal/witness"
 )
 
 func main() {
@@ -110,6 +111,24 @@ func serve() error {
 		Interval: interval,
 	}
 	go cp.Run(ctx)
+
+	// Optional: witness another node's log (decentralised trust). When
+	// DEDI_WITNESS_TARGET_URL is set, this node periodically verifies the
+	// target is append-only and records each verdict under `_witness`.
+	if wt := os.Getenv("DEDI_WITNESS_TARGET_URL"); wt != "" {
+		wiv, err := time.ParseDuration(envOr("DEDI_WITNESS_INTERVAL", "60s"))
+		if err != nil {
+			return fmt.Errorf("DEDI_WITNESS_INTERVAL: %w", err)
+		}
+		go (&witness.Witness{
+			Store:     s,
+			TargetURL: wt,
+			TargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
+			Origin:    envOr("DEDI_WITNESS_TARGET_ORIGIN", "target"),
+			Interval:  wiv,
+		}).Run(ctx)
+		log.Printf("witnessing %s every %s", wt, wiv)
+	}
 
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY")}
 	listen := envOr("DEDI_LISTEN", ":8080")
