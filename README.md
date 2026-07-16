@@ -28,3 +28,5 @@ dedid is proven from the outside in — through its own CLI and existing ecosyst
 - `make contract-test` — boots a real `dedid`, seeds it via `dedid seed`, and runs the [beckn-onix `dediregistry` client](https://github.com/beckn-one/beckn-onix) (the ONIX adapter's registry plugin, pinned to v1.8.0) against it over the wire: subscriber key lookup, node lookup, registry metadata, network-membership enforcement, and unknown-participant rejection.
 
 Note: a stock ONIX adapter pins the registry URL to `fabric.nfh.global` via a signed "locked Beckn constant" — pointing a full ONIX deployment at a self-hosted registry currently requires a patched adapter build. See docs/design.md Addendum C.
+
+**Setting up Beckn against this node** — the runbook (contract test + full starter-kit E2E procedure): [docs/beckn-demo.md](docs/beckn-demo.md).
