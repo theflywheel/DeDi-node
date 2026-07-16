@@ -242,3 +242,13 @@ From `api/openapi.yaml` (DeDi API v2.0.0) at `LF-Decentralized-Trust-labs/decent
 - **Spec inconsistencies to file upstream:** query `status` enum (active/inactive) doesn't match entity `state` enum (active/archived/revoked); records query `state` enum has only `live`; `versions` items are bare strings with no timestamps; no error code enumeration.
 - **Schemas dir:** `Beckn_subscriber.json`, `Beckn_subscriber_reference.json`, `public_key.json`, `membership.json`, `revoke.json` — ready-made registry schemas; Beckn subscriber schema confirms the dual-key model.
 - **Not in the spec:** any write/publish surface (publisher plane is implementation-defined), any proof/checkpoint surface (our extension), tiles, webhooks.
+
+## Addendum C — ONIX `dediregistry` wire contract (M3 teardown, 2026-07-16)
+
+Extracted from beckn-onix@e99b8c1 (v1.8.0). Supersedes §6.1's assumptions; resolves risk R1.
+
+- Lookup (signature-validation hot path): `GET {url}/lookup/{subscriber_id}/subscribers.beckn.one/{key_id}` — the middle segment is a hardcoded wildcard meaning "search all registries". dedid implements this via exact-resolve-first, then wildcard fallback (`FindBecknSubscriber`), live records only.
+- Node lookup: `GET {url}/lookup/{ns}/{registry}/{record}`; registry metadata: `GET {url}/lookup/{ns}/{registry}` (requires `data.meta`).
+- Response contract: `{message, data}` with `data.details.{signing_public_key (std-base64 raw Ed25519), url, type, domain, subscriber_id, encr_public_key}`, `data.network_memberships []string` (enforced client-side against `allowedNetworkIDs` — absent list + configured allowlist ⇒ rejection), optional `data.ttl` seconds (client cache override). Any non-200 ⇒ unknown participant ⇒ ONIX responds 401 NACK.
+- NOT used by ONIX: subscribe/on_subscribe (onboarding is out-of-band), registry-based routing (callback URLs come from `context.bpp_uri`), response signing. VC revocation is a bare GET on a credential-embedded lookup URL: 200 ⇒ revoked, 404/410 ⇒ not revoked.
+- **Locked constant:** stock ONIX force-injects `dediregistry.url = https://fabric.nfh.global/registry/dedi` from a signature-verified embedded constants file (plugin-manager enforcement on the exact plugin id `dediregistry`; any other configured value fails startup). Consequences: (a) the §6.3 acceptance test requires a patched/forked adapter build or a network-level override; (b) an upstream change request is needed before "change only the registry URL" is honest for stock deployments; (c) importing the plugin's Go package directly bypasses the lock — which is how the contract test works.

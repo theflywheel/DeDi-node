@@ -1,6 +1,6 @@
 export TEST_DATABASE_URL ?= postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable
 
-.PHONY: up down test build keygen
+.PHONY: up down test build keygen contract-test
 
 up:
 	docker compose up -d postgres
@@ -14,6 +14,9 @@ test:
 
 build:
 	go build -o bin/dedid ./cmd/dedid
+
+contract-test: build
+	cd test/onix-contract && DEDID_BIN=$(CURDIR)/bin/dedid go test -v ./...
 
 keygen:
 	mkdir -p keys && go run ./cmd/dedid keygen -out keys/dedid.key -name dev.dedi.local
