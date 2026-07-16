@@ -82,8 +82,9 @@ sequenceDiagram
 </table>
 <p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
 signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
-<code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against this node:</p>
-<pre><code>curl -s "/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
+<code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against the public
+reference node (seeded with Beckn identities — on your own node, use your host and a record you seeded):</p>
+<pre><code>curl -s "https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
 
 <h2>Run your own node</h2>
 <p>dedid is self-hostable: one binary, one Postgres. Requires Docker and Go&nbsp;&ge;&nbsp;1.25.</p>
