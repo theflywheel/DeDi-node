@@ -8,9 +8,10 @@ import (
 )
 
 type Server struct {
-	Store *store.Store
-	CP    *checkpoint.Checkpointer
-	TTL   int // cache hint surfaced in ttl fields (seconds)
+	Store       *store.Store
+	CP          *checkpoint.Checkpointer
+	TTL         int    // cache hint surfaced in ttl fields (seconds)
+	VerifierKey string // node verifier key, injected into the explorer page (may be empty)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -25,6 +26,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/versions/{namespace}/{registry_name}/{record_name}", s.versionsRecord)
 	mux.HandleFunc("GET /dedi/log/checkpoint", s.logCheckpoint)
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
+	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})
