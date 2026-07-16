@@ -229,7 +229,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func main() {
 	loadIndex(envOr("SCHEME_INDEX", "/schemes-index.json"))
 	mux := http.NewServeMux()
+	// the adapter posts to /api/webhook/<action>; the action also arrives in the body
 	mux.HandleFunc("POST /api/webhook", webhook)
+	mux.HandleFunc("POST /api/webhook/{action}", webhook)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"message": "OK!", "schemes": len(schemes)}) })
 	// direct search for quick manual testing (not part of the Beckn path)
 	mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
