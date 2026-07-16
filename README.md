@@ -30,3 +30,8 @@ dedid is proven from the outside in — through its own CLI and existing ecosyst
 Note: a stock ONIX adapter pins the registry URL to `fabric.nfh.global` via a signed "locked Beckn constant" — pointing a full ONIX deployment at a self-hosted registry currently requires a patched adapter build. See docs/design.md Addendum C.
 
 **Setting up Beckn against this node** — the runbook (contract test + full starter-kit E2E procedure): [docs/beckn-demo.md](docs/beckn-demo.md).
+
+## Live demo
+
+- **Node A (primary):** https://dedi.proto.theflywheel.in/ — explorer + [/docs](https://dedi.proto.theflywheel.in/docs) (sequence diagrams + test cases).
+- **Node B (witness):** https://dedi-witness.proto.theflywheel.in/ — an independent node that continuously verifies A's log is append-only (signed checkpoints + consistency proofs) and records each verdict under its own `_witness` namespace. This is the decentralised-trust property: A can't rewrite history without B detecting it. Set `DEDI_WITNESS_TARGET_URL` + `DEDI_WITNESS_TARGET_KEY` to make any node witness another.
