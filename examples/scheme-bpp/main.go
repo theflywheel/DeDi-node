@@ -191,31 +191,33 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 	// Acknowledge synchronously; the adapter also signs its own ACK to the BAP.
 	writeJSON(w, 200, map[string]any{"message": map[string]any{"ack": map[string]any{"status": "ACK"}}})
 
-	if !strings.Contains(strings.ToLower(action), "search") {
+	low := strings.ToLower(action)
+	if !strings.Contains(low, "search") && !strings.Contains(low, "discover") {
 		return // this demo answers discovery only
 	}
 	q := queryFromIntent(msg)
 	results := search(q)
-	log.Printf("search %q -> %d schemes", q, len(results))
+	log.Printf("%s %q -> %d schemes", action, q, len(results))
 
-	// Build the on_search callback: echo the context, flip the action.
+	// Build the on_<action> callback: echo the context, flip the action.
+	onAction := "on_" + action
 	onCtx := map[string]any{}
 	for k, v := range ctx {
 		onCtx[k] = v
 	}
-	onCtx["action"] = "on_search"
+	onCtx["action"] = onAction
 	onCtx["timestamp"] = time.Now().UTC().Format(time.RFC3339)
 	body, _ := json.Marshal(map[string]any{
 		"context": onCtx,
 		"message": map[string]any{"catalog": onSearchCatalog(results)},
 	})
-	resp, err := http.Post(callerURL+"/on_search", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(callerURL+"/"+onAction, "application/json", bytes.NewReader(body))
 	if err != nil {
-		log.Printf("on_search post: %v", err)
+		log.Printf("%s post: %v", onAction, err)
 		return
 	}
 	resp.Body.Close()
-	log.Printf("on_search -> %s (%d)", callerURL, resp.StatusCode)
+	log.Printf("%s -> %s (%d)", onAction, callerURL, resp.StatusCode)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
