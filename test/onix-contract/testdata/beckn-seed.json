@@ -1,0 +1,24 @@
+{
+  "namespace": "beckn-testnet",
+  "payload": {"description": "Beckn testnet mirror (contract test)"},
+  "registries": [
+    {
+      "name": "subscribers.beckn.one",
+      "payload": {"description": "Beckn participants", "meta": {"network": "beckn.one/testnet"}},
+      "records": [
+        {
+          "name": "76EU7LZ7gfqj13dWDKR1Uitnim11mCoxWBPdzLxUpAMBPVdANKgyFM",
+          "payload": {"subscriber_id": "bap.example.com", "url": "http://sandbox-bap:3001", "type": "BAP", "domain": "retail", "signing_public_key": "g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo=", "encr_public_key": "g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo=", "network_memberships": ["beckn.one/testnet"]}
+        },
+        {
+          "name": "76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy",
+          "payload": {"subscriber_id": "bpp.example.com", "url": "http://sandbox-bpp:3002", "type": "BPP", "domain": "retail", "signing_public_key": "CqVy97DW45bcZPPrWIYGe2ldl9C93NFeVciiAEYsvR0=", "encr_public_key": "CqVy97DW45bcZPPrWIYGe2ldl9C93NFeVciiAEYsvR0=", "network_memberships": ["beckn.one/testnet"]}
+        },
+        {
+          "name": "bpp.example.com",
+          "payload": {"subscriber_id": "bpp.example.com", "url": "http://sandbox-bpp:3002", "type": "BPP", "domain": "retail", "signing_public_key": "CqVy97DW45bcZPPrWIYGe2ldl9C93NFeVciiAEYsvR0=", "encr_public_key": "CqVy97DW45bcZPPrWIYGe2ldl9C93NFeVciiAEYsvR0=", "meta": {"manifestUrl": "http://sandbox-bpp:3002/manifest.json"}}
+        }
+      ]
+    }
+  ]
+}
