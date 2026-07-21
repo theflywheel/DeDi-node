@@ -22,9 +22,9 @@
 
 <nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="https://schemes.proto.theflywheel.in/">Demo</a></nav>
 <h1>DeDi Node Explorer</h1>
-<p id="node" class="mut">loading&hellip;</p>
+<p id="node" class="mut">loading...</p>
 <p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
-checkpoint signature are checked in your browser &mdash; the server is trusted for neither.</p>
+checkpoint signature are checked in your browser; the server is trusted for neither.</p>
 
 <hr>
 
@@ -69,7 +69,7 @@ async function proofRoot(path, t, n, leaf){
   return nodeHash(top, await proofRoot(rest, t-k, n-k, leaf));
 }
 
-// Canonical leaf preimage — MUST byte-match Go merkle.LeafBytes. JSON.stringify
+// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes. JSON.stringify
 // and Go json.Marshal agree for ASCII payloads (no <,>,& in these fields).
 function leafBytes(L){
   return te.encode(JSON.stringify([
@@ -119,8 +119,8 @@ async function loadCheckpoint(){
   if(sigOK === true) sig = '<span class="ok">signature verified &check;</span>';
   else if(sigOK === false) sig = '<span class="no">signature INVALID</span>';
   else sig = '<span class="mut">signature unchecked</span>';
-  $('node').innerHTML = 'node: <b>'+cb.origin.replace('/log','')+'</b> &mdash; '+
-    'checkpoint: tree size '+cb.size+', root '+cb.rootB64.slice(0,20)+'&hellip; ('+sig+')';
+  $('node').innerHTML = 'node: <b>'+cb.origin.replace('/log','')+'</b> &middot; '+
+    'checkpoint: tree size '+cb.size+', root '+cb.rootB64.slice(0,20)+'... ('+sig+')';
 }
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -129,7 +129,7 @@ function jarg(s){ return String(s).replace(/'/g,"\\'"); }
 function browse(){
   const ns = $('ns').value.trim();
   $('records').innerHTML = ''; $('record').innerHTML = '';
-  $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">loading&hellip;</p>';
+  $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">loading...</p>';
   jget('/dedi/query/'+encodeURIComponent(ns)).then(j => {
     const regs = j.data.registries || [];
     if(!regs.length){ $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">none.</p>'; return; }
@@ -142,7 +142,7 @@ function browse(){
 
 function loadRecords(ns, reg){
   $('record').innerHTML = '';
-  $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">loading&hellip;</p>';
+  $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">loading...</p>';
   jget('/dedi/query/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)).then(j => {
     const recs = j.data.records || [];
     if(!recs.length){ $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">none.</p>'; return; }
@@ -153,10 +153,10 @@ function loadRecords(ns, reg){
 }
 
 function loadRecord(ns, reg, rec){
-  $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="mut">loading&hellip;</p>';
+  $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="mut">loading...</p>';
   jget('/dedi/lookup/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)+'/'+encodeURIComponent(rec)+'?proof=inclusion').then(j => {
     CUR = j;
-    const d = j.data, nm = (d.network_memberships||[]).join(', ') || '—';
+    const d = j.data, nm = (d.network_memberships||[]).join(', ') || 'none';
     $('record').innerHTML = '<h2>'+esc(rec)+'</h2>' +
       '<p class="mut">version '+esc(d.version)+' &middot; state '+esc(d.state)+' &middot; networks '+esc(nm)+
       '<br>digest '+esc(d.digest)+'</p>' +
@@ -167,7 +167,7 @@ function loadRecord(ns, reg, rec){
 }
 
 async function verifyInclusion(){
-  const box = $('proof'); box.innerHTML = '<span class="mut">verifying&hellip;</span>';
+  const box = $('proof'); box.innerHTML = '<span class="mut">verifying...</span>';
   try {
     const p = CUR.proof;
     if(!p){ box.innerHTML = '<span class="no">no proof returned</span>'; return; }
