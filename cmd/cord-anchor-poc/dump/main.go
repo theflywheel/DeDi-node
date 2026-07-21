@@ -5,12 +5,17 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v4"
 )
 
 func main() {
-	api, err := gsrpc.NewSubstrateAPI("ws://127.0.0.1:9945")
+	url := os.Getenv("CORD_RPC_URL")
+	if url == "" {
+		url = "ws://127.0.0.1:9945"
+	}
+	api, err := gsrpc.NewSubstrateAPI(url)
 	if err != nil {
 		log.Fatal(err)
 	}

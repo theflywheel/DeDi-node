@@ -113,8 +113,10 @@ func main() {
 		log.Fatalf("storage key: %v", err)
 	}
 	var acct types.AccountInfo
-	if ok, err := api.RPC.State.GetStorageLatest(key, &acct); err != nil || !ok {
-		log.Fatalf("account info: ok=%v err=%v (is //Alice endowed on this chain?)", ok, err)
+	if ok, err := api.RPC.State.GetStorageLatest(key, &acct); err != nil {
+		log.Fatalf("account info: %v", err)
+	} else if !ok {
+		fmt.Println("    (account not found on chain: unfunded, continuing with nonce 0)")
 	}
 
 	extra := cat(
@@ -150,7 +152,13 @@ func main() {
 	fmt.Printf("[3] hand-encoded system.remark as //Alice (nonce %d, %d bytes)\n",
 		acct.Nonce, len(ext))
 
-	// 4. Submit (fire-and-poll: author_submitExtrinsic + scan new blocks).
+	// 4. Quote the fee, then submit (fire-and-poll).
+	var feeInfo struct {
+		PartialFee string `json:"partialFee"`
+	}
+	if err := api.Client.Call(&feeInfo, "payment_queryInfo", fmt.Sprintf("%#x", ext)); err == nil {
+		fmt.Printf("    quoted fee: %s (chain base units)\n", feeInfo.PartialFee)
+	}
 	var txHash string
 	if err := api.Client.Call(&txHash, "author_submitExtrinsic", fmt.Sprintf("%#x", ext)); err != nil {
 		log.Fatalf("submit: %v", err)
