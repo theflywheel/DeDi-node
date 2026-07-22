@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/mod/sumdb/note"
 
+	"github.com/theflywheel/DeDi-node/internal/anchor"
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -128,6 +129,32 @@ func serve() error {
 			Interval:  wiv,
 		}).Run(ctx)
 		log.Printf("witnessing %s every %s", wt, wiv)
+	}
+
+	// Optional: anchor signed checkpoints to an external ledger (adapter-based;
+	// secondary to witnessing). DEDI_ANCHOR_BACKEND selects the adapter.
+	if backend := os.Getenv("DEDI_ANCHOR_BACKEND"); backend != "" {
+		aiv, err := time.ParseDuration(envOr("DEDI_ANCHOR_INTERVAL", "5m"))
+		if err != nil {
+			return fmt.Errorf("DEDI_ANCHOR_INTERVAL: %w", err)
+		}
+		var ledger anchor.Ledger
+		switch backend {
+		case "cord":
+			prefix, err := strconv.Atoi(envOr("DEDI_ANCHOR_SS58", "29"))
+			if err != nil {
+				return fmt.Errorf("DEDI_ANCHOR_SS58: %w", err)
+			}
+			ledger = &anchor.CORD{
+				RPCURL:     envOr("DEDI_ANCHOR_RPC_URL", "ws://127.0.0.1:9944"),
+				SURI:       os.Getenv("DEDI_ANCHOR_SURI"),
+				SS58Prefix: uint16(prefix),
+			}
+		default:
+			return fmt.Errorf("DEDI_ANCHOR_BACKEND: unknown backend %q (supported: cord)", backend)
+		}
+		go (&anchor.Anchorer{Store: s, Ledger: ledger, Interval: aiv}).Run(ctx)
+		log.Printf("anchoring checkpoints to %s every %s", backend, aiv)
 	}
 
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY")}

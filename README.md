@@ -16,6 +16,11 @@ Design: [docs/design.md](docs/design.md). Status: M1 (core node) in progress.
 
 Or fully containerized: `make keygen && docker compose up --build`.
 
+Trust planes are feature flags on one binary: witnessing (`DEDI_WITNESS_*`) and
+ledger anchoring (`DEDI_ANCHOR_*`) turn on by env, packaged as compose overlays
+(`docker-compose.witness.yml`, `docker-compose.anchor.yml`). See
+[docs/deployment-modes.md](docs/deployment-modes.md).
+
 ## Development
 
     make test    # integration tests (needs make up)

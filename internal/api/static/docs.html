@@ -64,6 +64,7 @@ sequenceDiagram
 <tr><td>4</td><td>Offline inclusion proof (browser, WebCrypto)</td><td class="ok">verified</td></tr>
 <tr><td>5</td><td>Witness verifies primary is append-only</td><td class="ok">recorded</td></tr>
 <tr><td>6</td><td>Witness detects a forked history</td><td class="ok">alarm</td></tr>
+<tr><td>7</td><td>Checkpoint anchored to a CORD chain (<code>DEDI_ANCHOR_*</code>, adapter-based)</td><td class="ok">receipt verified in-block</td></tr>
 </table>
 
 <p class="mut" style="margin-top:1.2em">Witnessed checkpoints are browsable in the
@@ -96,7 +97,10 @@ curl -s localhost:8080/dedi/log/checkpoint   # your own signed tree head</code><
 <p class="mut">Load records with <code>go run ./cmd/dedid seed -file examples/beckn-seed.json</code>
 (set <code>DEDI_DB_URL=postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable</code>).
 Distribute your verifier key; anyone, including another dedid node acting as a witness,
-can then verify your log independently.</p>
+can then verify your log independently. Trust planes are feature flags on one binary:
+standalone, witnessed (<code>DEDI_WITNESS_*</code>), and ledger-anchored
+(<code>DEDI_ANCHOR_*</code>, CORD adapter first). See
+<a href="https://github.com/theflywheel/DeDi-node/blob/main/docs/deployment-modes.md">deployment modes</a>.</p>
 
 <h2>Protocol &amp; references</h2>
 <ul>
