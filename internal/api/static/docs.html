@@ -88,6 +88,14 @@ signed checkpoint it verifies against; <code>?version_id=</code> pins an exact v
 reference node (seeded with Beckn identities; on your own node, use your host and a record you seeded):</p>
 <pre><code>curl -s "https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
 
+<h2>Getting registered</h2>
+<p>Onboarding is <b>operator-gated</b>: there is no self-service registration, by design —
+who exists on a network is a governed decision, and every onboarding or revocation is an
+auditable entry in the transparency log. To register a participant on the networks served by
+this node, email <a href="mailto:contact@theflywheel.in">contact@theflywheel.in</a> with your
+subscriber id, role (BAP/BPP), namespace, and Ed25519 signing public key.
+Details: <a href="https://github.com/theflywheel/DeDi-node/blob/main/docs/governance.md">governance</a>.</p>
+
 <h2>Run your own node</h2>
 <p>dedid is self-hostable: one binary, one Postgres. Requires Docker and Go&nbsp;&ge;&nbsp;1.25.</p>
 <pre><code>git clone https://github.com/theflywheel/DeDi-node.git && cd DeDi-node

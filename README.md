@@ -21,6 +21,9 @@ ledger anchoring (`DEDI_ANCHOR_*`) turn on by env, packaged as compose overlays
 (`docker-compose.witness.yml`, `docker-compose.anchor.yml`). See
 [docs/deployment-modes.md](docs/deployment-modes.md).
 
+Onboarding is operator-gated — no self-service registration; every governance
+decision is a log entry. See [docs/governance.md](docs/governance.md).
+
 ## Development
 
     make test    # integration tests (needs make up)
