@@ -1,6 +1,6 @@
 # DeDi Node — Design Document
 
-**Status:** Draft v0.2 (v0.1 + Addendum A review findings + Addendum B spec teardown)
+**Status:** Draft v0.3 (v0.2 + Addendum D: ledger-anchor plane revises the v1 non-goal)
 **Author:** Chakshu (FWAI Technologies / Flywheel)
 **Date:** July 2026
 **License:** Apache-2.0
@@ -35,7 +35,7 @@ A first-class compatibility target is **Beckn**: ONIX v0.6.0 onboards networks a
 ### Non-goals (v1)
 
 - Multi-tenant SaaS operation (single-operator, multi-namespace is enough).
-- CORD/blockchain anchoring (witness cosigning covers the threat model; a CORD anchor can be added later as just another witness).
+- ~~CORD/blockchain anchoring~~ — revised 2026-07-22: an optional, adapter-based anchor plane shipped as a deployment mode (see Addendum D and docs/deployment-modes.md). The original reasoning stands — witness cosigning covers the threat model; the anchor is a secondary layer, never required.
 - Federation/gossip between nodes beyond witnessing.
 - Being a general-purpose database. Directories are small, public, read-heavy datasets.
 
@@ -254,3 +254,41 @@ Extracted from beckn-onix@e99b8c1 (v1.8.0). Supersedes §6.1's assumptions; reso
 - **Locked constant:** stock ONIX force-injects `dediregistry.url = https://fabric.nfh.global/registry/dedi` from a signature-verified embedded constants file (plugin-manager enforcement on the exact plugin id `dediregistry`; any other configured value fails startup). Consequences: (a) the §6.3 acceptance test requires a patched/forked adapter build or a network-level override; (b) an upstream change request is needed before "change only the registry URL" is honest for stock deployments; (c) importing the plugin's Go package directly bypasses the lock — which is how the contract test works.
 
 **Trust invariant (binding on M2):** the Beckn wildcard collapses the node's entire write surface into a single identity trust domain — any principal who can publish a record named `{key_id}` anywhere on the node can answer `GET /lookup/{any_subscriber_id}/subscribers.beckn.one/{key_id}`, and the ONIX client does not verify that the returned `subscriber_id` matches what it asked for. This is safe today because the only write paths are operator-controlled (`dedid seed`, direct DB). The M2 publisher plane MUST NOT ship without a wildcard eligibility constraint — e.g., only allowlisted namespaces/registries participate in wildcard resolution, or `subscriber_id` claims are verified at publish time. The namespace-preference ordering in `FindBecknSubscriber` is a routing heuristic, not a security mechanism.
+
+---
+
+## Addendum D — Ledger-anchor plane (2026-07-22)
+
+Revises the v1 non-goal "CORD/blockchain anchoring". The trust tiers are now
+**deployment modes of one binary, toggled like feature flags** (see
+`docs/deployment-modes.md`): standalone → witnessed (`DEDI_WITNESS_*`) →
+anchored (`DEDI_ANCHOR_*`). The anchor plane publishes the node's signed C2SP
+checkpoint to an external ledger on a cadence, adding an operator-independent
+ordered timeline of roots beside the witness plane. Decisions:
+
+- **Adapter pattern, extension to existing backends.** `anchor.Ledger` is a
+  two-method interface (`Name`, `Anchor(ctx, checkpoint) → Ref`); the runner
+  (`anchor.Anchorer`) is backend-agnostic and sits beside the witness goroutine.
+  New ledgers are a new adapter file plus a switch case — the daemon wiring and
+  deployment story do not change.
+- **Receipts are not log entries.** Anchor receipts (`anchors` table:
+  backend, tree_size, tx/block refs) live outside the transparency log — a log
+  entry per anchor would grow the tree and re-trigger anchoring indefinitely.
+- **First adapter: CORD** (`system.remark` digest anchoring — no pallet setup
+  on the target chain). The adapter reads the target runtime's signed-extension
+  list from on-chain metadata at connect time and encodes the SignedExtra to
+  match (Weave `ChargeAssetTxPayment` vs Loom `ChargeTransactionPayment`
+  layouts, golden-byte tested); unrecognized extension sets are refused rather
+  than risk submitting malformed extrinsics. Proven against a self-hosted
+  `cord --dev` node end-to-end (anchor → in-block inclusion → receipt) and
+  fee-quoted against Dhiway's public Weave testnet (`weave1.testnet.cord.network`,
+  ~0.005 WAY per anchor; needs only a funded account).
+- **Trust honesty.** A self-hosted single-validator anchor chain adds
+  persistence and ordering, not third-party trust; external trust comes from
+  witnessing (mode 2) or anchoring to a chain the operator does not control.
+  Anchoring is best-effort and non-blocking: the read plane never depends on
+  the anchor target being reachable.
+- **Deferred:** writing into CORD's DeDir `entries` pallet (namespace/registry
+  setup + client-side SS58 identifier derivation) — only warranted for
+  dedi.global-level interop, not for tamper-evidence; an `_anchor`-style read
+  API exposing receipts publicly.
