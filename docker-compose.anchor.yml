@@ -1,0 +1,30 @@
+# Mode 3 overlay: anchor checkpoints to a co-deployed CORD chain.
+#   docker compose -f docker-compose.yml -f docker-compose.anchor.yml up -d
+# Runs a lightweight single-validator CORD node with persistent state and turns
+# on dedid's anchor plane against it. To anchor to an EXTERNAL network instead
+# (e.g. Dhiway's), skip this overlay and set DEDI_ANCHOR_* on dedid directly.
+services:
+  cord:
+    image: dhiway/cord:develop
+    command:
+      - --dev
+      - --base-path=/data
+      - --rpc-external
+      - --rpc-cors=all
+      - --rpc-port=9944
+    volumes:
+      - corddata:/data
+    # RPC stays internal to the compose network; expose deliberately if needed.
+
+  dedid:
+    environment:
+      DEDI_ANCHOR_BACKEND: cord
+      DEDI_ANCHOR_RPC_URL: ws://cord:9944
+      DEDI_ANCHOR_SURI: ${DEDI_ANCHOR_SURI:-//Alice} # dev key; use a real SURI on real chains
+      DEDI_ANCHOR_INTERVAL: ${DEDI_ANCHOR_INTERVAL:-5m}
+    depends_on:
+      cord:
+        condition: service_started
+
+volumes:
+  corddata:
