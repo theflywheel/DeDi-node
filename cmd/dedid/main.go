@@ -177,6 +177,9 @@ type seedFile struct {
 		Records []struct {
 			Name    string          `json:"name"`
 			Payload json.RawMessage `json:"payload"`
+			// Optional explicit state: "live" (default) or "revoked" — the
+			// operator's revocation path (a revocation is a new version).
+			State string `json:"state"`
 		} `json:"records"`
 	} `json:"registries"`
 }
@@ -221,7 +224,7 @@ func seed(args []string) error {
 			return err
 		}
 		for _, rec := range reg.Records {
-			if err := appendOne(store.AppendInput{EntryType: "record", Namespace: sf.Namespace, Registry: reg.Name, RecordName: rec.Name, PayloadRaw: rec.Payload, CreatedBy: "seed"}); err != nil {
+			if err := appendOne(store.AppendInput{EntryType: "record", Namespace: sf.Namespace, Registry: reg.Name, RecordName: rec.Name, PayloadRaw: rec.Payload, State: rec.State, CreatedBy: "seed"}); err != nil {
 				return err
 			}
 		}
