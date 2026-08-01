@@ -27,6 +27,6 @@ func (s *Store) LatestCheckpoint(ctx context.Context) (int64, string, error) {
 
 // TruncateForTest empties all log state. Test support only.
 func (s *Store) TruncateForTest(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE log_entries, tree_hashes, checkpoints`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE log_entries, tree_hashes, checkpoints, request_counts`)
 	return err
 }
