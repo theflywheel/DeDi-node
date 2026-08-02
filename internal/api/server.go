@@ -35,6 +35,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
+	mux.HandleFunc("GET /admin", s.admin)
+	mux.HandleFunc("GET /admin/{$}", s.admin)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})

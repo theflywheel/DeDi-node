@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeDi Node · Operator console</title>
+<style>
+  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  h3 { font-size: .98em; margin: 1.1em 0 .3em; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  a { cursor: pointer; }
+  label { display: block; margin: .5em 0 .1em; }
+  input, select { font-family: monospace; font-size: 1em; width: 100%; box-sizing: border-box; padding: .2em .3em; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2em; }
+  .grid .full { grid-column: 1 / -1; }
+  fieldset { border: 1px solid #ccc; margin: .8em 0; padding: .4em 1em 1em; }
+  legend { padding: 0 .4em; }
+  button { font-family: monospace; font-size: 1em; padding: .3em .9em; margin-top: .8em; }
+  .tabs a { margin-right: 1em; padding-bottom: .15em; }
+  .tabs a.sel { border-bottom: 2px solid #333; font-weight: bold; }
+  .pill { font-size: .85em; padding: 0 .4em; border: 1px solid #ccc; border-radius: 3px; }
+  .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
+  .err { color: #b00; font-size: .9em; }
+  #detail { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
+</style>
+</head>
+<body>
+
+<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="/admin">Console</a></nav>
+<h1>Operator console</h1>
+<p class="mut">Onboarding participants onto a Beckn network served by this node: who exists,
+what keys they present, and when they stop being valid. Onboarding is a governed act — every
+action here is an <b>append</b> to the transparency log, never an edit or a delete.</p>
+
+<div class="banner" id="mode">
+  <b>Preview mode.</b> This node exposes no write API — publishing is operator tooling only
+  (<a href="https://github.com/theflywheel/DeDi-node/blob/main/docs/governance.md">governance</a>).
+  Forms below generate the exact record and the <code>dedid seed</code> command to apply it, so the
+  console is usable today and drops onto a publish endpoint unchanged.
+</div>
+
+<form onsubmit="return reload()">
+<div class="grid">
+  <div><label for="ns">namespace</label><input id="ns" value="beckn-testnet" spellcheck="false"></div>
+  <div><label for="reg">registry</label><input id="reg" value="subscribers.beckn.one" spellcheck="false"></div>
+</div>
+<button type="submit">load</button>
+</form>
+
+<p class="tabs" style="margin-top:1.4em">
+  <a id="tab-list" class="sel" onclick="show('list')">Participants</a>
+  <a id="tab-new" onclick="show('new')">Onboard</a>
+  <a id="tab-key" onclick="show('key')">Rotate key</a>
+  <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
+</p>
+
+<!-- ---------- participants ---------- -->
+<div id="view-list">
+  <div id="participants"><p class="mut">loading...</p></div>
+  <div id="detail"></div>
+</div>
+
+<!-- ---------- onboard ---------- -->
+<div id="view-new" hidden>
+  <h2>Onboard a participant</h2>
+  <p class="mut">The <b>key id</b> becomes the record name — that is what ONIX asks for on every
+  message (<code>/lookup/{subscriber_id}/{registry}/{key_id}</code>).</p>
+  <fieldset><legend>identity</legend>
+    <div class="grid">
+      <div class="full"><label for="f-sub">subscriber_id</label><input id="f-sub" placeholder="bpp.example.com" spellcheck="false"></div>
+      <div><label for="f-role">role</label>
+        <select id="f-role"><option>BAP</option><option>BPP</option><option>BG</option></select></div>
+      <div><label for="f-status">status</label>
+        <select id="f-status">
+          <option>SUBSCRIBED</option><option>INITIATED</option><option>UNDER_SUBSCRIPTION</option>
+          <option>UNSUBSCRIBED</option><option>INVALID_SSL</option>
+        </select></div>
+      <div class="full"><label for="f-url">callback url</label><input id="f-url" placeholder="https://bpp.example.com/beckn" spellcheck="false"></div>
+      <div><label for="f-domain">domain</label><input id="f-domain" placeholder="retail" spellcheck="false"></div>
+      <div><label for="f-net">network memberships <span class="mut">(comma-separated)</span></label>
+        <input id="f-net" value="beckn.one/testnet" spellcheck="false"></div>
+    </div>
+  </fieldset>
+  <fieldset><legend>keys</legend>
+    <div class="grid">
+      <div class="full"><label for="f-kid">key id <span class="mut">(= record name)</span></label><input id="f-kid" spellcheck="false"></div>
+      <div class="full"><label for="f-sign">signing public key <span class="mut">(Ed25519, std base64, 32 bytes)</span></label><input id="f-sign" spellcheck="false"></div>
+      <div class="full"><label for="f-encr">encryption public key <span class="mut">(X25519, std base64, 32 bytes)</span></label><input id="f-encr" spellcheck="false"></div>
+      <div><label for="f-from">valid from <span class="mut">(RFC 3339)</span></label><input id="f-from" placeholder="2026-01-01T00:00:00Z" spellcheck="false"></div>
+      <div><label for="f-until">valid until</label><input id="f-until" placeholder="2027-01-01T00:00:00Z" spellcheck="false"></div>
+    </div>
+  </fieldset>
+  <button onclick="genOnboard()">generate record</button>
+  <div id="out-new"></div>
+</div>
+
+<!-- ---------- rotate ---------- -->
+<div id="view-key" hidden>
+  <h2>Rotate a key</h2>
+  <p class="mut">Rotation is a new version, not a replacement: the old key stays resolvable via
+  <code>?as_on=</code> so signatures on older messages still verify. Publish the new key
+  <i>before</i> the old one expires so the windows overlap.</p>
+  <div class="grid">
+    <div class="full"><label for="r-rec">record <span class="mut">(existing key id)</span></label><input id="r-rec" spellcheck="false"></div>
+    <div class="full"><label for="r-sign">new signing public key</label><input id="r-sign" spellcheck="false"></div>
+    <div><label for="r-from">valid from</label><input id="r-from" placeholder="2026-06-01T00:00:00Z" spellcheck="false"></div>
+    <div><label for="r-until">valid until</label><input id="r-until" placeholder="2027-06-01T00:00:00Z" spellcheck="false"></div>
+  </div>
+  <button onclick="genRotate()">generate new version</button>
+  <div id="out-key"></div>
+</div>
+
+<!-- ---------- revoke ---------- -->
+<div id="view-revoke" hidden>
+  <h2>Revoke a participant</h2>
+  <p class="mut">A revocation is a new version with <code>state: revoked</code>, never a deletion —
+  history stays provable. Beckn wildcard lookups return live records only, so a revoked
+  participant then 404s and ONIX rejects its messages with 401.</p>
+  <div class="grid">
+    <div class="full"><label for="v-rec">record <span class="mut">(key id)</span></label><input id="v-rec" spellcheck="false"></div>
+    <div class="full"><label for="v-sub">subscriber_id <span class="mut">(defaults to the record name)</span></label><input id="v-sub" spellcheck="false"></div>
+    <div class="full"><label for="v-reason">reason <span class="mut">(recorded in the log)</span></label><input id="v-reason" placeholder="key compromise" spellcheck="false"></div>
+  </div>
+  <button onclick="genRevoke()">generate revocation</button>
+  <div id="out-revoke"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const jarg = s => String(s).replace(/'/g, "\\'");
+const VIEWS = ['list','new','key','revoke'];
+
+function show(v){
+  if(!VIEWS.includes(v)) v = 'list';
+  VIEWS.forEach(x => { $('view-'+x).hidden = (x !== v); $('tab-'+x).className = (x === v ? 'sel' : ''); });
+  if(location.hash.slice(1) !== v) location.hash = v;   // tabs are linkable
+}
+addEventListener('hashchange', () => show(location.hash.slice(1) || 'list'));
+
+async function jget(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+const ns  = () => $('ns').value.trim();
+const reg = () => $('reg').value.trim();
+const p   = s => encodeURIComponent(s);
+
+// ---- participants ----
+function reload(){
+  const box = $('participants');
+  $('detail').innerHTML = '';
+  box.innerHTML = '<p class="mut">loading...</p>';
+  jget('/dedi/query/' + p(ns()) + '/' + p(reg())).then(async j => {
+    const recs = j.data.records || [];
+    if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
+    // The query endpoint returns names + state; payload detail needs a lookup per record.
+    const rows = await Promise.all(recs.map(async r => {
+      let d = {};
+      try { d = (await jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(r.record_name))).data; }
+      catch(e){ /* record may have been revoked between calls */ }
+      return { name: r.record_name, state: r.state || d.state || '?', det: d.details || {}, ver: d.version };
+    }));
+    box.innerHTML = '<table><tr><th>subscriber</th><th>role</th><th>domain</th><th>status</th>' +
+      '<th>key id</th><th>valid until</th><th>state</th><th>v</th></tr>' +
+      rows.map(r => {
+        const t = r.det, live = r.state === 'live';
+        // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
+        return '<tr><td><a onclick="detail(\'' + jarg(r.name) + '\')">' + esc(t.subscriber_id || '—') + '</a></td>' +
+          '<td>' + esc(t.type || t.role || '—') + '</td><td>' + esc(t.domain || '—') + '</td>' +
+          '<td>' + esc(t.status || '—') + '</td>' +
+          '<td class="mut">' + esc(r.name.slice(0, 14)) + (r.name.length > 14 ? '…' : '') + '</td>' +
+          '<td>' + expiry(t.valid_until) + '</td>' +
+          '<td class="' + (live ? 'ok' : 'no') + '">' + esc(r.state) + '</td>' +
+          '<td class="mut">' + esc(r.ver || '?') + '</td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">' + rows.length + ' participant(s). Click a subscriber for version history.</p>';
+  }).catch(e => box.innerHTML = '<p class="no">' + esc(e.message) + '</p>');
+  return false;
+}
+
+// Expiry is the field most likely to bite an operator, so surface it loudly.
+function expiry(until){
+  if(!until) return '<span class="mut">—</span>';
+  const t = Date.parse(until);
+  if(isNaN(t)) return esc(until);
+  const days = Math.floor((t - Date.now()) / 86400000);
+  if(days < 0)  return '<span class="no">expired</span>';
+  if(days < 30) return '<span class="no">' + days + 'd</span>';
+  return '<span class="mut">' + esc(until.slice(0, 10)) + '</span>';
+}
+
+function detail(rec){
+  const box = $('detail');
+  box.innerHTML = '<h3>' + esc(rec) + '</h3><p class="mut">loading...</p>';
+  const base = '/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec);
+  Promise.all([
+    jget(base).catch(() => null),
+    jget('/dedi/versions/' + p(ns()) + '/' + p(reg()) + '/' + p(rec)).catch(() => null),
+  ]).then(async ([cur, vers]) => {
+    let out = '<h3>' + esc(rec) + '</h3>';
+    if(cur) out += '<pre>' + esc(JSON.stringify(cur.data.details, null, 2)) + '</pre>';
+    // /dedi/versions returns a flat array of version ids; the per-version detail
+    // (state, who appended it, when) needs a version-pinned lookup each.
+    const ids = (vers && vers.data.versions) || [];
+    const recent = ids.slice(-10).reverse();
+    if(recent.length){
+      const rows = await Promise.all(recent.map(async id => {
+        try {
+          const d = (await jget(base + '?version_id=' + p(id))).data;
+          return { id, state: d.state || '?', at: (d.created_at || '').slice(0, 19), by: d.created_by || '?' };
+        } catch(e){ return { id, state: '?', at: '', by: '' }; }
+      }));
+      out += '<table><tr><th>version</th><th>state</th><th>created</th><th>by</th></tr>' +
+        rows.map(v => '<tr><td>' + esc(v.id) + '</td><td class="' + (v.state === 'live' ? 'ok' : 'no') + '">' +
+          esc(v.state) + '</td><td class="mut">' + esc(v.at) + '</td><td class="mut">' +
+          esc(v.by) + '</td></tr>').join('') + '</table>' +
+        '<p class="mut">Every row is a log entry — the audit trail for this participant.' +
+        (ids.length > recent.length ? ' Showing the ' + recent.length + ' most recent of ' + ids.length + '.' : '') +
+        '</p>';
+    }
+    out += '<p><a onclick="prefill(\'' + jarg(rec) + '\')">rotate key</a> &middot; ' +
+           '<a onclick="prefillRevoke(\'' + jarg(rec) + '\')">revoke</a></p>';
+    box.innerHTML = out;
+  });
+}
+function prefill(rec){ $('r-rec').value = rec; show('key'); }
+function prefillRevoke(rec){ $('v-rec').value = rec; show('revoke'); }
+
+// ---- generators ----
+const b64re = /^[A-Za-z0-9+/]{43}=$/;   // 32 raw bytes in std base64
+function need(errs, id, label, extra){
+  const v = $(id).value.trim();
+  if(!v){ errs.push(label + ' is required'); return v; }
+  if(extra){ const e = extra(v); if(e) errs.push(label + ': ' + e); }
+  return v;
+}
+const isB64  = v => b64re.test(v) ? '' : 'expected 32 raw bytes in standard base64 (44 chars, ending "=")';
+const isTime = v => isNaN(Date.parse(v)) ? 'expected an RFC 3339 timestamp' : '';
+const isURL  = v => /^https?:\/\/.+/.test(v) ? '' : 'expected an http(s) URL';
+
+function genOnboard(){
+  const errs = [];
+  const sub  = need(errs, 'f-sub',  'subscriber_id');
+  const url  = need(errs, 'f-url',  'callback url', isURL);
+  const kid  = need(errs, 'f-kid',  'key id');
+  const sign = need(errs, 'f-sign', 'signing public key', isB64);
+  const encr = need(errs, 'f-encr', 'encryption public key', isB64);
+  const from = need(errs, 'f-from', 'valid from',  isTime);
+  const till = need(errs, 'f-until','valid until', isTime);
+  if(from && till && Date.parse(till) <= Date.parse(from)) errs.push('valid until must be after valid from');
+  if(errs.length) return fail('out-new', errs);
+
+  // Field names are the ones the ONIX dediregistry client reads off details:
+  // subscriber_id, type, url, domain, signing_public_key, encr_public_key.
+  // status / valid_* are additive operator metadata and are ignored by ONIX.
+  const payload = {
+    subscriber_id: sub, type: $('f-role').value, url: url,
+    signing_public_key: sign, encr_public_key: encr,
+    domain: $('f-domain').value.trim(), status: $('f-status').value,
+    valid_from: from, valid_until: till,
+  };
+  const nets = $('f-net').value.split(',').map(s => s.trim()).filter(Boolean);
+  if(nets.length) payload.network_memberships = nets;
+  emit('out-new', kid, payload, 'live', 'Onboard ' + sub);
+}
+
+function genRotate(){
+  const errs = [];
+  const rec  = need(errs, 'r-rec',  'record');
+  const sign = need(errs, 'r-sign', 'new signing public key', isB64);
+  const from = need(errs, 'r-from', 'valid from',  isTime);
+  const till = need(errs, 'r-until','valid until', isTime);
+  if(errs.length) return fail('out-key', errs);
+  emit('out-key', rec, { signing_public_key: sign, valid_from: from, valid_until: till },
+       'live', 'Rotate key for ' + rec,
+       'Merge these fields into the record’s current payload — an append replaces the whole ' +
+       'payload, so omitted fields would be dropped.');
+}
+
+function genRevoke(){
+  const errs = [];
+  const rec = need(errs, 'v-rec', 'record');
+  if(errs.length) return fail('out-revoke', errs);
+  const reason = $('v-reason').value.trim();
+  const payload = { subscriber_id: $('v-sub').value.trim() || rec, status: 'UNSUBSCRIBED' };
+  if(reason) payload.revocation_reason = reason;
+  emit('out-revoke', rec, payload, 'revoked', 'Revoke ' + rec,
+       'Caching validators may serve the old key until their TTL expires.');
+}
+
+function fail(box, errs){
+  $(box).innerHTML = '<p class="err">' + errs.map(esc).join('<br>') + '</p>';
+  return false;
+}
+
+// Emits the seed file + the command that applies it. Same shape dedid seed already accepts,
+// so this is copy-paste runnable rather than illustrative.
+function emit(box, recName, payload, state, title, note){
+  const seed = {
+    namespace: ns(), payload: {},
+    registries: [{ name: reg(), payload: {}, records: [{ name: recName, payload, state }] }],
+  };
+  const json = JSON.stringify(seed, null, 2);
+  const cmd = 'cat > onboard.json <<\'EOF\'\n' + json + '\nEOF\n\n' +
+              'DEDI_DB_URL="$DEDI_DB_URL" dedid seed -file onboard.json';
+  $(box).innerHTML =
+    '<h3>' + esc(title) + '</h3>' +
+    (note ? '<p class="mut">' + note + '</p>' : '') +
+    '<p class="mut">record <code>' + esc(ns() + '/' + reg() + '/' + recName) +
+      '</code> &middot; state <span class="pill">' + esc(state) + '</span></p>' +
+    '<pre id="' + box + '-cmd">' + esc(cmd) + '</pre>' +
+    '<button onclick="copy(\'' + box + '-cmd\', this)">copy</button>' +
+    '<p class="mut">Applying this appends a new version and it goes live on the next ' +
+    'checkpoint, with an inclusion proof like any other record.</p>';
+}
+
+function copy(id, btn){
+  navigator.clipboard.writeText($(id).textContent).then(() => {
+    btn.textContent = 'copied';
+    setTimeout(() => btn.textContent = 'copy', 1200);
+  }, () => btn.textContent = 'copy failed');
+}
+
+show(location.hash.slice(1) || 'list');
+reload();
+</script>
+</body>
+</html>
