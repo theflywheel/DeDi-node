@@ -100,53 +100,81 @@ func PayloadDigest(payload []byte) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// precondition enforces If-Match against the record's current digest, and
-// collapses an exact replay into a no-op.
+// preconditionOf reads the mandatory conditional-request header and turns it
+// into a store precondition.
 //
-// Two different problems, one place. If-Match is lost-update protection: two
-// operators editing the same participant should not silently overwrite each
-// other. The replay check is what makes a double-clicked Save — or a captured
-// request replayed inside the signature's timestamp window — stop forking a
-// participant's history.
+// Every write must state what it expects to be replacing: `If-Match: <digest>`
+// to replace a known version, or `If-None-Match: *` to create one that must not
+// exist yet. Both are covered by the signature (publisher.Preimage) and both
+// are enforced inside the append transaction (store.checkPrecondition).
 //
-// Returns the existing entry and true when the caller should stop.
-func (s *Server) precondition(w http.ResponseWriter, r *http.Request, ns, reg, rec, state string, payload []byte) (store.Entry, bool) {
-	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
+// Making this mandatory rather than optional is what closes replay. A captured
+// signed write cannot be stripped of its precondition, so replaying it can only
+// ever land on the exact version it was written against — by which time that
+// version has moved on, and the replay is a 412 instead of a silent revert to
+// an older payload. The same rule gives lost-update protection for free: two
+// operators editing one participant cannot overwrite each other unseen.
+//
+// Returns false when it has already answered the request.
+func preconditionOf(w http.ResponseWriter, r *http.Request) (store.AppendInput, bool) {
+	var in store.AppendInput
+	ifMatch := strings.Trim(r.Header.Get("If-Match"), `"`)
+	ifNone := strings.TrimSpace(r.Header.Get("If-None-Match"))
+
 	switch {
-	case errors.Is(err, store.ErrNotFound):
-		// Nothing published yet. An If-Match asking for a specific version
-		// cannot be satisfied; If-Match: * means "must already exist".
-		if m := r.Header.Get("If-Match"); m != "" {
-			writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
-				"If-Match was given but the record does not exist yet")
-			return store.Entry{}, true
+	case ifMatch != "" && ifNone != "":
+		badRequest(w, "give either If-Match or If-None-Match, not both")
+		return in, false
+	case ifNone != "":
+		if ifNone != "*" {
+			badRequest(w, "If-None-Match must be * on a write")
+			return in, false
 		}
-		return store.Entry{}, false
-	case err != nil:
-		internal(w, err)
-		return store.Entry{}, true
+		in.ExpectedAbsent = true
+	case ifMatch != "":
+		// `*` would mean "any current version", which is precisely the
+		// unconditional write this header exists to prevent here.
+		digest, err := hex.DecodeString(ifMatch)
+		if err != nil || len(digest) != sha256.Size {
+			badRequest(w, "If-Match must be the hex digest of the version being replaced, or use If-None-Match: * to create")
+			return in, false
+		}
+		in.ExpectedPrevDigest = digest
+	default:
+		writeErr(w, http.StatusPreconditionRequired, "PRECONDITION_REQUIRED",
+			"writes must carry If-Match: <digest> or If-None-Match: *")
+		return in, false
 	}
+	return in, true
+}
 
-	currentDigest := hex.EncodeToString(current.Digest)
-	if m := strings.Trim(r.Header.Get("If-Match"), `"`); m != "" && m != "*" && m != currentDigest {
-		writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
-			"record has changed: current digest is "+currentDigest)
-		return store.Entry{}, true
+// conflict renders a failed precondition. It carries the current digest so a
+// caller that lost a race can re-read, merge and retry without a second lookup.
+func conflict(w http.ResponseWriter, err error) {
+	writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED", err.Error())
+}
+
+// unchanged collapses an exact re-publish into a no-op, so a double-clicked
+// Save does not fork a participant's history with a duplicate version. This is
+// a courtesy, not a safety property — replay is closed by preconditionOf.
+//
+// Returns true when it has already answered the request.
+func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, ns, reg, rec, state string, payload []byte) bool {
+	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
+	if err != nil {
+		return false // absent, or a real error the append will surface
 	}
-
 	newDigest, err := PayloadDigest(payload)
 	if err != nil {
 		badRequest(w, "payload is not valid JSON")
-		return store.Entry{}, true
+		return true
 	}
-	if newDigest == currentDigest && current.State == state {
-		// Byte-identical to what is already live: return the existing version
-		// rather than appending a duplicate.
+	if newDigest == hex.EncodeToString(current.Digest) && current.State == state {
 		writeJSON(w, http.StatusOK, envelope{Message: "Record already at this version; no new version appended",
 			Data: versionData(current, true)})
-		return current, true
+		return true
 	}
-	return current, false
+	return false
 }
 
 // versionData renders a written (or unchanged) version.
@@ -177,6 +205,10 @@ func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.
 			badRequest(w, err.Error())
 			return
 		}
+		if errors.Is(err, store.ErrVersionConflict) {
+			conflict(w, err)
+			return
+		}
 		internal(w, err)
 		return
 	}
@@ -192,9 +224,12 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.appendAs(w, r, key, store.AppendInput{
-		EntryType: "namespace", Namespace: r.PathValue("namespace"), PayloadRaw: payload,
-	}, "Namespace published successfully")
+	in, ok := preconditionOf(w, r)
+	if !ok {
+		return
+	}
+	in.EntryType, in.Namespace, in.PayloadRaw = "namespace", r.PathValue("namespace"), payload
+	s.appendAs(w, r, key, in, "Namespace published successfully")
 }
 
 func (s *Server) putRegistry(w http.ResponseWriter, r *http.Request) {
@@ -206,10 +241,13 @@ func (s *Server) putRegistry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.appendAs(w, r, key, store.AppendInput{
-		EntryType: "registry", Namespace: r.PathValue("namespace"),
-		Registry: r.PathValue("registry_name"), PayloadRaw: payload,
-	}, "Registry published successfully")
+	in, ok := preconditionOf(w, r)
+	if !ok {
+		return
+	}
+	in.EntryType, in.Namespace = "registry", r.PathValue("namespace")
+	in.Registry, in.PayloadRaw = r.PathValue("registry_name"), payload
+	s.appendAs(w, r, key, in, "Registry published successfully")
 }
 
 func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
@@ -222,13 +260,16 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
-	if _, stop := s.precondition(w, r, ns, reg, rec, "live", payload); stop {
+	in, ok := preconditionOf(w, r)
+	if !ok {
 		return
 	}
-	s.appendAs(w, r, key, store.AppendInput{
-		EntryType: "record", Namespace: ns, Registry: reg, RecordName: rec,
-		PayloadRaw: payload, State: "live",
-	}, "Record published successfully")
+	if s.unchanged(w, r, ns, reg, rec, "live", payload) {
+		return
+	}
+	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
+	in.PayloadRaw, in.State = payload, "live"
+	s.appendAs(w, r, key, in, "Record published successfully")
 }
 
 // revokeRecord appends a revoked version carrying the previous payload, so the
@@ -258,9 +299,12 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if m := strings.Trim(r.Header.Get("If-Match"), `"`); m != "" && m != "*" && m != hex.EncodeToString(current.Digest) {
-		writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
-			"record has changed: current digest is "+hex.EncodeToString(current.Digest))
+	in, okPre := preconditionOf(w, r)
+	if !okPre {
+		return
+	}
+	if in.ExpectedAbsent {
+		badRequest(w, "revoke replaces an existing record; use If-Match, not If-None-Match")
 		return
 	}
 	// Revoking an already-revoked record is a no-op, not a second revocation.
@@ -283,8 +327,7 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.appendAs(w, r, key, store.AppendInput{
-		EntryType: "record", Namespace: ns, Registry: reg, RecordName: rec,
-		PayloadRaw: payload, State: "revoked",
-	}, "Record revoked successfully")
+	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
+	in.PayloadRaw, in.State = payload, "revoked"
+	s.appendAs(w, r, key, in, "Record revoked successfully")
 }

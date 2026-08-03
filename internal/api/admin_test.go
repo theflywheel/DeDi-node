@@ -51,18 +51,67 @@ func writeServer(t *testing.T, ns string) (*httptest.Server, *store.Store, ed255
 	return srv, s, priv
 }
 
-// signedDo issues a request signed by priv, or unsigned when priv is nil.
-func signedDo(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, method, path string, body []byte) *http.Response {
+// currentPrecondition is what a well-behaved client does before every write:
+// read the resource, and state the version it intends to replace. Writes are
+// refused without one, so tests that are not specifically about preconditions
+// let signedDo derive it.
+func currentPrecondition(t *testing.T, srv *httptest.Server, adminPath string) publisher.Precondition {
 	t.Helper()
+	// /admin/namespaces/ns/registries/r/records/x/publish -> /dedi/lookup/ns/r/x
+	seg := strings.Split(strings.Trim(strings.TrimPrefix(adminPath, "/admin/namespaces/"), "/"), "/")
+	parts := []string{seg[0]}
+	for i := 1; i+1 < len(seg); i += 2 {
+		parts = append(parts, seg[i+1])
+	}
+	resp, err := http.Get(srv.URL + "/dedi/lookup/" + strings.Join(parts, "/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return publisher.Precondition{IfNoneMatch: "*"}
+	}
+	var env struct {
+		Data struct {
+			Digest string `json:"digest"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	return publisher.Precondition{IfMatch: env.Data.Digest}
+}
+
+// signedDo issues a request signed by priv, or unsigned when priv is nil.
+//
+// The precondition is part of the signature (publisher.Preimage), so it has to
+// be chosen before signing rather than attached afterwards. Pass one to test
+// precondition behaviour; omit it to have the current version resolved, the way
+// a real client would.
+func signedDo(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, method, path string, body []byte, pre ...publisher.Precondition) *http.Response {
+	t.Helper()
+	p := publisher.Precondition{}
+	switch {
+	case len(pre) > 0:
+		p = pre[0]
+	case priv != nil:
+		p = currentPrecondition(t, srv, path)
+	}
 	req, err := http.NewRequest(method, srv.URL+path, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if p.IfMatch != "" {
+		req.Header.Set("If-Match", p.IfMatch)
+	}
+	if p.IfNoneMatch != "" {
+		req.Header.Set("If-None-Match", p.IfNoneMatch)
 	}
 	if priv != nil {
 		now := time.Now().UTC()
 		req.Header.Set(publisher.HeaderKeyID, "op-1")
 		req.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
-		req.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, method, path, body, now))
+		req.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, method, path, body, p, now))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -178,7 +227,8 @@ func TestWritePlaneRejectsUnauthorized(t *testing.T) {
 	now := time.Now().UTC()
 	req.Header.Set(publisher.HeaderKeyID, "op-1")
 	req.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
-	req.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", path, body, now))
+	req.Header.Set("If-None-Match", "*")
+	req.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", path, body, publisher.Precondition{IfNoneMatch: "*"}, now))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -330,17 +380,8 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 
 	// Stale digest: refused.
 	req := func(ifMatch string, body string) *http.Response {
-		r, _ := http.NewRequest("POST", srv.URL+path+"/publish", bytes.NewReader([]byte(body)))
-		now := time.Now().UTC()
-		r.Header.Set(publisher.HeaderKeyID, "op-1")
-		r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
-		r.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", path+"/publish", []byte(body), now))
-		r.Header.Set("If-Match", ifMatch)
-		resp, err := http.DefaultClient.Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return resp
+		return signedDo(t, srv, priv, "POST", path+"/publish", []byte(body),
+			publisher.Precondition{IfMatch: ifMatch})
 	}
 	if resp := req("0000000000000000000000000000000000000000000000000000000000000000", `{"payload":{"v":2}}`); resp.StatusCode != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match: status %d, want 412", resp.StatusCode)
@@ -357,16 +398,8 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 	}
 	// If-Match on a record that does not exist yet cannot be satisfied.
 	other := "/admin/namespaces/ns/registries/r/records/KEY-NEW/publish"
-	r, _ := http.NewRequest("POST", srv.URL+other, bytes.NewReader([]byte(`{"payload":{}}`)))
-	now := time.Now().UTC()
-	r.Header.Set(publisher.HeaderKeyID, "op-1")
-	r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
-	r.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", other, []byte(`{"payload":{}}`), now))
-	r.Header.Set("If-Match", digest)
-	resp, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := signedDo(t, srv, priv, "POST", other, []byte(`{"payload":{}}`),
+		publisher.Precondition{IfMatch: digest})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Fatalf("If-Match on a new record: status %d, want 412", resp.StatusCode)
@@ -428,5 +461,79 @@ func TestRecordWithoutWindowHasNoMarkers(t *testing.T) {
 	}
 	if _, present := data["not_yet_valid"]; present {
 		t.Fatalf("not_yet_valid present without a declared window")
+	}
+}
+
+// The signature's timestamp window bounds how long a captured write stays
+// replayable; it cannot prevent replay inside that window. What prevents it is
+// the precondition: it is signed, so it cannot be stripped, and it is checked
+// against the record as it actually stands, so a replay can no longer apply.
+//
+// Without this, an attacker who captured a publish could hold it, wait for the
+// operator to publish a correction, and then replay the original to silently
+// revert the participant.
+func TestCapturedWriteCannotBeReplayed(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1") + "/publish"
+
+	created := bodyOf(t, signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"v":1}}`)))
+	v1 := created["data"].(map[string]any)["digest"].(string)
+
+	// Capture a legitimate v1 -> v2 write, replaying the exact bytes and headers.
+	body := []byte(`{"payload":{"v":2}}`)
+	pre := publisher.Precondition{IfMatch: v1}
+	now := time.Now().UTC()
+	sig := publisher.Sign(priv, "POST", path, body, pre, now)
+	replay := func() *http.Response {
+		r, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(body))
+		r.Header.Set(publisher.HeaderKeyID, "op-1")
+		r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+		r.Header.Set(publisher.HeaderSignature, sig)
+		r.Header.Set("If-Match", pre.IfMatch)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	resp := replay()
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("original write: status %d, want 200", resp.StatusCode)
+	}
+
+	// The operator publishes a correction on top.
+	signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"v":3}}`)).Body.Close()
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 3 {
+		t.Fatalf("setup: %v versions, want 3", n)
+	}
+
+	// Replaying the captured request must not revert the record to v2.
+	resp = replay()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("replayed write: status %d, want 412", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 3 {
+		t.Fatalf("replay appended: %v versions, want 3", n)
+	}
+	live := getJSON(t, srv.URL+"/dedi/lookup/ns/r/KEY-1", http.StatusOK)
+	if v := live["data"].(map[string]any)["details"].(map[string]any)["v"]; v != float64(3) {
+		t.Fatalf("replay reverted the record to v=%v", v)
+	}
+
+	// Stripping the signed precondition does not help either.
+	r, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(body))
+	r.Header.Set(publisher.HeaderKeyID, "op-1")
+	r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+	r.Header.Set(publisher.HeaderSignature, sig)
+	stripped, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stripped.Body.Close()
+	if stripped.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("precondition stripped: status %d, want 401", stripped.StatusCode)
 	}
 }

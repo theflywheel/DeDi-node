@@ -15,6 +15,9 @@ var (
 	// wrong shape, bad payload — as opposed to a node failure. Callers use it
 	// to answer 400 rather than 500.
 	ErrInvalidWrite = errors.New("invalid write")
+	// ErrVersionConflict marks an append whose caller-supplied precondition no
+	// longer holds: the resource moved on since the caller read it.
+	ErrVersionConflict = errors.New("version conflict")
 )
 
 type Store struct {

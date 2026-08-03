@@ -10,8 +10,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := s.Migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
-	// Compare against the embedded files rather than a literal: a second
-	// Migrate must not reapply anything, whatever the migration count is.
+	// Counted from the embedded files rather than hardcoded, so adding a
+	// migration does not require editing this test to keep it passing.
 	files, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		t.Fatal(err)

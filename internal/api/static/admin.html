@@ -193,38 +193,56 @@ function clearKey(){
   $('k-state').innerHTML = '<span class="mut">no key loaded</span>';
 }
 
+// currentVersion reads what is published at path today, so a write can say
+// which version it is replacing. Returns null when nothing is there yet.
+async function currentVersion(ns, reg, rec){
+  const r = await fetch('/dedi/lookup/' + p(ns) + '/' + p(reg) + '/' + p(rec));
+  if(!r.ok) return null;
+  return (await r.json()).data.digest;
+}
+
 // The signed preimage must match publisher.Preimage byte for byte: scheme,
-// method, path, base64(sha256(body)), RFC 3339 timestamp — newline separated.
-async function signedFetch(method, path, bodyObj){
+// method, request URI, base64(sha256(body)), If-Match, If-None-Match, RFC 3339
+// timestamp — newline separated.
+//
+// The precondition is signed, not just sent: that is what stops a captured
+// request being replayed with the header stripped. It is therefore decided
+// here, before signing, and can never be added to the request afterwards.
+async function signedFetch(method, path, bodyObj, pre){
+  pre = pre || {};
+  const ifMatch = pre.ifMatch || '';
+  const ifNoneMatch = pre.ifNoneMatch || '';
   const body = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
   const bytes = new TextEncoder().encode(body);
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');  // seconds precision, as Go emits
-  const preimage = ['dedi/v1/publish', method.toUpperCase(), path, b64enc(digest), ts].join('\n');
+  const preimage = ['dedi/v1/publish', method.toUpperCase(), path, b64enc(digest),
+                    ifMatch, ifNoneMatch, ts].join('\n');
   const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', SIGNER.key, new TextEncoder().encode(preimage)));
-  return fetch(path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'DeDi-Key-Id': SIGNER.kid,
-      'DeDi-Timestamp': ts,
-      'DeDi-Signature': b64enc(sig),
-    },
-    body: body === '' ? undefined : body,
-  });
+  const headers = {
+    'Content-Type': 'application/json',
+    'DeDi-Key-Id': SIGNER.kid,
+    'DeDi-Timestamp': ts,
+    'DeDi-Signature': b64enc(sig),
+  };
+  if(ifMatch) headers['If-Match'] = ifMatch;
+  if(ifNoneMatch) headers['If-None-Match'] = ifNoneMatch;
+  return fetch(path, { method, headers, body: body === '' ? undefined : body });
 }
 
 // apply POSTs a write and reports what the node did, including the no-op case
 // where an identical publish appended nothing.
-async function apply(box, method, path, bodyObj, what){
+async function apply(box, method, path, bodyObj, what, pre){
   const el = $(box);
   el.innerHTML = '<p class="mut">publishing...</p>';
   try {
-    const resp = await signedFetch(method, path, bodyObj);
+    const resp = await signedFetch(method, path, bodyObj, pre);
     const j = await resp.json();
     if(!resp.ok){
+      const hint = resp.status === 412
+        ? '<p class="mut">this record changed since the form was loaded — reload and re-apply</p>' : '';
       el.innerHTML = '<p class="no">' + esc(j.error || ('HTTP ' + resp.status)) +
-        '</p><p class="mut">code ' + esc(j.code || resp.status) + '</p>';
+        '</p><p class="mut">code ' + esc(j.code || resp.status) + '</p>' + hint;
       return false;
     }
     const d = j.data || {};
@@ -377,8 +395,14 @@ function genOnboard(){
   };
   const nets = $('f-net').value.split(',').map(s => s.trim()).filter(Boolean);
   if(nets.length) payload.network_memberships = nets;
-  if(SIGNER) return apply('out-new', 'POST', recordPath(ns(), reg(), kid) + '/publish',
-                          {payload}, 'Onboarded ' + sub);
+  if(SIGNER){
+    // Onboarding is normally a create, but re-onboarding an existing
+    // participant is a legitimate replace — so state whichever it actually is.
+    return currentVersion(ns(), reg(), kid)
+      .then(cur => apply('out-new', 'POST', recordPath(ns(), reg(), kid) + '/publish',
+                         {payload}, 'Onboarded ' + sub,
+                         cur ? {ifMatch: cur} : {ifNoneMatch: '*'}));
+  }
   emit('out-new', kid, payload, 'live', 'Onboard ' + sub);
 }
 
@@ -395,7 +419,8 @@ function genRotate(){
     // current one forward rather than publishing the changed fields alone.
     return jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec))
       .then(j => apply('out-key', 'POST', recordPath(ns(), reg(), rec) + '/publish',
-                       {payload: Object.assign({}, j.data.details, fields)}, 'Rotated key for ' + rec))
+                       {payload: Object.assign({}, j.data.details, fields)}, 'Rotated key for ' + rec,
+                       {ifMatch: j.data.digest}))
       .catch(e => fail('out-key', ['could not read the current record: ' + e.message]));
   }
   emit('out-key', rec, fields, 'live', 'Rotate key for ' + rec,
@@ -408,8 +433,13 @@ function genRevoke(){
   const rec = need(errs, 'v-rec', 'record');
   if(errs.length) return fail('out-revoke', errs);
   const reason = $('v-reason').value.trim();
-  if(SIGNER) return apply('out-revoke', 'POST', recordPath(ns(), reg(), rec) + '/revoke',
-                          reason ? {reason} : {}, 'Revoked ' + rec);
+  if(SIGNER){
+    return currentVersion(ns(), reg(), rec)
+      .then(cur => cur
+        ? apply('out-revoke', 'POST', recordPath(ns(), reg(), rec) + '/revoke',
+                reason ? {reason} : {}, 'Revoked ' + rec, {ifMatch: cur})
+        : fail('out-revoke', ['no such record: ' + rec]));
+  }
   const payload = { subscriber_id: $('v-sub').value.trim() || rec, status: 'UNSUBSCRIBED' };
   if(reason) payload.revocation_reason = reason;
   emit('out-revoke', rec, payload, 'revoked', 'Revoke ' + rec,
