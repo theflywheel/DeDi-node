@@ -105,3 +105,38 @@ func TestLookupErrors(t *testing.T) {
 		t.Fatalf("code: %v", m["code"])
 	}
 }
+
+// A revoked record must stop resolving on the direct three-part path, not just
+// on the Beckn wildcard one. ONIX's LookupNode reads neither `state` nor
+// `status` and treats any 200 as a live participant, so anything short of a
+// non-200 leaves a revoked participant routable and its signatures trusted.
+func TestLookupRecordRevokedDoesNotResolve(t *testing.T) {
+	srv, s, _ := testServer(t)
+	_, _, _, rec2 := seedBasic(t, s)
+	ctx := context.Background()
+	revoked, err := s.Append(ctx, store.AppendInput{
+		EntryType: "record", Namespace: "flywheel", Registry: "participants",
+		RecordName: "bap.example.com", PayloadRaw: rec2.PayloadRaw,
+		State: "revoked", CreatedBy: "seed",
+	})
+	if err != nil {
+		t.Fatalf("revoke append: %v", err)
+	}
+
+	base := srv.URL + "/dedi/lookup/flywheel/participants/bap.example.com"
+	getJSON(t, base, http.StatusNotFound)
+
+	// History must stay reachable: the revocation withdraws the live binding,
+	// it does not hide the record.
+	m := getJSON(t, base+"?include_revoked=true", http.StatusOK)
+	if got := m["data"].(map[string]any)["state"]; got != "revoked" {
+		t.Fatalf("include_revoked state = %v, want revoked", got)
+	}
+	m = getJSON(t, base+"?version_id="+strconv.FormatInt(rec2.Seq, 10), http.StatusOK)
+	if got := m["data"].(map[string]any)["state"]; got != "live" {
+		t.Fatalf("pinned read state = %v, want live", got)
+	}
+	if revoked.VersionNum != 3 {
+		t.Fatalf("revoked version_num = %d, want 3", revoked.VersionNum)
+	}
+}

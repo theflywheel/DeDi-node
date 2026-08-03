@@ -86,7 +86,7 @@ func TestAppendPrecondition(t *testing.T) {
 	}
 
 	update := rec
-	update.PayloadRaw, update.ExpectedPrevDigest = []byte(`{"a":2}`), e1.Digest
+	update.PayloadRaw, update.ExpectedPrevDigest, update.ExpectedPrevState = []byte(`{"a":2}`), e1.Digest, e1.State
 	e2 := mustAppend(t, s, update)
 	if e2.VersionNum != 2 {
 		t.Fatalf("version_num = %d, want 2", e2.VersionNum)
@@ -101,9 +101,21 @@ func TestAppendPrecondition(t *testing.T) {
 	// And an update whose expected version never existed is a conflict too.
 	orphan := rec
 	orphan.RecordName, orphan.PayloadRaw = "r2", []byte(`{"a":3}`)
-	orphan.ExpectedPrevDigest = e1.Digest
+	orphan.ExpectedPrevDigest, orphan.ExpectedPrevState = e1.Digest, e1.State
 	if _, err := s.Append(context.Background(), orphan); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("update to absent record: err = %v, want ErrVersionConflict", err)
+	}
+
+	revoke := rec
+	revoke.PayloadRaw, revoke.State = e2.PayloadRaw, "revoked"
+	revoke.ExpectedPrevDigest, revoke.ExpectedPrevState = e2.Digest, e2.State
+	e3 := mustAppend(t, s, revoke)
+
+	replay := rec
+	replay.PayloadRaw = e2.PayloadRaw
+	replay.ExpectedPrevDigest, replay.ExpectedPrevState = e3.Digest, "live"
+	if _, err := s.Append(context.Background(), replay); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("same digest with stale state: err = %v, want ErrVersionConflict", err)
 	}
 }
 

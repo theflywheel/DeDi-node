@@ -207,12 +207,23 @@ function clearKey(){
   $('k-state').innerHTML = '<span class="mut">no key loaded</span>';
 }
 
+// recordLookup builds the read URL for a record.
+//
+// include_revoked is on because this is the operator console: a revoked
+// participant must stay visible here, and reinstating one needs its current
+// digest for the If-Match. The read plane withholds revoked records by default
+// so that a resolver — ONIX's LookupNode in particular — cannot keep routing to
+// a participant that has been taken off the network.
+const recordLookup = (ns, reg, rec) =>
+  '/dedi/lookup/' + p(ns) + '/' + p(reg) + '/' + p(rec) + '?include_revoked=true';
+
 // currentVersion reads what is published at path today, so a write can say
 // which version it is replacing. Returns null when nothing is there yet.
 async function currentVersion(ns, reg, rec){
-  const r = await fetch('/dedi/lookup/' + p(ns) + '/' + p(reg) + '/' + p(rec));
+  const r = await fetch(recordLookup(ns, reg, rec));
   if(!r.ok) return null;
-  return (await r.json()).data.digest;
+  const d = (await r.json()).data;
+  return d.version_tag || (d.digest + '-' + d.state);
 }
 
 // The signed preimage must match publisher.Preimage byte for byte: scheme,
@@ -304,7 +315,7 @@ function reload(){
     // The query endpoint returns names + state; payload detail needs a lookup per record.
     const rows = await Promise.all(recs.map(async r => {
       let d = {};
-      try { d = (await jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(r.record_name))).data; }
+      try { d = (await jget(recordLookup(ns(), reg(), r.record_name))).data; }
       catch(e){ /* record may have been revoked between calls */ }
       return { name: r.record_name, state: r.state || d.state || '?', det: d.details || {}, ver: d.version };
     }));
@@ -340,7 +351,7 @@ function expiry(until){
 function detail(rec){
   const box = $('detail');
   box.innerHTML = '<h3>' + esc(rec) + '</h3><p class="mut">loading...</p>';
-  const base = '/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec);
+  const base = recordLookup(ns(), reg(), rec);
   Promise.all([
     jget(base).catch(() => null),
     jget('/dedi/versions/' + p(ns()) + '/' + p(reg()) + '/' + p(rec)).catch(() => null),
@@ -354,7 +365,7 @@ function detail(rec){
     if(recent.length){
       const rows = await Promise.all(recent.map(async id => {
         try {
-          const d = (await jget(base + '?version_id=' + p(id))).data;
+          const d = (await jget(base + '&version_id=' + p(id))).data;
           return { id, state: d.state || '?', at: (d.created_at || '').slice(0, 19), by: d.created_by || '?' };
         } catch(e){ return { id, state: '?', at: '', by: '' }; }
       }));
@@ -431,10 +442,10 @@ function genRotate(){
   if(SIGNER){
     // An append replaces the whole payload, so rotation has to carry the
     // current one forward rather than publishing the changed fields alone.
-    return jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec))
+    return jget(recordLookup(ns(), reg(), rec))
       .then(j => apply('out-key', 'POST', recordPath(ns(), reg(), rec) + '/publish',
                        {payload: Object.assign({}, j.data.details, fields)}, 'Rotated key for ' + rec,
-                       {ifMatch: j.data.digest}))
+                       {ifMatch: j.data.version_tag || (j.data.digest + '-' + j.data.state)}))
       .catch(e => fail('out-key', ['could not read the current record: ' + e.message]));
   }
   // Same rule without a key loaded. A seed command is runnable as printed, so
@@ -473,7 +484,7 @@ function genRevoke(){
 // withCurrent runs fn against the record's current payload. Every generated
 // write replaces the whole payload, so nothing may be emitted without it.
 function withCurrent(box, rec, fn){
-  return jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec))
+  return jget(recordLookup(ns(), reg(), rec))
     .then(j => fn(j.data.details || {}))
     .catch(e => fail(box, ['could not read the current record: ' + e.message +
                            ' — a new version must carry its payload forward, so nothing was generated']));

@@ -118,7 +118,7 @@ func signCmd(args []string) error {
 	method := fs.String("method", "POST", "HTTP method")
 	path := fs.String("path", "", "request URI, e.g. /admin/namespaces/beckn-testnet (required)")
 	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
-	ifMatch := fs.String("if-match", "", "hex digest of the version being replaced")
+	ifMatch := fs.String("if-match", "", "version tag (<hex digest>-<state>) of the version being replaced")
 	create := fs.Bool("create", false, "the target must not exist yet (If-None-Match: *)")
 	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
 	fs.Parse(args)
@@ -128,7 +128,7 @@ func signCmd(args []string) error {
 	// The precondition is signed, so it has to be decided here rather than
 	// added to the request afterwards — see publisher.Preimage.
 	if (*ifMatch == "") == !*create {
-		return fmt.Errorf("sign: give exactly one of -if-match <digest> or -create")
+		return fmt.Errorf("sign: give exactly one of -if-match <digest>-<state> or -create")
 	}
 	pre := publisher.Precondition{IfMatch: *ifMatch}
 	if *create {

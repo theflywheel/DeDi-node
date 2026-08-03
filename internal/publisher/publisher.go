@@ -99,7 +99,7 @@ func (ks *KeySet) Lookup(kid string) (Key, bool) {
 // write applies. They are part of the signature, not merely of the request:
 // see Preimage.
 type Precondition struct {
-	IfMatch     string // If-Match: <digest> — the version being replaced
+	IfMatch     string // If-Match: <digest>-<state> — the version being replaced
 	IfNoneMatch string // If-None-Match: * — nothing may exist yet
 }
 
