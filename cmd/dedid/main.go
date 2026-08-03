@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -475,7 +477,9 @@ func openCluster(s *store.Store) (*cluster.Node, error) {
 }
 
 func serve() error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	s, err := openStore(ctx)
 	if err != nil {
 		return err
@@ -761,7 +765,11 @@ func serve() error {
 	handler := srv.Handler()
 	// Requests are counted in memory and folded into the store on this cadence,
 	// so the served-request total survives restarts and sums across replicas.
-	go srv.RunCounterFlush(ctx, statsInterval)
+	counterFlushDone := make(chan struct{})
+	go func() {
+		defer close(counterFlushDone)
+		srv.RunCounterFlush(ctx, statsInterval)
+	}()
 
 	// PaaS platforms assign the port at runtime via $PORT; an explicit
 	// DEDI_LISTEN still wins so local and compose setups are unaffected.
@@ -779,7 +787,21 @@ func serve() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return server.ListenAndServe()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+	}()
+	err = server.ListenAndServe()
+	stop()
+	<-counterFlushDone
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 type seedFile struct {
