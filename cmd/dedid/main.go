@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,19 +21,24 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/anchor"
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 	"github.com/theflywheel/DeDi-node/internal/witness"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: dedid <keygen|serve|seed> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: dedid <keygen|pubkeygen|sign|serve|seed> [flags]")
 		os.Exit(2)
 	}
 	var err error
 	switch os.Args[1] {
 	case "keygen":
 		err = keygen(os.Args[2:])
+	case "pubkeygen":
+		err = pubkeygen(os.Args[2:])
+	case "sign":
+		err = signCmd(os.Args[2:])
 	case "serve":
 		err = serve()
 	case "seed":
@@ -64,6 +71,81 @@ func keygen(args []string) error {
 		return err
 	}
 	fmt.Printf("private key written to %s\npublic verifier key (distribute to clients):\n%s\n", *out, vkey)
+	return nil
+}
+
+// pubkeygen mints a publisher credential for the write plane. The private key
+// stays with the operator; the printed entry is what the node is configured
+// with, and it carries no secret.
+func pubkeygen(args []string) error {
+	fs := flag.NewFlagSet("pubkeygen", flag.ExitOnError)
+	out := fs.String("out", "publisher.key", "private key output file")
+	kid := fs.String("kid", "", "key id, recorded on every version this key publishes (required)")
+	ns := fs.String("namespace", "", "namespace this key may write to (required)")
+	fs.Parse(args)
+	if *kid == "" || *ns == "" {
+		return fmt.Errorf("pubkeygen: -kid and -namespace are required")
+	}
+	if strings.ContainsAny(*kid, ":, \t\n") || strings.ContainsAny(*ns, ":, \t\n") {
+		return fmt.Errorf("pubkeygen: -kid and -namespace must not contain ':', ',' or whitespace")
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(*out, []byte(base64.StdEncoding.EncodeToString(priv)+"\n"), 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("private key written to %s (keep it secret)\n\nadd to the node's config:\nDEDI_PUBLISHER_KEYS=%s:%s:%s\n",
+		*out, *kid, *ns, base64.StdEncoding.EncodeToString(pub))
+	return nil
+}
+
+// signCmd prints the headers that authenticate one write request. Operator
+// tooling and curl use this; the node only ever verifies.
+func signCmd(args []string) error {
+	fs := flag.NewFlagSet("sign", flag.ExitOnError)
+	keyFile := fs.String("key", "publisher.key", "publisher private key file")
+	kid := fs.String("kid", "", "key id (required)")
+	method := fs.String("method", "POST", "HTTP method")
+	path := fs.String("path", "", "request path, e.g. /admin/namespaces/beckn-testnet (required)")
+	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
+	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
+	fs.Parse(args)
+	if *kid == "" || *path == "" {
+		return fmt.Errorf("sign: -kid and -path are required")
+	}
+	raw, err := os.ReadFile(*keyFile)
+	if err != nil {
+		return fmt.Errorf("read publisher key: %w", err)
+	}
+	priv, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+	if err != nil || len(priv) != ed25519.PrivateKeySize {
+		return fmt.Errorf("publisher key must be a base64 Ed25519 private key")
+	}
+	var body []byte
+	if *bodyFile != "" {
+		if body, err = os.ReadFile(*bodyFile); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	sig := publisher.Sign(ed25519.PrivateKey(priv), *method, *path, body, now)
+	hdrs := [][2]string{
+		{publisher.HeaderKeyID, *kid},
+		{publisher.HeaderTimestamp, now.Format(time.RFC3339)},
+		{publisher.HeaderSignature, sig},
+	}
+	for _, h := range hdrs {
+		if *curl {
+			fmt.Printf("-H '%s: %s' ", h[0], h[1])
+		} else {
+			fmt.Printf("%s: %s\n", h[0], h[1])
+		}
+	}
+	if *curl {
+		fmt.Println()
+	}
 	return nil
 }
 
