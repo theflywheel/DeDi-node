@@ -73,7 +73,7 @@ func TestPubkeygenAndSignVerifyAgainstKeySet(t *testing.T) {
 		t.Fatalf("node cannot parse the entry the CLI printed (%q): %v", entry, err)
 	}
 
-	const path = "/admin/records/x:publish"
+	const path = "/admin/records/x:publish?expected_version=0&state=live"
 	out := capture(t, func() error {
 		return signCmd([]string{"-key", keyFile, "-kid", "op-1", "-method", "POST", "-path", path, "-body", bodyFile})
 	})

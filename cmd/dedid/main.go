@@ -93,7 +93,15 @@ func pubkeygen(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(*out, []byte(base64.StdEncoding.EncodeToString(priv)+"\n"), 0o600); err != nil {
+	keyFile, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := keyFile.Write([]byte(base64.StdEncoding.EncodeToString(priv) + "\n")); err != nil {
+		keyFile.Close()
+		return err
+	}
+	if err := keyFile.Close(); err != nil {
 		return err
 	}
 	fmt.Printf("private key written to %s (keep it secret)\n\nadd to the node's config:\nDEDI_PUBLISHER_KEYS=%s:%s:%s\n",
@@ -108,7 +116,7 @@ func signCmd(args []string) error {
 	keyFile := fs.String("key", "publisher.key", "publisher private key file")
 	kid := fs.String("kid", "", "key id (required)")
 	method := fs.String("method", "POST", "HTTP method")
-	path := fs.String("path", "", "request path, e.g. /admin/namespaces/beckn-testnet (required)")
+	path := fs.String("path", "", "request URI, e.g. /admin/namespaces/beckn-testnet?expected_version=0 (required)")
 	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
 	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
 	fs.Parse(args)

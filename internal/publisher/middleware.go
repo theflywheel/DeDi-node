@@ -52,8 +52,8 @@ func (a *Authenticator) Require(h http.Handler, deny func(http.ResponseWriter, *
 		}
 		r.Body.Close()
 
-		// The signature covers the path as requested, before any rewriting.
-		key, err := a.Keys.Verify(r.Method, r.URL.EscapedPath(), body,
+		// The signature covers the request URI as requested, before any rewriting.
+		key, err := a.Keys.Verify(r.Method, r.URL.RequestURI(), body,
 			r.Header.Get(HeaderKeyID), r.Header.Get(HeaderTimestamp), r.Header.Get(HeaderSignature),
 			a.now(), a.skew())
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -21,6 +22,8 @@ func mustAppend(t *testing.T, s *Store, in AppendInput) Entry {
 	}
 	return e
 }
+
+func int32Ptr(v int32) *int32 { return &v }
 
 func seedNSReg(t *testing.T, s *Store) {
 	t.Helper()
@@ -61,6 +64,47 @@ func TestAppendRejectsOrphans(t *testing.T) {
 	_, err = s.Append(context.Background(), AppendInput{EntryType: "registry", Namespace: "ns", Registry: "reg", PayloadRaw: []byte(`{}`), CreatedBy: "t"})
 	if err == nil {
 		t.Fatal("registry without namespace accepted")
+	}
+}
+
+func TestAppendExpectedPreviousVersion(t *testing.T) {
+	s := testStore(t)
+	seedNSReg(t, s)
+
+	e1 := mustAppend(t, s, AppendInput{
+		EntryType:           "record",
+		Namespace:           "ns",
+		Registry:            "reg",
+		RecordName:          "r1",
+		PayloadRaw:          []byte(`{"a":1}`),
+		CreatedBy:           "t",
+		ExpectedPrevVersion: int32Ptr(0),
+	})
+	if e1.VersionNum != 1 {
+		t.Fatalf("version_num = %d, want 1", e1.VersionNum)
+	}
+	if _, err := s.Append(context.Background(), AppendInput{
+		EntryType:           "record",
+		Namespace:           "ns",
+		Registry:            "reg",
+		RecordName:          "r1",
+		PayloadRaw:          []byte(`{"a":2}`),
+		CreatedBy:           "t",
+		ExpectedPrevVersion: int32Ptr(0),
+	}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("err = %v, want ErrVersionConflict", err)
+	}
+	e2 := mustAppend(t, s, AppendInput{
+		EntryType:           "record",
+		Namespace:           "ns",
+		Registry:            "reg",
+		RecordName:          "r1",
+		PayloadRaw:          []byte(`{"a":2}`),
+		CreatedBy:           "t",
+		ExpectedPrevVersion: int32Ptr(1),
+	})
+	if e2.VersionNum != 2 {
+		t.Fatalf("version_num = %d, want 2", e2.VersionNum)
 	}
 }
 

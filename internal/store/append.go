@@ -33,13 +33,14 @@ type Entry struct {
 }
 
 type AppendInput struct {
-	EntryType  string // namespace | registry | record
-	Namespace  string
-	Registry   string
-	RecordName string
-	PayloadRaw []byte // JSON; compacted before storing/hashing
-	State      string // default: record→live, namespace/registry→active
-	CreatedBy  string
+	EntryType           string // namespace | registry | record
+	Namespace           string
+	Registry            string
+	RecordName          string
+	PayloadRaw          []byte // JSON; compacted before storing/hashing
+	State               string // default: record→live, namespace/registry→active
+	CreatedBy           string
+	ExpectedPrevVersion *int32
 }
 
 func validateAppend(in *AppendInput) error {
@@ -138,13 +139,18 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(seq)+1, 0) FROM log_entries`).Scan(&seq); err != nil {
 		return Entry{}, err
 	}
-	var vnum int32
+	var currentVersion int32
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version_num)+1, 1) FROM log_entries
+		`SELECT COALESCE(MAX(version_num), 0) FROM log_entries
 		 WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4`,
-		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&vnum); err != nil {
+		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&currentVersion); err != nil {
 		return Entry{}, err
 	}
+	if in.ExpectedPrevVersion != nil && *in.ExpectedPrevVersion != currentVersion {
+		return Entry{}, fmt.Errorf("%w: expected previous version %d, got %d",
+			ErrVersionConflict, *in.ExpectedPrevVersion, currentVersion)
+	}
+	vnum := currentVersion + 1
 
 	// Truncate to Postgres timestamptz precision so the stored value
 	// reproduces the hashed leaf bytes exactly.
