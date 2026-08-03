@@ -347,6 +347,16 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	// Revoking an already-revoked record is a no-op, not a second revocation.
 	if current.State == "revoked" {
+		switch {
+		case in.ExpectedPrevDigest != nil && !bytes.Equal(in.ExpectedPrevDigest, current.Digest):
+			conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+				store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+			return
+		case in.ExpectedPrevDigest != nil && in.ExpectedPrevState != "" && in.ExpectedPrevState != current.State:
+			conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+				store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+			return
+		}
 		writeJSON(w, http.StatusOK, envelope{Message: "Record is already revoked; no new version appended",
 			Data: versionData(current, true)})
 		return

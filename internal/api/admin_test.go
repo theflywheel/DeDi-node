@@ -455,6 +455,25 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRevokeAlreadyRevokedHonoursPrecondition(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	published := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"subscriber_id":"a"}}`)))
+	liveTag := published["data"].(map[string]any)["version_tag"].(string)
+
+	signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`)).Body.Close()
+
+	resp := signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`),
+		publisher.Precondition{IfMatch: liveTag})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("stale revoke of already-revoked record: status %d, want 412", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
+		t.Fatalf("stale revoke appended: %v versions, want 2", n)
+	}
+}
+
 // The decision on expiry: mark, do not filter. An expired participant still
 // resolves — including on the Beckn wildcard path — and carries the marker.
 func TestExpiredRecordStillResolvesWithMarker(t *testing.T) {
