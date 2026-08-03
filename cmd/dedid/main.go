@@ -5,13 +5,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/mod/sumdb/note"
@@ -81,7 +84,9 @@ func openStore(ctx context.Context) (*store.Store, error) {
 }
 
 func serve() error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	s, err := openStore(ctx)
 	if err != nil {
 		return err
@@ -169,7 +174,11 @@ func serve() error {
 	handler := srv.Handler()
 	// Requests are counted in memory and folded into the store on this cadence,
 	// so the served-request total survives restarts and sums across replicas.
-	go srv.RunCounterFlush(ctx, statsInterval)
+	counterFlushDone := make(chan struct{})
+	go func() {
+		defer close(counterFlushDone)
+		srv.RunCounterFlush(ctx, statsInterval)
+	}()
 
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
@@ -178,7 +187,21 @@ func serve() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return server.ListenAndServe()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+	}()
+	err = server.ListenAndServe()
+	stop()
+	<-counterFlushDone
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 type seedFile struct {
