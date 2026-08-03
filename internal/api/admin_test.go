@@ -257,7 +257,7 @@ func TestWritePlaneAbsentWhenNoKeys(t *testing.T) {
 func TestPublishRejectsBadPayloads(t *testing.T) {
 	srv, _, priv := writeServer(t, "ns")
 	const path = "/admin/namespaces/ns/registries/r/records/rec/publish"
-	for _, body := range []string{`{"payload":"a string"}`, `{"payload":[1,2]}`, `{}`, `not json`} {
+	for _, body := range []string{`{"payload":"a string"}`, `{"payload":[1,2]}`, `{"payload":null}`, `{}`, `not json`} {
 		resp := signedDo(t, srv, priv, "POST", path, []byte(body))
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("body %q: status %d, want 400", body, resp.StatusCode)

@@ -85,6 +85,10 @@ func decodePayload(w http.ResponseWriter, r *http.Request) (json.RawMessage, boo
 		badRequest(w, "payload must be a JSON object")
 		return nil, false
 	}
+	if obj == nil {
+		badRequest(w, "payload must be a JSON object")
+		return nil, false
+	}
 	return req.Payload, true
 }
 
