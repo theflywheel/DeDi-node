@@ -389,3 +389,44 @@ func TestRevokeIsIdempotent(t *testing.T) {
 		t.Fatalf("versions = %v, want 2 (publish + one revoke)", n)
 	}
 }
+
+// The decision on expiry: mark, do not filter. An expired participant still
+// resolves — including on the Beckn wildcard path — and carries the marker.
+func TestExpiredRecordStillResolvesWithMarker(t *testing.T) {
+	srv, _, priv := writeServer(t, "beckn-testnet")
+	path := setupRegistry(t, srv, priv, "beckn-testnet", "subscribers.beckn.one", "KEY-OLD")
+	body := []byte(`{"payload":{"subscriber_id":"bpp.old.example","type":"BPP",` +
+		`"valid_from":"2020-01-01T00:00:00Z","valid_until":"2021-01-01T00:00:00Z"}}`)
+	signedDo(t, srv, priv, "POST", path+"/publish", body).Body.Close()
+
+	m := getJSON(t, srv.URL+"/dedi/lookup/bpp.old.example/subscribers.beckn.one/KEY-OLD", http.StatusOK)
+	data := m["data"].(map[string]any)
+	if data["expired"] != true {
+		t.Fatalf("expired = %v, want true", data["expired"])
+	}
+	if data["valid_till"] != "2021-01-01T00:00:00Z" {
+		t.Fatalf("valid_till = %v", data["valid_till"])
+	}
+	if data["not_yet_valid"] != false {
+		t.Fatalf("not_yet_valid = %v, want false", data["not_yet_valid"])
+	}
+	// It is still live and still served — marking, not filtering.
+	if data["state"] != "live" {
+		t.Fatalf("state = %v", data["state"])
+	}
+}
+
+// Records with no declared window must not grow the new fields at all.
+func TestRecordWithoutWindowHasNoMarkers(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"subscriber_id":"a"}}`)).Body.Close()
+
+	data := getJSON(t, srv.URL+"/dedi/lookup/ns/r/KEY-1", http.StatusOK)["data"].(map[string]any)
+	if _, present := data["expired"]; present {
+		t.Fatalf("expired present without a declared window: %v", data["expired"])
+	}
+	if _, present := data["not_yet_valid"]; present {
+		t.Fatalf("not_yet_valid present without a declared window")
+	}
+}
