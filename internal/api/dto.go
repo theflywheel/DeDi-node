@@ -168,9 +168,35 @@ func validityWindow(raw []byte, now time.Time) (validTill *string, expired, notY
 	return validTill, expired, notYet
 }
 
+// effectiveTTL resolves how long a consumer may cache this record.
+//
+// This is the only lever the node has over revocation latency on a Beckn
+// network. The ONIX dediregistry client caches lookups in redis and overrides
+// its own configured cacheTTL with the `ttl` in our response
+// (beckn-onix v1.8.0, dediregistry.go:322) — so a participant revoked here
+// keeps validating signatures at every adapter until that TTL elapses.
+// Restarting an adapter does not help; the cache is shared and external.
+//
+// A record may therefore declare its own `ttl` to trade lookup traffic for
+// revocation speed: set it low on participants where fast revocation matters.
+// Absent or invalid values fall back to the node default (DEDI_TTL).
+func effectiveTTL(raw []byte, def int) int {
+	var p struct {
+		TTL *float64 `json:"ttl"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.TTL == nil {
+		return def
+	}
+	if *p.TTL <= 0 || *p.TTL != float64(int(*p.TTL)) {
+		return def // zero, negative and fractional seconds are meaningless here
+	}
+	return int(*p.TTL)
+}
+
 func recordData(e store.Entry, versions []store.Entry, ttl int) recordDTO {
 	p := parseMeta(e.PayloadRaw)
 	validTill, expired, notYet := validityWindow(e.PayloadRaw, time.Now())
+	ttl = effectiveTTL(e.PayloadRaw, ttl)
 	return recordDTO{
 		RecordID:   e.Namespace + "/" + e.Registry + "/" + e.RecordName,
 		RecordName: e.RecordName,

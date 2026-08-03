@@ -1,9 +1,11 @@
 package api
 
 import (
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -104,9 +106,51 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	s.respondLookup(w, r, "Record retrieved successfully", recordData(e, versions, s.TTL), e)
 }
 
+// setCacheHeaders emits ETag/Cache-Control and answers 304 when the caller
+// already holds the current version (design.md §5.4).
+//
+// A version-pinned read (?version_id= / ?as_on=) can never change, so it is
+// immutable and cacheable for a long time. A latest-version read must stay
+// short-lived: it is how a revocation reaches a consumer.
+//
+// This governs HTTP caches and proxies. It does NOT govern the ONIX
+// dediregistry client, which keeps its own redis cache and honours the `ttl`
+// field in the response body instead — see effectiveTTL.
+//
+// Returns true when it has written a 304 and the caller should stop.
+func (s *Server) setCacheHeaders(w http.ResponseWriter, r *http.Request, e store.Entry) bool {
+	q := r.URL.Query()
+	pinned := q.Get("version_id") != "" || q.Get("as_on") != ""
+
+	// The digest covers the payload; state and the proof mode are not in it but
+	// do change the response, so they are part of the tag.
+	etag := `"` + hex.EncodeToString(e.Digest) + "-" + e.State
+	if q.Get("proof") != "" {
+		etag += "-proof"
+	}
+	etag += `"`
+	w.Header().Set("ETag", etag)
+	if pinned {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(effectiveTTL(e.PayloadRaw, s.TTL)))
+	}
+
+	for _, candidate := range strings.Split(r.Header.Get("If-None-Match"), ",") {
+		if strings.TrimSpace(candidate) == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return true
+		}
+	}
+	return false
+}
+
 // respondLookup emits the plain envelope, or attaches an inclusion proof
 // when the caller passes ?proof=inclusion.
 func (s *Server) respondLookup(w http.ResponseWriter, r *http.Request, msg string, data any, e store.Entry) {
+	if s.setCacheHeaders(w, r, e) {
+		return // client's copy is current; 304 already written
+	}
 	switch r.URL.Query().Get("proof") {
 	case "":
 		ok(w, msg, data)
