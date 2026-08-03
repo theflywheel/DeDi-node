@@ -783,11 +783,11 @@ func serve() error {
 }
 
 type seedFile struct {
-	Namespace  string          `json:"namespace"`
-	Payload    json.RawMessage `json:"payload"`
+	Namespace  string           `json:"namespace"`
+	Payload    *json.RawMessage `json:"payload"`
 	Registries []struct {
-		Name    string          `json:"name"`
-		Payload json.RawMessage `json:"payload"`
+		Name    string           `json:"name"`
+		Payload *json.RawMessage `json:"payload"`
 		Records []struct {
 			Name    string          `json:"name"`
 			Payload json.RawMessage `json:"payload"`
@@ -798,8 +798,9 @@ type seedFile struct {
 	} `json:"registries"`
 }
 
-// seed appends the contents of a seed file. Appends are unconditional: rerunning
-// a seed produces new versions, which is harmless in dev.
+// seed appends the contents of a seed file. Parent namespace/registry payloads
+// are optional; omitting them appends only child records, preserving parent
+// metadata. Present payloads still append new parent versions.
 func seed(args []string) error {
 	fs := flag.NewFlagSet("seed", flag.ExitOnError)
 	file := fs.String("file", "", "seed JSON file")
@@ -837,12 +838,16 @@ func seed(args []string) error {
 		log.Printf("seq=%d %s %s/%s/%s v%d", e.Seq, e.EntryType, e.Namespace, e.Registry, e.RecordName, e.VersionNum)
 		return nil
 	}
-	if err := appendOne(store.AppendInput{EntryType: "namespace", Namespace: sf.Namespace, PayloadRaw: sf.Payload, CreatedBy: *by}); err != nil {
-		return err
+	if sf.Payload != nil {
+		if err := appendOne(store.AppendInput{EntryType: "namespace", Namespace: sf.Namespace, PayloadRaw: *sf.Payload, CreatedBy: *by}); err != nil {
+			return err
+		}
 	}
 	for _, reg := range sf.Registries {
-		if err := appendOne(store.AppendInput{EntryType: "registry", Namespace: sf.Namespace, Registry: reg.Name, PayloadRaw: reg.Payload, CreatedBy: *by}); err != nil {
-			return err
+		if reg.Payload != nil {
+			if err := appendOne(store.AppendInput{EntryType: "registry", Namespace: sf.Namespace, Registry: reg.Name, PayloadRaw: *reg.Payload, CreatedBy: *by}); err != nil {
+				return err
+			}
 		}
 		for _, rec := range reg.Records {
 			if err := appendOne(store.AppendInput{EntryType: "record", Namespace: sf.Namespace, Registry: reg.Name, RecordName: rec.Name, PayloadRaw: rec.Payload, State: rec.State, CreatedBy: *by}); err != nil {
