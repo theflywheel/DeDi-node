@@ -210,7 +210,7 @@ func openStore(ctx context.Context) (*store.Store, error) {
 		"postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable"))
 	s, err := store.Open(ctx, dbURL)
 	if err != nil {
-		return nil, fmt.Errorf("connect %s: %w", dbURL, err)
+		return nil, fmt.Errorf("connect database: %w", err)
 	}
 	if err := s.Migrate(ctx); err != nil {
 		s.Close()
