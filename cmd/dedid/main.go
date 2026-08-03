@@ -149,6 +149,34 @@ func signCmd(args []string) error {
 	return nil
 }
 
+// writePlaneConfig resolves the publisher keys and the Beckn wildcard
+// allowlist together, because the eligibility constraint only binds once
+// writes are possible.
+//
+// A node with no publisher keys is read-only, and an unrestricted wildcard is
+// safe there — that is today's reference deployment, and it keeps working
+// untouched. The moment a key is configured, the allowlist becomes mandatory:
+// without it any publisher could answer for any subscriber_id on the node,
+// which design.md:256 forbids the publisher plane from shipping.
+func writePlaneConfig(keysSpec, wildcardSpec string) (*publisher.KeySet, []string, error) {
+	keys, err := publisher.ParseKeySet(keysSpec)
+	if err != nil {
+		return nil, nil, fmt.Errorf("DEDI_PUBLISHER_KEYS: %w", err)
+	}
+	var wildcard []string
+	for _, ns := range strings.Split(wildcardSpec, ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			wildcard = append(wildcard, ns)
+		}
+	}
+	if keys.Len() > 0 && wildcard == nil {
+		return nil, nil, fmt.Errorf("DEDI_WILDCARD_NAMESPACES must list the namespaces eligible " +
+			"for Beckn wildcard lookup when DEDI_PUBLISHER_KEYS is set: without it any publisher " +
+			"key could answer for any subscriber_id on the node (design.md:256)")
+	}
+	return keys, wildcard, nil
+}
+
 func openStore(ctx context.Context) (*store.Store, error) {
 	dbURL := envOr("DEDI_DB_URL", "postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable")
 	s, err := store.Open(ctx, dbURL)
@@ -239,7 +267,17 @@ func serve() error {
 		log.Printf("anchoring checkpoints to %s every %s", backend, aiv)
 	}
 
-	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY")}
+	keys, wildcard, err := writePlaneConfig(os.Getenv("DEDI_PUBLISHER_KEYS"), os.Getenv("DEDI_WILDCARD_NAMESPACES"))
+	if err != nil {
+		return err
+	}
+	if keys.Len() > 0 {
+		log.Printf("write plane open: %d publisher key(s); wildcard namespaces: %s",
+			keys.Len(), strings.Join(wildcard, ", "))
+	}
+
+	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
+		WildcardNamespaces: wildcard}
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
 	server := &http.Server{

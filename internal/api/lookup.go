@@ -86,7 +86,7 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, vid, asOn)
 	if errors.Is(err, store.ErrNotFound) && reg == becknWildcardRegistry && vid == nil && asOn == nil {
-		e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec)
+		e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec, s.WildcardNamespaces)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		notFound(w, "record")

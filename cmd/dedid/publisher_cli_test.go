@@ -124,3 +124,52 @@ func TestSignRejectsUnusableKeyFile(t *testing.T) {
 		t.Fatal("signCmd accepted a missing key file")
 	}
 }
+
+// The wildcard allowlist is only mandatory once writes are possible: a
+// read-only node must keep booting unrestricted, and opening the write plane
+// without the constraint must fail loudly rather than quietly escalate.
+func TestWritePlaneConfigBindsWildcardToPublisherKeys(t *testing.T) {
+	dir := t.TempDir()
+	gen := capture(t, func() error {
+		return pubkeygen([]string{"-kid", "op-1", "-namespace", "beckn-testnet", "-out", filepath.Join(dir, "k")})
+	})
+	var entry string
+	for _, line := range strings.Split(gen, "\n") {
+		if strings.HasPrefix(line, "DEDI_PUBLISHER_KEYS=") {
+			entry = strings.TrimPrefix(line, "DEDI_PUBLISHER_KEYS=")
+		}
+	}
+
+	// Read-only node: no keys, no allowlist required, wildcard unrestricted.
+	keys, wildcard, err := writePlaneConfig("", "")
+	if err != nil {
+		t.Fatalf("read-only node failed to boot: %v", err)
+	}
+	if keys.Len() != 0 || wildcard != nil {
+		t.Fatalf("keys=%d wildcard=%v, want 0 and nil", keys.Len(), wildcard)
+	}
+
+	// Write plane open with no allowlist: must refuse to start.
+	if _, _, err := writePlaneConfig(entry, ""); err == nil {
+		t.Fatal("node started with publisher keys but no wildcard allowlist")
+	}
+	if _, _, err := writePlaneConfig(entry, "   ,  ,"); err == nil {
+		t.Fatal("a whitespace-only allowlist was accepted as a constraint")
+	}
+
+	// Write plane open with an allowlist: fine, and entries are trimmed.
+	keys, wildcard, err = writePlaneConfig(entry, " beckn-testnet , other-net ")
+	if err != nil {
+		t.Fatalf("valid write-plane config rejected: %v", err)
+	}
+	if keys.Len() != 1 {
+		t.Fatalf("keys = %d", keys.Len())
+	}
+	if len(wildcard) != 2 || wildcard[0] != "beckn-testnet" || wildcard[1] != "other-net" {
+		t.Fatalf("wildcard = %#v", wildcard)
+	}
+
+	if _, _, err := writePlaneConfig("garbage", "ns"); err == nil {
+		t.Fatal("malformed publisher key spec accepted")
+	}
+}

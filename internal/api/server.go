@@ -12,6 +12,11 @@ type Server struct {
 	CP          *checkpoint.Checkpointer
 	TTL         int    // cache hint surfaced in ttl fields (seconds)
 	VerifierKey string // node verifier key, injected into the explorer page (may be empty)
+
+	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
+	// lookup (design.md:256). nil means no restriction — permitted only while
+	// the write plane is closed; see serve().
+	WildcardNamespaces []string
 }
 
 func (s *Server) Handler() http.Handler {
