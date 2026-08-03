@@ -150,7 +150,21 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const jarg = s => String(s).replace(/'/g, "\\'");
+
+// Record names come from the store, which accepts any non-empty string, so
+// they are untrusted input here. They are never interpolated into JavaScript:
+// a name is carried in a data- attribute (HTML-escaped by esc, which covers
+// the quote that would end the attribute) and read back as a plain string by a
+// delegated listener. Building an inline onclick from one would let a crafted
+// name run in the operator's console — the one page holding the publisher key.
+function onAction(root, action, fn){
+  root.addEventListener('click', e => {
+    const el = e.target.closest('[data-action="' + action + '"]');
+    if(el && root.contains(el)) fn(el.dataset.rec);
+  });
+}
+const actionLink = (action, rec, label) =>
+  '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
 const VIEWS = ['list','new','key','revoke'];
 
 // ---- request signing ----
@@ -299,7 +313,7 @@ function reload(){
       rows.map(r => {
         const t = r.det, live = r.state === 'live';
         // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
-        return '<tr><td><a onclick="detail(\'' + jarg(r.name) + '\')">' + esc(t.subscriber_id || '—') + '</a></td>' +
+        return '<tr><td>' + actionLink('detail', r.name, t.subscriber_id || '—') + '</td>' +
           '<td>' + esc(t.type || t.role || '—') + '</td><td>' + esc(t.domain || '—') + '</td>' +
           '<td>' + esc(t.status || '—') + '</td>' +
           '<td class="mut">' + esc(r.name.slice(0, 14)) + (r.name.length > 14 ? '…' : '') + '</td>' +
@@ -352,8 +366,8 @@ function detail(rec){
         (ids.length > recent.length ? ' Showing the ' + recent.length + ' most recent of ' + ids.length + '.' : '') +
         '</p>';
     }
-    out += '<p><a onclick="prefill(\'' + jarg(rec) + '\')">rotate key</a> &middot; ' +
-           '<a onclick="prefillRevoke(\'' + jarg(rec) + '\')">revoke</a></p>';
+    out += '<p>' + actionLink('rotate', rec, 'rotate key') + ' &middot; ' +
+           actionLink('revoke', rec, 'revoke') + '</p>';
     box.innerHTML = out;
   });
 }
@@ -423,9 +437,14 @@ function genRotate(){
                        {ifMatch: j.data.digest}))
       .catch(e => fail('out-key', ['could not read the current record: ' + e.message]));
   }
-  emit('out-key', rec, fields, 'live', 'Rotate key for ' + rec,
-       'Merge these fields into the record’s current payload — an append replaces the whole ' +
-       'payload, so omitted fields would be dropped.');
+  // Same rule without a key loaded. A seed command is runnable as printed, so
+  // emitting only the changed fields would produce a version missing
+  // subscriber_id, type, url and the rest — a participant ONIX can no longer
+  // resolve. Warning the operator in prose is not enough; merge it for them.
+  return withCurrent('out-key', rec, cur =>
+    emit('out-key', rec, Object.assign({}, cur, fields), 'live', 'Rotate key for ' + rec,
+         'The current payload has been merged in — an append replaces the whole payload, ' +
+         'so the changed fields alone would drop the rest.'));
 }
 
 function genRevoke(){
@@ -440,10 +459,24 @@ function genRevoke(){
                 reason ? {reason} : {}, 'Revoked ' + rec, {ifMatch: cur})
         : fail('out-revoke', ['no such record: ' + rec]));
   }
-  const payload = { subscriber_id: $('v-sub').value.trim() || rec, status: 'UNSUBSCRIBED' };
-  if(reason) payload.revocation_reason = reason;
-  emit('out-revoke', rec, payload, 'revoked', 'Revoke ' + rec,
-       'Caching validators may serve the old key until their TTL expires.');
+  // Revocation changes state, not content: the payload has to be carried
+  // forward so the record stays inspectable at the version that revoked it.
+  return withCurrent('out-revoke', rec, cur => {
+    const payload = Object.assign({}, cur, { status: 'UNSUBSCRIBED' });
+    if(!payload.subscriber_id) payload.subscriber_id = $('v-sub').value.trim() || rec;
+    if(reason) payload.revocation_reason = reason;
+    emit('out-revoke', rec, payload, 'revoked', 'Revoke ' + rec,
+         'Caching validators may serve the old key until their TTL expires.');
+  });
+}
+
+// withCurrent runs fn against the record's current payload. Every generated
+// write replaces the whole payload, so nothing may be emitted without it.
+function withCurrent(box, rec, fn){
+  return jget('/dedi/lookup/' + p(ns()) + '/' + p(reg()) + '/' + p(rec))
+    .then(j => fn(j.data.details || {}))
+    .catch(e => fail(box, ['could not read the current record: ' + e.message +
+                           ' — a new version must carry its payload forward, so nothing was generated']));
 }
 
 function fail(box, errs){
@@ -478,6 +511,12 @@ function copy(id, btn){
     setTimeout(() => btn.textContent = 'copy', 1200);
   }, () => btn.textContent = 'copy failed');
 }
+
+// Delegated once, on the containers the rows are rendered into, so re-rendering
+// never has to re-bind and no handler is ever built from a record name.
+onAction($('participants'), 'detail', detail);
+onAction($('detail'), 'rotate', prefill);
+onAction($('detail'), 'revoke', prefillRevoke);
 
 show(location.hash.slice(1) || 'list');
 reload();
