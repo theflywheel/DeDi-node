@@ -85,6 +85,10 @@ func decodePayload(w http.ResponseWriter, r *http.Request) (json.RawMessage, boo
 		badRequest(w, "payload must be a JSON object")
 		return nil, false
 	}
+	if obj == nil {
+		badRequest(w, "payload must be a JSON object")
+		return nil, false
+	}
 	return req.Payload, true
 }
 
@@ -100,25 +104,43 @@ func PayloadDigest(payload []byte) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func versionTag(e store.Entry) string {
+	return hex.EncodeToString(e.Digest) + "-" + e.State
+}
+
+func parseVersionTag(tag string) ([]byte, string, error) {
+	digestHex, state, ok := strings.Cut(tag, "-")
+	if !ok || state == "" {
+		return nil, "", fmt.Errorf("missing state")
+	}
+	digest, err := hex.DecodeString(digestHex)
+	if err != nil || len(digest) != sha256.Size {
+		return nil, "", fmt.Errorf("bad digest")
+	}
+	return digest, state, nil
+}
+
 // preconditionOf reads the mandatory conditional-request header and turns it
 // into a store precondition.
 //
-// Every write must state what it expects to be replacing: `If-Match: <digest>`
-// to replace a known version, or `If-None-Match: *` to create one that must not
-// exist yet. Both are covered by the signature (publisher.Preimage) and both
-// are enforced inside the append transaction (store.checkPrecondition).
+// Every write must state what it expects to be replacing:
+// `If-Match: <digest>-<state>` to replace a known version, or
+// `If-None-Match: *` to create one that must not exist yet. Both are covered by
+// the signature (publisher.Preimage) and both are enforced inside the append
+// transaction (store.checkPrecondition).
 //
 // Making this mandatory rather than optional is what closes replay. A captured
 // signed write cannot be stripped of its precondition, so replaying it can only
-// ever land on the exact version it was written against — by which time that
-// version has moved on, and the replay is a 412 instead of a silent revert to
-// an older payload. The same rule gives lost-update protection for free: two
-// operators editing one participant cannot overwrite each other unseen.
+// ever land on the exact payload and state it was written against — by which
+// time that version has moved on, and the replay is a 412 instead of a silent
+// revert to an older payload or state. The same rule gives lost-update
+// protection for free: two operators editing one participant cannot overwrite
+// each other unseen.
 //
 // Returns false when it has already answered the request.
 func preconditionOf(w http.ResponseWriter, r *http.Request) (store.AppendInput, bool) {
 	var in store.AppendInput
-	ifMatch := strings.Trim(r.Header.Get("If-Match"), `"`)
+	ifMatch := strings.Trim(strings.TrimSpace(r.Header.Get("If-Match")), `"`)
 	ifNone := strings.TrimSpace(r.Header.Get("If-None-Match"))
 
 	switch {
@@ -134,15 +156,16 @@ func preconditionOf(w http.ResponseWriter, r *http.Request) (store.AppendInput, 
 	case ifMatch != "":
 		// `*` would mean "any current version", which is precisely the
 		// unconditional write this header exists to prevent here.
-		digest, err := hex.DecodeString(ifMatch)
-		if err != nil || len(digest) != sha256.Size {
-			badRequest(w, "If-Match must be the hex digest of the version being replaced, or use If-None-Match: * to create")
+		digest, state, err := parseVersionTag(ifMatch)
+		if err != nil {
+			badRequest(w, "If-Match must be <hex digest>-<state> for the version being replaced, or use If-None-Match: * to create")
 			return in, false
 		}
 		in.ExpectedPrevDigest = digest
+		in.ExpectedPrevState = state
 	default:
 		writeErr(w, http.StatusPreconditionRequired, "PRECONDITION_REQUIRED",
-			"writes must carry If-Match: <digest> or If-None-Match: *")
+			"writes must carry If-Match: <digest>-<state> or If-None-Match: *")
 		return in, false
 	}
 	return in, true
@@ -159,10 +182,24 @@ func conflict(w http.ResponseWriter, err error) {
 // a courtesy, not a safety property — replay is closed by preconditionOf.
 //
 // Returns true when it has already answered the request.
-func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, ns, reg, rec, state string, payload []byte) bool {
+func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, in store.AppendInput, ns, reg, rec, state string, payload []byte) bool {
 	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
 	if err != nil {
 		return false // absent, or a real error the append will surface
+	}
+	switch {
+	case in.ExpectedAbsent:
+		conflict(w, fmt.Errorf("%w: expected no existing version, found %s",
+			store.ErrVersionConflict, versionTag(current)))
+		return true
+	case in.ExpectedPrevDigest != nil && !bytes.Equal(in.ExpectedPrevDigest, current.Digest):
+		conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+			store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+		return true
+	case in.ExpectedPrevDigest != nil && in.ExpectedPrevState != "" && in.ExpectedPrevState != current.State:
+		conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+			store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+		return true
 	}
 	newDigest, err := PayloadDigest(payload)
 	if err != nil {
@@ -187,6 +224,7 @@ func versionData(e store.Entry, unchanged bool) map[string]any {
 		"version_num": e.VersionNum,
 		"state":       e.State,
 		"digest":      hex.EncodeToString(e.Digest),
+		"version_tag": versionTag(e),
 		"created_by":  e.CreatedBy,
 		"created_at":  e.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00"),
 		"unchanged":   unchanged,
@@ -264,7 +302,7 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.unchanged(w, r, ns, reg, rec, "live", payload) {
+	if s.unchanged(w, r, in, ns, reg, rec, "live", payload) {
 		return
 	}
 	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
