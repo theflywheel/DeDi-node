@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
@@ -12,6 +13,9 @@ type Server struct {
 	CP          *checkpoint.Checkpointer
 	TTL         int    // cache hint surfaced in ttl fields (seconds)
 	VerifierKey string // node verifier key, injected into the explorer page (may be empty)
+
+	// PublisherKeys opens the authenticated write plane when non-empty.
+	PublisherKeys *publisher.KeySet
 
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
 	// lookup (design.md:256). nil means no restriction — permitted only while
@@ -34,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
+	s.mountAdmin(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})
