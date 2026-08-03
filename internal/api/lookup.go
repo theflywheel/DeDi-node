@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
@@ -124,7 +123,7 @@ func (s *Server) setCacheHeaders(w http.ResponseWriter, r *http.Request, e store
 
 	// The digest covers the payload; state and the proof mode are not in it but
 	// do change the response, so they are part of the tag.
-	etag := `"` + hex.EncodeToString(e.Digest) + "-" + e.State
+	etag := `"` + versionTag(e)
 	if q.Get("proof") != "" {
 		etag += "-proof"
 	}

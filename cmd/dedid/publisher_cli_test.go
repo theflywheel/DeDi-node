@@ -74,10 +74,10 @@ func TestPubkeygenAndSignVerifyAgainstKeySet(t *testing.T) {
 	}
 
 	const path = "/admin/records/x/publish?state=live"
-	const digest = "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
+	const tag = "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c-live"
 	out := capture(t, func() error {
 		return signCmd([]string{"-key", keyFile, "-kid", "op-1", "-method", "POST",
-			"-path", path, "-body", bodyFile, "-if-match", digest})
+			"-path", path, "-body", bodyFile, "-if-match", tag})
 	})
 	kid := header(t, out, publisher.HeaderKeyID)
 	ts := header(t, out, publisher.HeaderTimestamp)
@@ -85,10 +85,10 @@ func TestPubkeygenAndSignVerifyAgainstKeySet(t *testing.T) {
 
 	// The CLI must emit the precondition it signed; a caller who forwards only
 	// the signature headers would otherwise send an unverifiable request.
-	if got := header(t, out, "If-Match"); got != digest {
-		t.Fatalf("If-Match header = %q, want %q", got, digest)
+	if got := header(t, out, "If-Match"); got != tag {
+		t.Fatalf("If-Match header = %q, want %q", got, tag)
 	}
-	pre := publisher.Precondition{IfMatch: digest}
+	pre := publisher.Precondition{IfMatch: tag}
 
 	key, err := ks.Verify("POST", path, body, pre, kid, ts, sig, time.Now(), publisher.DefaultMaxSkew)
 	if err != nil {

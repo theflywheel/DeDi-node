@@ -74,12 +74,13 @@ func currentPrecondition(t *testing.T, srv *httptest.Server, adminPath string) p
 	var env struct {
 		Data struct {
 			Digest string `json:"digest"`
+			State  string `json:"state"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatal(err)
 	}
-	return publisher.Precondition{IfMatch: env.Data.Digest}
+	return publisher.Precondition{IfMatch: env.Data.Digest + "-" + env.Data.State}
 }
 
 // signedDo issues a request signed by priv, or unsigned when priv is nil.
@@ -376,21 +377,21 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 	srv, _, priv := writeServer(t, "ns")
 	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
 	first := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"v":1}}`)))
-	digest := first["data"].(map[string]any)["digest"].(string)
+	tag := first["data"].(map[string]any)["version_tag"].(string)
 
-	// Stale digest: refused.
+	// Stale version tag: refused.
 	req := func(ifMatch string, body string) *http.Response {
 		return signedDo(t, srv, priv, "POST", path+"/publish", []byte(body),
 			publisher.Precondition{IfMatch: ifMatch})
 	}
-	if resp := req("0000000000000000000000000000000000000000000000000000000000000000", `{"payload":{"v":2}}`); resp.StatusCode != http.StatusPreconditionFailed {
+	if resp := req("0000000000000000000000000000000000000000000000000000000000000000-live", `{"payload":{"v":2}}`); resp.StatusCode != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match: status %d, want 412", resp.StatusCode)
 	}
 	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 1 {
 		t.Fatalf("refused write still appended: %v versions", n)
 	}
-	// Current digest: accepted.
-	if resp := req(digest, `{"payload":{"v":2}}`); resp.StatusCode != http.StatusOK {
+	// Current version tag: accepted.
+	if resp := req(tag, `{"payload":{"v":2}}`); resp.StatusCode != http.StatusOK {
 		t.Fatalf("current If-Match: status %d, want 200", resp.StatusCode)
 	}
 	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
@@ -399,7 +400,7 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 	// If-Match on a record that does not exist yet cannot be satisfied.
 	other := "/admin/namespaces/ns/registries/r/records/KEY-NEW/publish"
 	resp := signedDo(t, srv, priv, "POST", other, []byte(`{"payload":{}}`),
-		publisher.Precondition{IfMatch: digest})
+		publisher.Precondition{IfMatch: tag})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Fatalf("If-Match on a new record: status %d, want 412", resp.StatusCode)
@@ -477,7 +478,7 @@ func TestCapturedWriteCannotBeReplayed(t *testing.T) {
 	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1") + "/publish"
 
 	created := bodyOf(t, signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"v":1}}`)))
-	v1 := created["data"].(map[string]any)["digest"].(string)
+	v1 := created["data"].(map[string]any)["version_tag"].(string)
 
 	// Capture a legitimate v1 -> v2 write, replaying the exact bytes and headers.
 	body := []byte(`{"payload":{"v":2}}`)
@@ -535,5 +536,50 @@ func TestCapturedWriteCannotBeReplayed(t *testing.T) {
 	defer stripped.Body.Close()
 	if stripped.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("precondition stripped: status %d, want 401", stripped.StatusCode)
+	}
+}
+
+func TestCapturedPublishCannotUndoReasonlessRevoke(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	base := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	publishPath := base + "/publish"
+
+	created := bodyOf(t, signedDo(t, srv, priv, "POST", publishPath, []byte(`{"payload":{"v":1}}`)))
+	v1 := created["data"].(map[string]any)["version_tag"].(string)
+
+	// Capture a same-payload publish against the live record. A reasonless
+	// revoke keeps the payload digest unchanged, so digest-only preconditions
+	// used to let this replay append a new live version.
+	body := []byte(`{"payload":{"v":1}}`)
+	pre := publisher.Precondition{IfMatch: v1}
+	now := time.Now().UTC()
+	sig := publisher.Sign(priv, "POST", publishPath, body, pre, now)
+	replay := func() *http.Response {
+		r, _ := http.NewRequest("POST", srv.URL+publishPath, bytes.NewReader(body))
+		r.Header.Set(publisher.HeaderKeyID, "op-1")
+		r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+		r.Header.Set(publisher.HeaderSignature, sig)
+		r.Header.Set("If-Match", pre.IfMatch)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	resp := replay()
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("original write: status %d, want 200", resp.StatusCode)
+	}
+	signedDo(t, srv, priv, "POST", base+"/revoke", []byte(`{}`)).Body.Close()
+
+	resp = replay()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("replayed publish after revoke: status %d, want 412", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
+		t.Fatalf("replay appended: %v versions, want 2", n)
 	}
 }

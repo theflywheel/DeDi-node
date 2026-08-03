@@ -49,23 +49,27 @@ type AppendInput struct {
 	//
 	// At most one may be set.
 	ExpectedPrevDigest []byte // the latest version's digest must equal this
+	ExpectedPrevState  string // when set, the latest version's state must equal this too
 	ExpectedAbsent     bool   // no version may exist yet
 }
 
 // checkPrecondition compares the caller's expectation against the resource as
 // it stands inside the transaction. currentDigest is nil when nothing has been
 // published under this name yet.
-func checkPrecondition(in AppendInput, currentDigest []byte) error {
+func checkPrecondition(in AppendInput, currentDigest []byte, currentState string) error {
 	switch {
 	case in.ExpectedAbsent && currentDigest != nil:
-		return fmt.Errorf("%w: expected no existing version, found digest %x",
-			ErrVersionConflict, currentDigest)
+		return fmt.Errorf("%w: expected no existing version, found %x-%s",
+			ErrVersionConflict, currentDigest, currentState)
 	case in.ExpectedPrevDigest != nil && currentDigest == nil:
-		return fmt.Errorf("%w: expected version with digest %x, found none",
-			ErrVersionConflict, in.ExpectedPrevDigest)
+		return fmt.Errorf("%w: expected version %x-%s, found none",
+			ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState)
 	case in.ExpectedPrevDigest != nil && !bytes.Equal(in.ExpectedPrevDigest, currentDigest):
-		return fmt.Errorf("%w: expected version with digest %x, found %x",
-			ErrVersionConflict, in.ExpectedPrevDigest, currentDigest)
+		return fmt.Errorf("%w: expected version %x-%s, found %x-%s",
+			ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, currentDigest, currentState)
+	case in.ExpectedPrevDigest != nil && in.ExpectedPrevState != "" && in.ExpectedPrevState != currentState:
+		return fmt.Errorf("%w: expected version %x-%s, found %x-%s",
+			ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, currentDigest, currentState)
 	}
 	return nil
 }
@@ -168,17 +172,21 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 	}
 	var currentVersion int32
 	var currentDigest []byte
+	var currentState string
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(MAX(version_num), 0),
 		        (SELECT digest FROM log_entries
 		          WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4
-		          ORDER BY version_num DESC LIMIT 1)
+		          ORDER BY version_num DESC LIMIT 1),
+		        COALESCE((SELECT state FROM log_entries
+		          WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4
+		          ORDER BY version_num DESC LIMIT 1), '')
 		   FROM log_entries
 		  WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4`,
-		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&currentVersion, &currentDigest); err != nil {
+		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&currentVersion, &currentDigest, &currentState); err != nil {
 		return Entry{}, err
 	}
-	if err := checkPrecondition(in, currentDigest); err != nil {
+	if err := checkPrecondition(in, currentDigest, currentState); err != nil {
 		return Entry{}, err
 	}
 	vnum := currentVersion + 1

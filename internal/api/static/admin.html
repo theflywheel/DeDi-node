@@ -212,7 +212,8 @@ function clearKey(){
 async function currentVersion(ns, reg, rec){
   const r = await fetch('/dedi/lookup/' + p(ns) + '/' + p(reg) + '/' + p(rec));
   if(!r.ok) return null;
-  return (await r.json()).data.digest;
+  const d = (await r.json()).data;
+  return d.version_tag || (d.digest + '-' + d.state);
 }
 
 // The signed preimage must match publisher.Preimage byte for byte: scheme,
