@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
+
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // Registries may declare a `schema` in their payload; record payloads written
 // to that registry are validated against it. Without this a console or a
@@ -119,22 +125,34 @@ func ValidateAgainstSchema(schema map[string]any, payloadRaw []byte) error {
 	return nil
 }
 
-// registrySchema returns the schema declared by the registry a record belongs
-// to. A registry that does not exist yet, or declares none, yields nil — which
-// accepts everything, preserving the behaviour of nodes seeded before schemas.
-func (s *Store) registrySchema(ctx context.Context, ns, reg string) (map[string]any, error) {
-	e, err := s.Resolve(ctx, "registry", ns, reg, "", nil, nil)
+// registrySchemaFrom returns the schema declared by the registry a record
+// belongs to. A registry that does not exist yet, or declares none, yields nil
+// which accepts everything, preserving the behaviour of nodes seeded before
+// schemas.
+func registrySchemaFrom(ctx context.Context, q queryRower, ns, reg string) (map[string]any, error) {
+	var raw []byte
+	err := q.QueryRow(ctx,
+		`SELECT payload_raw FROM log_entries
+		  WHERE entry_type='registry' AND namespace=$1 AND registry=$2
+		  ORDER BY version_num DESC LIMIT 1`,
+		ns, reg).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var p struct {
 		Schema map[string]any `json:"schema"`
 	}
-	if err := json.Unmarshal(e.PayloadRaw, &p); err != nil {
+	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, nil // an unreadable registry payload declares no schema
 	}
 	return p.Schema, nil
+}
+
+// registrySchema returns the schema declared by the registry a record belongs
+// to, outside a caller-managed transaction.
+func (s *Store) registrySchema(ctx context.Context, ns, reg string) (map[string]any, error) {
+	return registrySchemaFrom(ctx, s.pool, ns, reg)
 }
