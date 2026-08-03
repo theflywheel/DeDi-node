@@ -109,3 +109,45 @@ func TestFindBecknSubscriberEmptyAllowlistResolvesNothing(t *testing.T) {
 		t.Fatalf("empty allowlist resolved a record: %v", err)
 	}
 }
+
+// Subscriber status gates Beckn resolution: only SUBSCRIBED participants can
+// answer, but records predating the field must keep working.
+func TestFindBecknSubscriberHonoursStatus(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	mustAppend(t, s, AppendInput{EntryType: "namespace", Namespace: "ns", PayloadRaw: []byte(`{}`), CreatedBy: "t"})
+	mustAppend(t, s, AppendInput{EntryType: "registry", Namespace: "ns", Registry: "subscribers.beckn.one", PayloadRaw: []byte(`{}`), CreatedBy: "t"})
+
+	add := func(rec, sub, status string) {
+		payload := `{"subscriber_id":"` + sub + `"`
+		if status != "" {
+			payload += `,"status":"` + status + `"`
+		}
+		payload += `}`
+		mustAppend(t, s, AppendInput{EntryType: "record", Namespace: "ns", Registry: "subscribers.beckn.one",
+			RecordName: rec, PayloadRaw: []byte(payload), CreatedBy: "t"})
+	}
+	add("k-sub", "a.example.com", "SUBSCRIBED")
+	add("k-none", "b.example.com", "")
+	add("k-init", "c.example.com", "INITIATED")
+	add("k-unsub", "d.example.com", "UNSUBSCRIBED")
+	add("k-ssl", "e.example.com", "INVALID_SSL")
+
+	for _, rec := range []struct{ name, sub string }{{"k-sub", "a.example.com"}, {"k-none", "b.example.com"}} {
+		if _, err := s.FindBecknSubscriber(ctx, rec.sub, rec.name, nil); err != nil {
+			t.Fatalf("%s should resolve: %v", rec.name, err)
+		}
+	}
+	for _, rec := range []struct{ name, sub string }{
+		{"k-init", "c.example.com"}, {"k-unsub", "d.example.com"}, {"k-ssl", "e.example.com"},
+	} {
+		if _, err := s.FindBecknSubscriber(ctx, rec.sub, rec.name, nil); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s resolved despite its status: %v", rec.name, err)
+		}
+	}
+
+	// The generic DeDi path is unaffected — it stays spec-conformant.
+	if _, err := s.Resolve(ctx, "record", "ns", "subscribers.beckn.one", "k-unsub", nil, nil); err != nil {
+		t.Fatalf("generic lookup should still return an unsubscribed record: %v", err)
+	}
+}

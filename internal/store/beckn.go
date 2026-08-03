@@ -14,6 +14,14 @@ import (
 // recency. Only live records are visible to Beckn lookups — a revoked
 // latest version hides the participant.
 //
+// A participant's subscriber status also gates resolution: only SUBSCRIBED
+// participants answer, so INITIATED / UNDER_SUBSCRIPTION / INVALID_SSL /
+// UNSUBSCRIBED are not usable for signature validation. Records that declare
+// no status at all still resolve — many seeds predate the field, and silently
+// dropping them would take working participants off the network. The gate is
+// only on this Beckn path; generic DeDi lookups stay spec-conformant and
+// return the record regardless.
+//
 // eligible restricts which namespaces may answer a wildcard lookup — the
 // constraint design.md:256 makes binding on the publisher plane. Because the
 // wildcard searches every namespace for a record of the given name, without it
@@ -36,6 +44,7 @@ WITH latest AS (
 SELECT ` + entryCols + ` FROM latest
 WHERE state='live' AND (namespace=$1 OR payload->>'subscriber_id'=$1)
   AND ($3::text[] IS NULL OR namespace = ANY($3::text[]))
+  AND (payload->>'status' IS NULL OR payload->>'status' = 'SUBSCRIBED')
 ORDER BY (namespace=$1) DESC, created_at DESC, seq DESC
 LIMIT 1`
 	if eligible != nil && len(eligible) == 0 {
