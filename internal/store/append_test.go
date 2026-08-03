@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -61,6 +62,48 @@ func TestAppendRejectsOrphans(t *testing.T) {
 	_, err = s.Append(context.Background(), AppendInput{EntryType: "registry", Namespace: "ns", Registry: "reg", PayloadRaw: []byte(`{}`), CreatedBy: "t"})
 	if err == nil {
 		t.Fatal("registry without namespace accepted")
+	}
+}
+
+// The precondition must be evaluated inside the append transaction, because it
+// is what makes a captured signed write unreplayable: a replay carries the
+// digest of a version that has since been superseded.
+func TestAppendPrecondition(t *testing.T) {
+	s := testStore(t)
+	seedNSReg(t, s)
+	rec := AppendInput{EntryType: "record", Namespace: "ns", Registry: "reg", RecordName: "r1", CreatedBy: "t"}
+
+	create := rec
+	create.PayloadRaw, create.ExpectedAbsent = []byte(`{"a":1}`), true
+	e1 := mustAppend(t, s, create)
+	if e1.VersionNum != 1 {
+		t.Fatalf("version_num = %d, want 1", e1.VersionNum)
+	}
+
+	// Creating again must fail: something is already there.
+	if _, err := s.Append(context.Background(), create); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("second create: err = %v, want ErrVersionConflict", err)
+	}
+
+	update := rec
+	update.PayloadRaw, update.ExpectedPrevDigest = []byte(`{"a":2}`), e1.Digest
+	e2 := mustAppend(t, s, update)
+	if e2.VersionNum != 2 {
+		t.Fatalf("version_num = %d, want 2", e2.VersionNum)
+	}
+
+	// Replaying the update now that v2 is current must be refused, not applied
+	// on top — otherwise a replay silently reverts the record to {"a":1}.
+	if _, err := s.Append(context.Background(), update); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("replayed update: err = %v, want ErrVersionConflict", err)
+	}
+
+	// And an update whose expected version never existed is a conflict too.
+	orphan := rec
+	orphan.RecordName, orphan.PayloadRaw = "r2", []byte(`{"a":3}`)
+	orphan.ExpectedPrevDigest = e1.Digest
+	if _, err := s.Append(context.Background(), orphan); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("update to absent record: err = %v, want ErrVersionConflict", err)
 	}
 }
 

@@ -93,7 +93,15 @@ func pubkeygen(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(*out, []byte(base64.StdEncoding.EncodeToString(priv)+"\n"), 0o600); err != nil {
+	keyFile, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := keyFile.Write([]byte(base64.StdEncoding.EncodeToString(priv) + "\n")); err != nil {
+		keyFile.Close()
+		return err
+	}
+	if err := keyFile.Close(); err != nil {
 		return err
 	}
 	fmt.Printf("private key written to %s (keep it secret)\n\nadd to the node's config:\nDEDI_PUBLISHER_KEYS=%s:%s:%s\n",
@@ -108,12 +116,23 @@ func signCmd(args []string) error {
 	keyFile := fs.String("key", "publisher.key", "publisher private key file")
 	kid := fs.String("kid", "", "key id (required)")
 	method := fs.String("method", "POST", "HTTP method")
-	path := fs.String("path", "", "request path, e.g. /admin/namespaces/beckn-testnet (required)")
+	path := fs.String("path", "", "request URI, e.g. /admin/namespaces/beckn-testnet (required)")
 	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
+	ifMatch := fs.String("if-match", "", "hex digest of the version being replaced")
+	create := fs.Bool("create", false, "the target must not exist yet (If-None-Match: *)")
 	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
 	fs.Parse(args)
 	if *kid == "" || *path == "" {
 		return fmt.Errorf("sign: -kid and -path are required")
+	}
+	// The precondition is signed, so it has to be decided here rather than
+	// added to the request afterwards — see publisher.Preimage.
+	if (*ifMatch == "") == !*create {
+		return fmt.Errorf("sign: give exactly one of -if-match <digest> or -create")
+	}
+	pre := publisher.Precondition{IfMatch: *ifMatch}
+	if *create {
+		pre.IfNoneMatch = "*"
 	}
 	raw, err := os.ReadFile(*keyFile)
 	if err != nil {
@@ -130,11 +149,17 @@ func signCmd(args []string) error {
 		}
 	}
 	now := time.Now().UTC()
-	sig := publisher.Sign(ed25519.PrivateKey(priv), *method, *path, body, now)
+	sig := publisher.Sign(ed25519.PrivateKey(priv), *method, *path, body, pre, now)
 	hdrs := [][2]string{
 		{publisher.HeaderKeyID, *kid},
 		{publisher.HeaderTimestamp, now.Format(time.RFC3339)},
 		{publisher.HeaderSignature, sig},
+	}
+	if pre.IfMatch != "" {
+		hdrs = append(hdrs, [2]string{"If-Match", pre.IfMatch})
+	}
+	if pre.IfNoneMatch != "" {
+		hdrs = append(hdrs, [2]string{"If-None-Match", pre.IfNoneMatch})
 	}
 	for _, h := range hdrs {
 		if *curl {
