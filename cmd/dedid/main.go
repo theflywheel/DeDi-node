@@ -275,17 +275,29 @@ func serve() error {
 		log.Printf("write plane open: %d publisher key(s); wildcard namespaces: %s",
 			keys.Len(), strings.Join(wildcard, ", "))
 	}
+	statsInterval, err := time.ParseDuration(envOr("DEDI_STATS_FLUSH_INTERVAL", "10s"))
+	if err != nil {
+		return fmt.Errorf("DEDI_STATS_FLUSH_INTERVAL: %w", err)
+	}
+	if statsInterval <= 0 {
+		return fmt.Errorf("DEDI_STATS_FLUSH_INTERVAL must be positive")
+	}
 
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
 		WildcardNamespaces: wildcard}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
 	}
+	handler := srv.Handler()
+	// Requests are counted in memory and folded into the store on this cadence,
+	// so the served-request total survives restarts and sums across replicas.
+	go srv.RunCounterFlush(ctx, statsInterval)
+
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           srv.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return server.ListenAndServe()

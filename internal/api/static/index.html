@@ -23,6 +23,7 @@
 <nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="https://schemes.proto.theflywheel.in/">Demo</a></nav>
 <h1>DeDi Node Explorer</h1>
 <p id="node" class="mut">loading...</p>
+<p id="stats" class="mut">requests served: <span id="served">...</span></p>
 <p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
 checkpoint signature are checked in your browser; the server is trusted for neither.</p>
 
@@ -123,6 +124,25 @@ async function loadCheckpoint(){
     'checkpoint: tree size '+cb.size+', root '+cb.rootB64.slice(0,20)+'... ('+sig+')';
 }
 
+// Served-request counter. Polls /dedi/stats, which is itself excluded from the
+// count server-side so this poll does not inflate the number it displays.
+async function loadStats(){
+  const j = await jget('/dedi/stats');
+  const d = j.data, by = d.by_status_class || {};
+  let out = Number(d.requests_served).toLocaleString();
+  const errs = (by['4xx']||0) + (by['5xx']||0);
+  if(errs) out += ' <span class="mut">('+errs.toLocaleString()+' errors)</span>';
+  if(d.uptime_seconds != null) out += ' <span class="mut">&middot; up '+fmtDur(d.uptime_seconds)+'</span>';
+  $('served').innerHTML = out;
+}
+function fmtDur(s){
+  s = Math.floor(s);
+  if(s < 60) return s+'s';
+  if(s < 3600) return Math.floor(s/60)+'m';
+  if(s < 86400) return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function jarg(s){ return String(s).replace(/'/g,"\\'"); }
 
@@ -192,6 +212,9 @@ function li(ok, okMsg, noMsg){
 }
 
 loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint error: '+esc(e.message)+'</span>');
+const statsFail = () => $('served').innerHTML = '<span class="mut">unavailable</span>';
+loadStats().catch(statsFail);
+setInterval(() => loadStats().catch(statsFail), 5000);
 browse();
 </script>
 </body>

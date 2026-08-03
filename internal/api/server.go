@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
@@ -22,9 +23,13 @@ type Server struct {
 	// Auth verifies signed writes. nil, or holding no keys, leaves the write
 	// plane closed and its routes unregistered.
 	Auth *publisher.Authenticator
+
+	reqs      counters  // requests served since the last flush (see counter.go)
+	startedAt time.Time // set by Handler
 }
 
 func (s *Server) Handler() http.Handler {
+	s.startedAt = time.Now()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /dedi/lookup/{namespace}", s.lookupNamespace)
 	mux.HandleFunc("GET /dedi/lookup/{namespace}/{registry_name}", s.lookupRegistry)
@@ -36,9 +41,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/versions/{namespace}/{registry_name}/{record_name}", s.versionsRecord)
 	mux.HandleFunc("GET /dedi/log/checkpoint", s.logCheckpoint)
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
+	mux.HandleFunc("GET /dedi/stats", s.stats)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
+	mux.HandleFunc("GET /admin", s.admin)
+	mux.HandleFunc("GET /admin/{$}", s.admin)
+
 	// Publisher plane. Registered only when the node holds publisher keys, so a
 	// read-only node has no write surface to probe at all (governance.md:
 	// "enforcement today is structural").
@@ -55,5 +64,5 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})
-	return mux
+	return s.counted(mux)
 }
