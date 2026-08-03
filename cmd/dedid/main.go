@@ -178,7 +178,11 @@ func writePlaneConfig(keysSpec, wildcardSpec string) (*publisher.KeySet, []strin
 }
 
 func openStore(ctx context.Context) (*store.Store, error) {
-	dbURL := envOr("DEDI_DB_URL", "postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable")
+	// DATABASE_URL is what managed Postgres add-ons inject; DEDI_DB_URL still
+	// wins when both are present, so pointing the node at a different database
+	// than the platform's default needs no unsetting.
+	dbURL := envOr("DEDI_DB_URL", envOr("DATABASE_URL",
+		"postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable"))
 	s, err := store.Open(ctx, dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", dbURL, err)
@@ -198,10 +202,18 @@ func serve() error {
 	}
 	defer s.Close()
 
-	keyFile := envOr("DEDI_KEY_FILE", "dedid.key")
-	skeyBytes, err := os.ReadFile(keyFile)
-	if err != nil {
-		return fmt.Errorf("read node key (run 'dedid keygen' first): %w", err)
+	// The node signing key comes from DEDI_KEY when set, else from a file.
+	// Container platforms inject secrets as environment variables and have no
+	// persistent filesystem by default, so requiring a file makes the node
+	// undeployable there.
+	skey := strings.TrimSpace(os.Getenv("DEDI_KEY"))
+	if skey == "" {
+		keyFile := envOr("DEDI_KEY_FILE", "dedid.key")
+		skeyBytes, err := os.ReadFile(keyFile)
+		if err != nil {
+			return fmt.Errorf("read node key: set DEDI_KEY, or run 'dedid keygen': %w", err)
+		}
+		skey = strings.TrimSpace(string(skeyBytes))
 	}
 	interval, err := time.ParseDuration(envOr("DEDI_CHECKPOINT_INTERVAL", "30s"))
 	if err != nil {
@@ -217,7 +229,7 @@ func serve() error {
 
 	cp := &checkpoint.Checkpointer{
 		Store:    s,
-		SKey:     strings.TrimSpace(string(skeyBytes)),
+		SKey:     skey,
 		Origin:   envOr("DEDI_ORIGIN", "dev.dedi.local/log"),
 		Interval: interval,
 	}
@@ -293,7 +305,16 @@ func serve() error {
 	// so the served-request total survives restarts and sums across replicas.
 	go srv.RunCounterFlush(ctx, statsInterval)
 
-	listen := envOr("DEDI_LISTEN", ":8080")
+	// PaaS platforms assign the port at runtime via $PORT; an explicit
+	// DEDI_LISTEN still wins so local and compose setups are unaffected.
+	listen := os.Getenv("DEDI_LISTEN")
+	if listen == "" {
+		if port := os.Getenv("PORT"); port != "" {
+			listen = ":" + port
+		} else {
+			listen = ":8080"
+		}
+	}
 	log.Printf("dedid read plane listening on %s", listen)
 	server := &http.Server{
 		Addr:              listen,
