@@ -182,10 +182,24 @@ func conflict(w http.ResponseWriter, err error) {
 // a courtesy, not a safety property — replay is closed by preconditionOf.
 //
 // Returns true when it has already answered the request.
-func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, ns, reg, rec, state string, payload []byte) bool {
+func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, in store.AppendInput, ns, reg, rec, state string, payload []byte) bool {
 	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
 	if err != nil {
 		return false // absent, or a real error the append will surface
+	}
+	switch {
+	case in.ExpectedAbsent:
+		conflict(w, fmt.Errorf("%w: expected no existing version, found %s",
+			store.ErrVersionConflict, versionTag(current)))
+		return true
+	case in.ExpectedPrevDigest != nil && !bytes.Equal(in.ExpectedPrevDigest, current.Digest):
+		conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+			store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+		return true
+	case in.ExpectedPrevDigest != nil && in.ExpectedPrevState != "" && in.ExpectedPrevState != current.State:
+		conflict(w, fmt.Errorf("%w: expected version %x-%s, found %s",
+			store.ErrVersionConflict, in.ExpectedPrevDigest, in.ExpectedPrevState, versionTag(current)))
+		return true
 	}
 	newDigest, err := PayloadDigest(payload)
 	if err != nil {
@@ -288,7 +302,7 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.unchanged(w, r, ns, reg, rec, "live", payload) {
+	if s.unchanged(w, r, in, ns, reg, rec, "live", payload) {
 		return
 	}
 	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec

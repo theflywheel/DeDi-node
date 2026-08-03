@@ -371,6 +371,31 @@ func TestPublishIsIdempotentForIdenticalPayload(t *testing.T) {
 	}
 }
 
+func TestPublishUnchangedStillHonoursPrecondition(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1") + "/publish"
+	body := []byte(`{"payload":{"subscriber_id":"a","type":"BPP"}}`)
+
+	signedDo(t, srv, priv, "POST", path, body).Body.Close()
+
+	resp := signedDo(t, srv, priv, "POST", path, body,
+		publisher.Precondition{IfMatch: "0000000000000000000000000000000000000000000000000000000000000000-live"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("same-payload stale If-Match: status %d, want 412", resp.StatusCode)
+	}
+
+	resp = signedDo(t, srv, priv, "POST", path, body,
+		publisher.Precondition{IfNoneMatch: "*"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("same-payload If-None-Match: status %d, want 412", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 1 {
+		t.Fatalf("failed preconditions appended: %v versions, want 1", n)
+	}
+}
+
 // If-Match is lost-update protection: two operators editing the same
 // participant must not silently overwrite each other.
 func TestPublishHonoursIfMatch(t *testing.T) {
