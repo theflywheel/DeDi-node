@@ -33,14 +33,41 @@ type Entry struct {
 }
 
 type AppendInput struct {
-	EntryType           string // namespace | registry | record
-	Namespace           string
-	Registry            string
-	RecordName          string
-	PayloadRaw          []byte // JSON; compacted before storing/hashing
-	State               string // default: record→live, namespace/registry→active
-	CreatedBy           string
-	ExpectedPrevVersion *int32
+	EntryType  string // namespace | registry | record
+	Namespace  string
+	Registry   string
+	RecordName string
+	PayloadRaw []byte // JSON; compacted before storing/hashing
+	State      string // default: record→live, namespace/registry→active
+	CreatedBy  string
+
+	// Precondition on the resource's current state, evaluated inside the append
+	// transaction under the write lock. Checking it any earlier would be a
+	// time-of-check race: two writers could both read the same current version
+	// and both append, which is exactly the lost update the precondition exists
+	// to prevent — and exactly what makes a captured signed write replayable.
+	//
+	// At most one may be set.
+	ExpectedPrevDigest []byte // the latest version's digest must equal this
+	ExpectedAbsent     bool   // no version may exist yet
+}
+
+// checkPrecondition compares the caller's expectation against the resource as
+// it stands inside the transaction. currentDigest is nil when nothing has been
+// published under this name yet.
+func checkPrecondition(in AppendInput, currentDigest []byte) error {
+	switch {
+	case in.ExpectedAbsent && currentDigest != nil:
+		return fmt.Errorf("%w: expected no existing version, found digest %x",
+			ErrVersionConflict, currentDigest)
+	case in.ExpectedPrevDigest != nil && currentDigest == nil:
+		return fmt.Errorf("%w: expected version with digest %x, found none",
+			ErrVersionConflict, in.ExpectedPrevDigest)
+	case in.ExpectedPrevDigest != nil && !bytes.Equal(in.ExpectedPrevDigest, currentDigest):
+		return fmt.Errorf("%w: expected version with digest %x, found %x",
+			ErrVersionConflict, in.ExpectedPrevDigest, currentDigest)
+	}
+	return nil
 }
 
 func validateAppend(in *AppendInput) error {
@@ -140,15 +167,19 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 		return Entry{}, err
 	}
 	var currentVersion int32
+	var currentDigest []byte
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version_num), 0) FROM log_entries
-		 WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4`,
-		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&currentVersion); err != nil {
+		`SELECT COALESCE(MAX(version_num), 0),
+		        (SELECT digest FROM log_entries
+		          WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4
+		          ORDER BY version_num DESC LIMIT 1)
+		   FROM log_entries
+		  WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4`,
+		in.EntryType, in.Namespace, in.Registry, in.RecordName).Scan(&currentVersion, &currentDigest); err != nil {
 		return Entry{}, err
 	}
-	if in.ExpectedPrevVersion != nil && *in.ExpectedPrevVersion != currentVersion {
-		return Entry{}, fmt.Errorf("%w: expected previous version %d, got %d",
-			ErrVersionConflict, *in.ExpectedPrevVersion, currentVersion)
+	if err := checkPrecondition(in, currentDigest); err != nil {
+		return Entry{}, err
 	}
 	vnum := currentVersion + 1
 

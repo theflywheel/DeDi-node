@@ -73,15 +73,24 @@ func TestPubkeygenAndSignVerifyAgainstKeySet(t *testing.T) {
 		t.Fatalf("node cannot parse the entry the CLI printed (%q): %v", entry, err)
 	}
 
-	const path = "/admin/records/x:publish?expected_version=0&state=live"
+	const path = "/admin/records/x/publish?state=live"
+	const digest = "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
 	out := capture(t, func() error {
-		return signCmd([]string{"-key", keyFile, "-kid", "op-1", "-method", "POST", "-path", path, "-body", bodyFile})
+		return signCmd([]string{"-key", keyFile, "-kid", "op-1", "-method", "POST",
+			"-path", path, "-body", bodyFile, "-if-match", digest})
 	})
 	kid := header(t, out, publisher.HeaderKeyID)
 	ts := header(t, out, publisher.HeaderTimestamp)
 	sig := header(t, out, publisher.HeaderSignature)
 
-	key, err := ks.Verify("POST", path, body, kid, ts, sig, time.Now(), publisher.DefaultMaxSkew)
+	// The CLI must emit the precondition it signed; a caller who forwards only
+	// the signature headers would otherwise send an unverifiable request.
+	if got := header(t, out, "If-Match"); got != digest {
+		t.Fatalf("If-Match header = %q, want %q", got, digest)
+	}
+	pre := publisher.Precondition{IfMatch: digest}
+
+	key, err := ks.Verify("POST", path, body, pre, kid, ts, sig, time.Now(), publisher.DefaultMaxSkew)
 	if err != nil {
 		t.Fatalf("CLI signature does not verify server-side: %v", err)
 	}
@@ -92,7 +101,7 @@ func TestPubkeygenAndSignVerifyAgainstKeySet(t *testing.T) {
 		t.Fatal("key authorised a namespace it is not scoped to")
 	}
 	// One byte of drift in the body must break it.
-	if _, err := ks.Verify("POST", path, append(body, ' '), kid, ts, sig, time.Now(), publisher.DefaultMaxSkew); err == nil {
+	if _, err := ks.Verify("POST", path, append(body, ' '), pre, kid, ts, sig, time.Now(), publisher.DefaultMaxSkew); err == nil {
 		t.Fatal("tampered body verified")
 	}
 }

@@ -28,7 +28,8 @@ const (
 // DefaultMaxSkew bounds how far a request timestamp may be from the server
 // clock in either direction. It bounds replay of a captured request, it does
 // not prevent it: within the window an identical request verifies again. That
-// is closed by publish idempotency (expected-version on the append), not here.
+// is closed by the signed precondition (see Preimage) and its transactional
+// enforcement on the append, not here.
 const DefaultMaxSkew = 5 * time.Minute
 
 var (
@@ -94,29 +95,46 @@ func (ks *KeySet) Lookup(kid string) (Key, bool) {
 	return k, ok
 }
 
+// Precondition carries the conditional-request headers that decide whether a
+// write applies. They are part of the signature, not merely of the request:
+// see Preimage.
+type Precondition struct {
+	IfMatch     string // If-Match: <digest> — the version being replaced
+	IfNoneMatch string // If-None-Match: * — nothing may exist yet
+}
+
 // Preimage is the exact byte string a publisher signs. Binding the method, the
 // path and query string, and a digest of the body, means a captured signature
 // cannot be moved to a different route or reused with different content or
 // state-changing query parameters; binding the timestamp bounds how long it
 // stays usable at all.
 //
+// The precondition headers are signed for a subtler reason. Bounding the
+// timestamp limits how long a captured request stays replayable, but inside
+// that window an attacker could otherwise strip If-Match and have the replay
+// apply unconditionally — reverting a participant to an earlier payload. Signed
+// and enforced, the precondition means a replay can only land on the exact
+// version the publisher was replacing, so it is a no-op or a conflict.
+//
 // Field order and separator are part of the wire contract — changing either
 // invalidates every existing signature.
-func Preimage(method, requestURI string, body []byte, ts time.Time) []byte {
+func Preimage(method, requestURI string, body []byte, pre Precondition, ts time.Time) []byte {
 	sum := sha256.Sum256(body)
 	return []byte(strings.Join([]string{
 		scheme,
 		strings.ToUpper(method),
 		requestURI,
 		base64.StdEncoding.EncodeToString(sum[:]),
+		pre.IfMatch,
+		pre.IfNoneMatch,
 		ts.UTC().Format(time.RFC3339),
 	}, "\n"))
 }
 
 // Sign produces the DeDi-Signature value for a request. Used by operator
 // tooling and by the tests; the server only ever verifies.
-func Sign(priv ed25519.PrivateKey, method, path string, body []byte, ts time.Time) string {
-	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, Preimage(method, path, body, ts)))
+func Sign(priv ed25519.PrivateKey, method, requestURI string, body []byte, pre Precondition, ts time.Time) string {
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, Preimage(method, requestURI, body, pre, ts)))
 }
 
 // Verify authenticates a signed request against the key set. It returns the key
@@ -125,7 +143,7 @@ func Sign(priv ed25519.PrivateKey, method, path string, body []byte, ts time.Tim
 //
 // now is passed in rather than read from the clock to keep the skew check
 // testable.
-func (ks *KeySet) Verify(method, path string, body []byte, kid, tsHeader, sigHeader string, now time.Time, maxSkew time.Duration) (Key, error) {
+func (ks *KeySet) Verify(method, requestURI string, body []byte, pre Precondition, kid, tsHeader, sigHeader string, now time.Time, maxSkew time.Duration) (Key, error) {
 	if kid == "" && tsHeader == "" && sigHeader == "" {
 		return Key{}, ErrNoSignature
 	}
@@ -151,7 +169,7 @@ func (ks *KeySet) Verify(method, path string, body []byte, kid, tsHeader, sigHea
 	if !ok {
 		return Key{}, ErrUnknownKey
 	}
-	if !ed25519.Verify(key.Public, Preimage(method, path, body, ts), sig) {
+	if !ed25519.Verify(key.Public, Preimage(method, requestURI, body, pre, ts), sig) {
 		return Key{}, ErrBadSignature
 	}
 	return key, nil

@@ -23,8 +23,6 @@ func mustAppend(t *testing.T, s *Store, in AppendInput) Entry {
 	return e
 }
 
-func int32Ptr(v int32) *int32 { return &v }
-
 func seedNSReg(t *testing.T, s *Store) {
 	t.Helper()
 	mustAppend(t, s, AppendInput{EntryType: "namespace", Namespace: "ns", PayloadRaw: []byte(`{"description":"test ns"}`), CreatedBy: "t"})
@@ -67,44 +65,45 @@ func TestAppendRejectsOrphans(t *testing.T) {
 	}
 }
 
-func TestAppendExpectedPreviousVersion(t *testing.T) {
+// The precondition must be evaluated inside the append transaction, because it
+// is what makes a captured signed write unreplayable: a replay carries the
+// digest of a version that has since been superseded.
+func TestAppendPrecondition(t *testing.T) {
 	s := testStore(t)
 	seedNSReg(t, s)
+	rec := AppendInput{EntryType: "record", Namespace: "ns", Registry: "reg", RecordName: "r1", CreatedBy: "t"}
 
-	e1 := mustAppend(t, s, AppendInput{
-		EntryType:           "record",
-		Namespace:           "ns",
-		Registry:            "reg",
-		RecordName:          "r1",
-		PayloadRaw:          []byte(`{"a":1}`),
-		CreatedBy:           "t",
-		ExpectedPrevVersion: int32Ptr(0),
-	})
+	create := rec
+	create.PayloadRaw, create.ExpectedAbsent = []byte(`{"a":1}`), true
+	e1 := mustAppend(t, s, create)
 	if e1.VersionNum != 1 {
 		t.Fatalf("version_num = %d, want 1", e1.VersionNum)
 	}
-	if _, err := s.Append(context.Background(), AppendInput{
-		EntryType:           "record",
-		Namespace:           "ns",
-		Registry:            "reg",
-		RecordName:          "r1",
-		PayloadRaw:          []byte(`{"a":2}`),
-		CreatedBy:           "t",
-		ExpectedPrevVersion: int32Ptr(0),
-	}); !errors.Is(err, ErrVersionConflict) {
-		t.Fatalf("err = %v, want ErrVersionConflict", err)
+
+	// Creating again must fail: something is already there.
+	if _, err := s.Append(context.Background(), create); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("second create: err = %v, want ErrVersionConflict", err)
 	}
-	e2 := mustAppend(t, s, AppendInput{
-		EntryType:           "record",
-		Namespace:           "ns",
-		Registry:            "reg",
-		RecordName:          "r1",
-		PayloadRaw:          []byte(`{"a":2}`),
-		CreatedBy:           "t",
-		ExpectedPrevVersion: int32Ptr(1),
-	})
+
+	update := rec
+	update.PayloadRaw, update.ExpectedPrevDigest = []byte(`{"a":2}`), e1.Digest
+	e2 := mustAppend(t, s, update)
 	if e2.VersionNum != 2 {
 		t.Fatalf("version_num = %d, want 2", e2.VersionNum)
+	}
+
+	// Replaying the update now that v2 is current must be refused, not applied
+	// on top — otherwise a replay silently reverts the record to {"a":1}.
+	if _, err := s.Append(context.Background(), update); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("replayed update: err = %v, want ErrVersionConflict", err)
+	}
+
+	// And an update whose expected version never existed is a conflict too.
+	orphan := rec
+	orphan.RecordName, orphan.PayloadRaw = "r2", []byte(`{"a":3}`)
+	orphan.ExpectedPrevDigest = e1.Digest
+	if _, err := s.Append(context.Background(), orphan); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("update to absent record: err = %v, want ErrVersionConflict", err)
 	}
 }
 

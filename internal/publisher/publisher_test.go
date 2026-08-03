@@ -37,10 +37,11 @@ func TestSignedRequestVerifies(t *testing.T) {
 	ks := mustSet(t, entry)
 	now := time.Now()
 	body := []byte(`{"subscriber_id":"bpp.example.com"}`)
-	uri := "/admin/records/x:publish?expected_version=0&state=revoked"
-	sig := Sign(priv, "POST", uri, body, now)
+	uri := "/admin/records/x/publish?state=revoked"
+	pre := Precondition{IfMatch: "abc123"}
+	sig := Sign(priv, "POST", uri, body, pre, now)
 
-	key, err := ks.Verify("POST", uri, body, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew)
+	key, err := ks.Verify("POST", uri, body, pre, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -56,18 +57,23 @@ func TestVerifyRejectsTampering(t *testing.T) {
 	now := time.Now()
 	ts := now.Format(time.RFC3339)
 	body := []byte(`{"a":1}`)
-	good := Sign(priv, "POST", "/admin/x", body, now)
+	goodPre := Precondition{IfMatch: "d00d"}
+	good := Sign(priv, "POST", "/admin/x", body, goodPre, now)
 
 	cases := []struct {
 		name                     string
 		method, path, kid, tsHdr string
 		body                     []byte
+		pre                      *Precondition // nil means goodPre
 		sig                      string
 		want                     error
 	}{
 		{name: "body changed", method: "POST", path: "/admin/x", body: []byte(`{"a":2}`), kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "path changed", method: "POST", path: "/admin/y", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "query added", method: "POST", path: "/admin/x?state=revoked", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
+		{name: "if-match stripped", method: "POST", path: "/admin/x", pre: &Precondition{}, body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
+		{name: "if-match changed", method: "POST", path: "/admin/x", pre: &Precondition{IfMatch: "beef"}, body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
+		{name: "if-none-match added", method: "POST", path: "/admin/x", pre: &Precondition{IfMatch: "d00d", IfNoneMatch: "*"}, body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "method changed", method: "DELETE", path: "/admin/x", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "timestamp changed", method: "POST", path: "/admin/x", body: body, kid: "op-1", tsHdr: now.Add(time.Minute).Format(time.RFC3339), sig: good, want: ErrBadSignature},
 		{name: "unknown key id", method: "POST", path: "/admin/x", body: body, kid: "nope", tsHdr: ts, sig: good, want: ErrUnknownKey},
@@ -79,7 +85,11 @@ func TestVerifyRejectsTampering(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ks.Verify(tc.method, tc.path, tc.body, tc.kid, tc.tsHdr, tc.sig, now, DefaultMaxSkew)
+			pre := goodPre
+			if tc.pre != nil {
+				pre = *tc.pre
+			}
+			_, err := ks.Verify(tc.method, tc.path, tc.body, pre, tc.kid, tc.tsHdr, tc.sig, now, DefaultMaxSkew)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
@@ -96,9 +106,9 @@ func TestVerifyRejectsForeignKey(t *testing.T) {
 	attacker, _ := testKey(t, "op-1", "ns") // same kid, different key material
 	now := time.Now()
 	body := []byte(`{}`)
-	sig := Sign(attacker, "POST", "/admin/x", body, now)
+	sig := Sign(attacker, "POST", "/admin/x", body, Precondition{}, now)
 
-	if _, err := ks.Verify("POST", "/admin/x", body, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew); !errors.Is(err, ErrBadSignature) {
+	if _, err := ks.Verify("POST", "/admin/x", body, Precondition{}, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("err = %v, want ErrBadSignature", err)
 	}
 }
@@ -111,16 +121,16 @@ func TestVerifyRejectsStaleAndFutureTimestamps(t *testing.T) {
 
 	for _, offset := range []time.Duration{-10 * time.Minute, 10 * time.Minute} {
 		ts := now.Add(offset)
-		sig := Sign(priv, "POST", "/admin/x", body, ts)
-		_, err := ks.Verify("POST", "/admin/x", body, "op-1", ts.Format(time.RFC3339), sig, now, DefaultMaxSkew)
+		sig := Sign(priv, "POST", "/admin/x", body, Precondition{}, ts)
+		_, err := ks.Verify("POST", "/admin/x", body, Precondition{}, "op-1", ts.Format(time.RFC3339), sig, now, DefaultMaxSkew)
 		if !errors.Is(err, ErrStale) {
 			t.Fatalf("offset %v: err = %v, want ErrStale", offset, err)
 		}
 	}
 	// Inside the window it must still verify, including a clock slightly ahead.
 	ts := now.Add(2 * time.Minute)
-	sig := Sign(priv, "POST", "/admin/x", body, ts)
-	if _, err := ks.Verify("POST", "/admin/x", body, "op-1", ts.Format(time.RFC3339), sig, now, DefaultMaxSkew); err != nil {
+	sig := Sign(priv, "POST", "/admin/x", body, Precondition{}, ts)
+	if _, err := ks.Verify("POST", "/admin/x", body, Precondition{}, "op-1", ts.Format(time.RFC3339), sig, now, DefaultMaxSkew); err != nil {
 		t.Fatalf("within skew: %v", err)
 	}
 }
@@ -174,10 +184,13 @@ func TestMiddlewareAllowsAndRestoresBody(t *testing.T) {
 
 	body := `{"hello":"world"}`
 	now := time.Now()
-	req := httptest.NewRequest("POST", "/admin/x?expected_version=0&state=live", strings.NewReader(body))
+	const uri = "/admin/x?state=live"
+	mwPre := Precondition{IfNoneMatch: "*"}
+	req := httptest.NewRequest("POST", uri, strings.NewReader(body))
 	req.Header.Set(HeaderKeyID, "op-1")
 	req.Header.Set(HeaderTimestamp, now.Format(time.RFC3339))
-	req.Header.Set(HeaderSignature, Sign(priv, "POST", "/admin/x?expected_version=0&state=live", []byte(body), now))
+	req.Header.Set("If-None-Match", mwPre.IfNoneMatch)
+	req.Header.Set(HeaderSignature, Sign(priv, "POST", uri, []byte(body), mwPre, now))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -215,8 +228,8 @@ func TestEmptyKeySetRejectsEverything(t *testing.T) {
 	priv, _ := testKey(t, "op-1", "ns")
 	ks := mustSet(t, "")
 	now := time.Now()
-	sig := Sign(priv, "POST", "/admin/x", []byte(`{}`), now)
-	if _, err := ks.Verify("POST", "/admin/x", []byte(`{}`), "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew); !errors.Is(err, ErrUnknownKey) {
+	sig := Sign(priv, "POST", "/admin/x", []byte(`{}`), Precondition{}, now)
+	if _, err := ks.Verify("POST", "/admin/x", []byte(`{}`), Precondition{}, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew); !errors.Is(err, ErrUnknownKey) {
 		t.Fatalf("err = %v, want ErrUnknownKey", err)
 	}
 }
