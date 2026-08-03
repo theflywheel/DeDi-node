@@ -67,6 +67,9 @@ func ValidateAgainstSchema(schema map[string]any, payloadRaw []byte) error {
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
 		return fmt.Errorf("%w: payload must be a JSON object to validate against the registry schema", ErrInvalidWrite)
 	}
+	if payload == nil {
+		return fmt.Errorf("%w: payload must be a JSON object to validate against the registry schema", ErrInvalidWrite)
+	}
 
 	if t, ok := schema["type"].(string); ok && t != "object" {
 		// The node only stores object payloads, so a registry demanding

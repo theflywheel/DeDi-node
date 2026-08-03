@@ -35,6 +35,7 @@ func TestValidateAgainstSchema(t *testing.T) {
 	}{
 		{name: "valid", payload: `{"subscriber_id":"bpp.example.com","signing_public_key":"k"}`},
 		{name: "extra fields are fine", payload: `{"subscriber_id":"a","signing_public_key":"k","anything":1}`},
+		{name: "null is not an object", payload: `null`, wantErr: "payload must be a JSON object"},
 		{name: "missing one required", payload: `{"subscriber_id":"a"}`, wantErr: "signing_public_key"},
 		{name: "missing several, listed", payload: `{}`, wantErr: "signing_public_key, subscriber_id"},
 		{name: "wrong scalar type", payload: `{"subscriber_id":42,"signing_public_key":"k"}`, wantErr: `"subscriber_id" must be string`},
@@ -105,6 +106,23 @@ func TestAppendEnforcesRegistrySchema(t *testing.T) {
 	if _, err := s.Append(ctx, AppendInput{EntryType: "record", Namespace: "ns", Registry: "participants",
 		RecordName: "rec-1", PayloadRaw: []byte(`{"subscriber_id":"a","signing_public_key":"k"}`), CreatedBy: "t"}); err != nil {
 		t.Fatalf("valid record rejected: %v", err)
+	}
+}
+
+func TestAppendRejectsNullRecordAgainstObjectSchema(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	mustAppend(t, s, AppendInput{EntryType: "namespace", Namespace: "ns", PayloadRaw: []byte(`{}`), CreatedBy: "t"})
+	mustAppend(t, s, AppendInput{EntryType: "registry", Namespace: "ns", Registry: "objects", CreatedBy: "t",
+		PayloadRaw: []byte(`{"schema":{"type":"object"}}`)})
+
+	_, err := s.Append(ctx, AppendInput{EntryType: "record", Namespace: "ns", Registry: "objects",
+		RecordName: "rec-1", PayloadRaw: []byte(`null`), CreatedBy: "t"})
+	if !errors.Is(err, ErrInvalidWrite) {
+		t.Fatalf("err = %v, want ErrInvalidWrite", err)
+	}
+	if !strings.Contains(err.Error(), "payload must be a JSON object") {
+		t.Fatalf("error should reject null object payload: %v", err)
 	}
 }
 
