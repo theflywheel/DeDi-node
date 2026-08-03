@@ -312,7 +312,14 @@ type seedFile struct {
 func seed(args []string) error {
 	fs := flag.NewFlagSet("seed", flag.ExitOnError)
 	file := fs.String("file", "", "seed JSON file")
+	// created_by is inside the Merkle leaf, so it is covered by inclusion
+	// proofs. Naming the actual operator makes the log's audit trail useful;
+	// the default keeps existing invocations working.
+	by := fs.String("by", "seed", "author recorded on every entry (appears in the log and in proofs)")
 	fs.Parse(args)
+	if strings.TrimSpace(*by) == "" {
+		return fmt.Errorf("seed: -by must not be empty")
+	}
 	if *file == "" {
 		return fmt.Errorf("seed: -file is required")
 	}
@@ -339,15 +346,15 @@ func seed(args []string) error {
 		log.Printf("seq=%d %s %s/%s/%s v%d", e.Seq, e.EntryType, e.Namespace, e.Registry, e.RecordName, e.VersionNum)
 		return nil
 	}
-	if err := appendOne(store.AppendInput{EntryType: "namespace", Namespace: sf.Namespace, PayloadRaw: sf.Payload, CreatedBy: "seed"}); err != nil {
+	if err := appendOne(store.AppendInput{EntryType: "namespace", Namespace: sf.Namespace, PayloadRaw: sf.Payload, CreatedBy: *by}); err != nil {
 		return err
 	}
 	for _, reg := range sf.Registries {
-		if err := appendOne(store.AppendInput{EntryType: "registry", Namespace: sf.Namespace, Registry: reg.Name, PayloadRaw: reg.Payload, CreatedBy: "seed"}); err != nil {
+		if err := appendOne(store.AppendInput{EntryType: "registry", Namespace: sf.Namespace, Registry: reg.Name, PayloadRaw: reg.Payload, CreatedBy: *by}); err != nil {
 			return err
 		}
 		for _, rec := range reg.Records {
-			if err := appendOne(store.AppendInput{EntryType: "record", Namespace: sf.Namespace, Registry: reg.Name, RecordName: rec.Name, PayloadRaw: rec.Payload, State: rec.State, CreatedBy: "seed"}); err != nil {
+			if err := appendOne(store.AppendInput{EntryType: "record", Namespace: sf.Namespace, Registry: reg.Name, RecordName: rec.Name, PayloadRaw: rec.Payload, State: rec.State, CreatedBy: *by}); err != nil {
 				return err
 			}
 		}

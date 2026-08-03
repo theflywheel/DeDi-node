@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/mod/sumdb/tlog"
@@ -69,6 +70,13 @@ func validateAppend(in *AppendInput) error {
 	}
 	if !json.Valid(in.PayloadRaw) {
 		return fmt.Errorf("%w: payload is not valid JSON", ErrInvalidWrite)
+	}
+	// Every entry must name its author. created_by is part of the Merkle leaf
+	// preimage (merkle.LeafBytes), so authorship is covered by inclusion
+	// proofs — an unattributable entry would weaken the audit trail
+	// governance.md requires, and a side column would not be provable.
+	if strings.TrimSpace(in.CreatedBy) == "" {
+		return fmt.Errorf("%w: created_by is required — every log entry must name its author", ErrInvalidWrite)
 	}
 	return nil
 }
