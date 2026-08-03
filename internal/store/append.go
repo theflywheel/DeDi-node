@@ -45,30 +45,30 @@ func validateAppend(in *AppendInput) error {
 	switch in.EntryType {
 	case "namespace":
 		if in.Namespace == "" || in.Registry != "" || in.RecordName != "" {
-			return fmt.Errorf("namespace entry needs namespace only")
+			return fmt.Errorf("%w: namespace entry needs namespace only", ErrInvalidWrite)
 		}
 		if in.State == "" {
 			in.State = "active"
 		}
 	case "registry":
 		if in.Namespace == "" || in.Registry == "" || in.RecordName != "" {
-			return fmt.Errorf("registry entry needs namespace and registry")
+			return fmt.Errorf("%w: registry entry needs namespace and registry", ErrInvalidWrite)
 		}
 		if in.State == "" {
 			in.State = "active"
 		}
 	case "record":
 		if in.Namespace == "" || in.Registry == "" || in.RecordName == "" {
-			return fmt.Errorf("record entry needs namespace, registry and record_name")
+			return fmt.Errorf("%w: record entry needs namespace, registry and record_name", ErrInvalidWrite)
 		}
 		if in.State == "" {
 			in.State = "live"
 		}
 	default:
-		return fmt.Errorf("invalid entry_type %q", in.EntryType)
+		return fmt.Errorf("%w: invalid entry_type %q", ErrInvalidWrite, in.EntryType)
 	}
 	if !json.Valid(in.PayloadRaw) {
-		return fmt.Errorf("payload is not valid JSON")
+		return fmt.Errorf("%w: payload is not valid JSON", ErrInvalidWrite)
 	}
 	return nil
 }

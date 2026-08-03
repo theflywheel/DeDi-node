@@ -35,6 +35,11 @@ func (s *Server) buildProof(r *http.Request, e store.Entry) (*proofDTO, error) {
 	ctx := r.Context()
 	size, cpNote, err := s.Store.LatestCheckpoint(ctx)
 	if errors.Is(err, store.ErrNoCheckpoint) || (err == nil && size <= e.Seq) {
+		// A node assembled without a checkpointer cannot mint one on demand;
+		// answer as an error rather than panicking inside the handler.
+		if s.CP == nil {
+			return nil, errors.New("no checkpoint covers this entry and this node has no checkpointer")
+		}
 		size, cpNote, err = s.CP.PublishNow(ctx)
 	}
 	if err != nil {

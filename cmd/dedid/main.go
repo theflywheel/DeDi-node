@@ -278,6 +278,9 @@ func serve() error {
 
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
 		WildcardNamespaces: wildcard}
+	if keys.Len() > 0 {
+		srv.Auth = &publisher.Authenticator{Keys: keys}
+	}
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
 	server := &http.Server{

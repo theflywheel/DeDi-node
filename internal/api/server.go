@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
@@ -17,6 +18,10 @@ type Server struct {
 	// lookup (design.md:256). nil means no restriction — permitted only while
 	// the write plane is closed; see serve().
 	WildcardNamespaces []string
+
+	// Auth verifies signed writes. nil, or holding no keys, leaves the write
+	// plane closed and its routes unregistered.
+	Auth *publisher.Authenticator
 }
 
 func (s *Server) Handler() http.Handler {
@@ -34,6 +39,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
+	// Publisher plane. Registered only when the node holds publisher keys, so a
+	// read-only node has no write surface to probe at all (governance.md:
+	// "enforcement today is structural").
+	if s.writeEnabled() {
+		write := func(pattern string, h http.HandlerFunc) {
+			mux.Handle(pattern, s.Auth.Require(h, denyWrite))
+		}
+		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
+		write("PUT /admin/namespaces/{namespace}/registries/{registry_name}", s.putRegistry)
+		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/publish", s.publishRecord)
+		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/revoke", s.revokeRecord)
+	}
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})

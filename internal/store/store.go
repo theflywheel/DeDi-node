@@ -11,6 +11,10 @@ import (
 var (
 	ErrNotFound     = errors.New("not found")
 	ErrNoCheckpoint = errors.New("no checkpoint published yet")
+	// ErrInvalidWrite marks an append rejected for the caller's reasons —
+	// wrong shape, bad payload — as opposed to a node failure. Callers use it
+	// to answer 400 rather than 500.
+	ErrInvalidWrite = errors.New("invalid write")
 )
 
 type Store struct {
