@@ -173,8 +173,7 @@ function reload(){
   const box = $('participants');
   $('detail').innerHTML = '';
   box.innerHTML = '<p class="mut">loading...</p>';
-  jget('/dedi/query/' + p(ns()) + '/' + p(reg())).then(async j => {
-    const recs = j.data.records || [];
+  queryAllRecords().then(async recs => {
     if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
     // The query endpoint returns names + state; payload detail needs a lookup per record.
     const rows = await Promise.all(recs.map(async r => {
@@ -199,6 +198,20 @@ function reload(){
       '<p class="mut">' + rows.length + ' participant(s). Click a subscriber for version history.</p>';
   }).catch(e => box.innerHTML = '<p class="no">' + esc(e.message) + '</p>');
   return false;
+}
+
+async function queryAllRecords(){
+  const pageSize = 100; // API maximum; avoids hiding records behind the default first page.
+  const path = page => '/dedi/query/' + p(ns()) + '/' + p(reg()) +
+    '?page_size=' + pageSize + '&page=' + page;
+  const first = await jget(path(1));
+  const data = first.data || {};
+  const totalPages = data.total_pages || 1;
+  const recs = data.records || [];
+  if(totalPages <= 1) return recs;
+  const rest = await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) =>
+    jget(path(i + 2)).then(j => (j.data && j.data.records) || [])));
+  return recs.concat(...rest);
 }
 
 // Expiry is the field most likely to bite an operator, so surface it loudly.
@@ -335,12 +348,12 @@ function fail(box, errs){
   return false;
 }
 
-// Emits the seed file + the command that applies it. Same shape dedid seed already accepts,
-// so this is copy-paste runnable rather than illustrative.
+// Emits the seed file + the command that applies it. Parent payloads are omitted
+// deliberately: dedid seed treats that as record-only, preserving their versions.
 function emit(box, recName, payload, state, title, note){
   const seed = {
-    namespace: ns(), payload: {},
-    registries: [{ name: reg(), payload: {}, records: [{ name: recName, payload, state }] }],
+    namespace: ns(),
+    registries: [{ name: reg(), records: [{ name: recName, payload, state }] }],
   };
   const json = JSON.stringify(seed, null, 2);
   const cmd = 'cat > onboard.json <<\'EOF\'\n' + json + '\nEOF\n\n' +
