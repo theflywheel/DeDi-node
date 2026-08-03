@@ -95,18 +95,19 @@ func (ks *KeySet) Lookup(kid string) (Key, bool) {
 }
 
 // Preimage is the exact byte string a publisher signs. Binding the method, the
-// path and a digest of the body means a captured signature cannot be moved to a
-// different route or reused with different content; binding the timestamp bounds
-// how long it stays usable at all.
+// path and query string, and a digest of the body, means a captured signature
+// cannot be moved to a different route or reused with different content or
+// state-changing query parameters; binding the timestamp bounds how long it
+// stays usable at all.
 //
 // Field order and separator are part of the wire contract — changing either
 // invalidates every existing signature.
-func Preimage(method, path string, body []byte, ts time.Time) []byte {
+func Preimage(method, requestURI string, body []byte, ts time.Time) []byte {
 	sum := sha256.Sum256(body)
 	return []byte(strings.Join([]string{
 		scheme,
 		strings.ToUpper(method),
-		path,
+		requestURI,
 		base64.StdEncoding.EncodeToString(sum[:]),
 		ts.UTC().Format(time.RFC3339),
 	}, "\n"))

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/theflywheel/DeDi-node/internal/publisher"
@@ -62,7 +63,26 @@ func appendErr(w http.ResponseWriter, err error) {
 		notFound(w, "parent")
 		return
 	}
+	if errors.Is(err, store.ErrVersionConflict) {
+		writeErr(w, http.StatusConflict, "VERSION_CONFLICT", err.Error())
+		return
+	}
 	badRequest(w, err.Error())
+}
+
+func expectedPrevVersion(w http.ResponseWriter, r *http.Request) (*int32, bool) {
+	raw := r.URL.Query().Get("expected_version")
+	if raw == "" {
+		badRequest(w, "expected_version query parameter is required")
+		return nil, false
+	}
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n < 0 {
+		badRequest(w, "expected_version must be a non-negative integer")
+		return nil, false
+	}
+	v := int32(n)
+	return &v, true
 }
 
 func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +95,17 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request) {
 	if !okBody {
 		return
 	}
+	expected, okExpected := expectedPrevVersion(w, r)
+	if !okExpected {
+		return
+	}
 	e, err := s.Store.Append(r.Context(), store.AppendInput{
-		EntryType:  "namespace",
-		Namespace:  ns,
-		PayloadRaw: body,
-		State:      r.URL.Query().Get("state"),
-		CreatedBy:  key.KID,
+		EntryType:           "namespace",
+		Namespace:           ns,
+		PayloadRaw:          body,
+		State:               r.URL.Query().Get("state"),
+		CreatedBy:           key.KID,
+		ExpectedPrevVersion: expected,
 	})
 	if err != nil {
 		appendErr(w, err)
@@ -104,13 +129,18 @@ func (s *Server) putRegistry(w http.ResponseWriter, r *http.Request) {
 	if !okBody {
 		return
 	}
+	expected, okExpected := expectedPrevVersion(w, r)
+	if !okExpected {
+		return
+	}
 	e, err := s.Store.Append(r.Context(), store.AppendInput{
-		EntryType:  "registry",
-		Namespace:  ns,
-		Registry:   reg,
-		PayloadRaw: body,
-		State:      r.URL.Query().Get("state"),
-		CreatedBy:  key.KID,
+		EntryType:           "registry",
+		Namespace:           ns,
+		Registry:            reg,
+		PayloadRaw:          body,
+		State:               r.URL.Query().Get("state"),
+		CreatedBy:           key.KID,
+		ExpectedPrevVersion: expected,
 	})
 	if err != nil {
 		appendErr(w, err)
@@ -140,14 +170,19 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 	if !okBody {
 		return
 	}
+	expected, okExpected := expectedPrevVersion(w, r)
+	if !okExpected {
+		return
+	}
 	e, err := s.Store.Append(r.Context(), store.AppendInput{
-		EntryType:  "record",
-		Namespace:  ns,
-		Registry:   reg,
-		RecordName: rec,
-		PayloadRaw: body,
-		State:      r.URL.Query().Get("state"),
-		CreatedBy:  key.KID,
+		EntryType:           "record",
+		Namespace:           ns,
+		Registry:            reg,
+		RecordName:          rec,
+		PayloadRaw:          body,
+		State:               r.URL.Query().Get("state"),
+		CreatedBy:           key.KID,
+		ExpectedPrevVersion: expected,
 	})
 	if err != nil {
 		appendErr(w, err)

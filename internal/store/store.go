@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("not found")
-	ErrNoCheckpoint = errors.New("no checkpoint published yet")
+	ErrNotFound        = errors.New("not found")
+	ErrNoCheckpoint    = errors.New("no checkpoint published yet")
+	ErrVersionConflict = errors.New("version conflict")
 )
 
 type Store struct {

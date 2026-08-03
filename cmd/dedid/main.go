@@ -116,7 +116,7 @@ func signCmd(args []string) error {
 	keyFile := fs.String("key", "publisher.key", "publisher private key file")
 	kid := fs.String("kid", "", "key id (required)")
 	method := fs.String("method", "POST", "HTTP method")
-	path := fs.String("path", "", "request path, e.g. /admin/namespaces/beckn-testnet (required)")
+	path := fs.String("path", "", "request URI, e.g. /admin/namespaces/beckn-testnet?expected_version=0 (required)")
 	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
 	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
 	fs.Parse(args)

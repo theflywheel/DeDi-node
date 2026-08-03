@@ -37,9 +37,10 @@ func TestSignedRequestVerifies(t *testing.T) {
 	ks := mustSet(t, entry)
 	now := time.Now()
 	body := []byte(`{"subscriber_id":"bpp.example.com"}`)
-	sig := Sign(priv, "POST", "/admin/records/x:publish", body, now)
+	uri := "/admin/records/x:publish?expected_version=0&state=revoked"
+	sig := Sign(priv, "POST", uri, body, now)
 
-	key, err := ks.Verify("POST", "/admin/records/x:publish", body, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew)
+	key, err := ks.Verify("POST", uri, body, "op-1", now.Format(time.RFC3339), sig, now, DefaultMaxSkew)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -66,6 +67,7 @@ func TestVerifyRejectsTampering(t *testing.T) {
 	}{
 		{name: "body changed", method: "POST", path: "/admin/x", body: []byte(`{"a":2}`), kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "path changed", method: "POST", path: "/admin/y", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
+		{name: "query added", method: "POST", path: "/admin/x?state=revoked", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "method changed", method: "DELETE", path: "/admin/x", body: body, kid: "op-1", tsHdr: ts, sig: good, want: ErrBadSignature},
 		{name: "timestamp changed", method: "POST", path: "/admin/x", body: body, kid: "op-1", tsHdr: now.Add(time.Minute).Format(time.RFC3339), sig: good, want: ErrBadSignature},
 		{name: "unknown key id", method: "POST", path: "/admin/x", body: body, kid: "nope", tsHdr: ts, sig: good, want: ErrUnknownKey},
@@ -172,10 +174,10 @@ func TestMiddlewareAllowsAndRestoresBody(t *testing.T) {
 
 	body := `{"hello":"world"}`
 	now := time.Now()
-	req := httptest.NewRequest("POST", "/admin/x", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/admin/x?expected_version=0&state=live", strings.NewReader(body))
 	req.Header.Set(HeaderKeyID, "op-1")
 	req.Header.Set(HeaderTimestamp, now.Format(time.RFC3339))
-	req.Header.Set(HeaderSignature, Sign(priv, "POST", "/admin/x", []byte(body), now))
+	req.Header.Set(HeaderSignature, Sign(priv, "POST", "/admin/x?expected_version=0&state=live", []byte(body), now))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
