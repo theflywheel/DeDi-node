@@ -77,6 +77,19 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 	if err := validateAppend(&in); err != nil {
 		return Entry{}, err
 	}
+	// Record payloads are checked against the schema their registry declares.
+	// This runs before the write lock: it is a read of already-committed state,
+	// and a registry whose schema changes concurrently is not worth serializing
+	// against — the next write validates against the new one.
+	if in.EntryType == "record" {
+		schema, err := s.registrySchema(ctx, in.Namespace, in.Registry)
+		if err != nil {
+			return Entry{}, err
+		}
+		if err := ValidateAgainstSchema(schema, in.PayloadRaw); err != nil {
+			return Entry{}, err
+		}
+	}
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, in.PayloadRaw); err != nil {
 		return Entry{}, fmt.Errorf("compact payload: %w", err)

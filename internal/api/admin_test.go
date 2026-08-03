@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,4 +243,27 @@ func TestPublishedRecordIsProvable(t *testing.T) {
 	if _, ok := m["proof"]; !ok {
 		t.Fatalf("no inclusion proof on a published record: %v", m)
 	}
+}
+
+// A registry schema must reject an incomplete participant at the write, as a
+// caller error — not surface later as an ONIX signature failure.
+func TestPublishEnforcesRegistrySchema(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns", []byte(`{"payload":{}}`)).Body.Close()
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns/registries/participants",
+		[]byte(`{"payload":{"schema":{"type":"object","required":["subscriber_id","signing_public_key"]}}}`)).Body.Close()
+
+	const path = "/admin/namespaces/ns/registries/participants/records/KEY-1/publish"
+	resp := signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"subscriber_id":"a"}}`))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("incomplete record: status %d, want 400", resp.StatusCode)
+	}
+	if msg, _ := bodyOf(t, resp)["error"].(string); !strings.Contains(msg, "signing_public_key") {
+		t.Fatalf("error should name the missing field, got %q", msg)
+	}
+	resp = signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"subscriber_id":"a","signing_public_key":"k"}}`))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("complete record: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
