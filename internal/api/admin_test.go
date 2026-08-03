@@ -428,9 +428,20 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
 		t.Fatalf("accepted write did not append: %v versions", n)
 	}
+	// Stale/create-only preconditions are still refused when the body already
+	// matches the current version and would otherwise hit the no-op shortcut.
+	if resp := req(tag, `{"payload":{"v":2}}`); resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("stale If-Match with current body: status %d, want 412", resp.StatusCode)
+	}
+	resp := signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"v":2}}`),
+		publisher.Precondition{IfNoneMatch: "*"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("If-None-Match with current body: status %d, want 412", resp.StatusCode)
+	}
 	// If-Match on a record that does not exist yet cannot be satisfied.
 	other := "/admin/namespaces/ns/registries/r/records/KEY-NEW/publish"
-	resp := signedDo(t, srv, priv, "POST", other, []byte(`{"payload":{}}`),
+	resp = signedDo(t, srv, priv, "POST", other, []byte(`{"payload":{}}`),
 		publisher.Precondition{IfMatch: tag})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPreconditionFailed {
@@ -441,7 +452,9 @@ func TestPublishHonoursIfMatch(t *testing.T) {
 func TestRevokeIsIdempotent(t *testing.T) {
 	srv, _, priv := writeServer(t, "ns")
 	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
-	signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"subscriber_id":"a"}}`)).Body.Close()
+	published := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"subscriber_id":"a"}}`)))
+	// The write API takes a digest-state tag, not a bare digest.
+	publishedTag := published["data"].(map[string]any)["version_tag"].(string)
 
 	if bodyOf(t, signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`)))["data"].(map[string]any)["unchanged"] != false {
 		t.Fatal("first revoke reported unchanged")
@@ -452,6 +465,12 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	}
 	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
 		t.Fatalf("versions = %v, want 2 (publish + one revoke)", n)
+	}
+	resp := signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`),
+		publisher.Precondition{IfMatch: publishedTag})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("stale If-Match on revoked no-op: status %d, want 412", resp.StatusCode)
 	}
 }
 

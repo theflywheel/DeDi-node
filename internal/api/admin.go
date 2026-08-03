@@ -179,11 +179,16 @@ func conflict(w http.ResponseWriter, err error) {
 
 // unchanged collapses an exact re-publish into a no-op, so a double-clicked
 // Save does not fork a participant's history with a duplicate version. This is
-// a courtesy, not a safety property — replay is closed by preconditionOf.
+// a courtesy, not a safety property — replay is closed by checking the signed
+// precondition against the current version before returning unchanged.
 //
 // Returns true when it has already answered the request.
-func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, in store.AppendInput, ns, reg, rec, state string, payload []byte) bool {
-	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
+func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, state string, payload []byte, in store.AppendInput) bool {
+	current, err := s.Store.ResolveCurrentForWrite(r.Context(), in)
+	if errors.Is(err, store.ErrVersionConflict) {
+		conflict(w, err)
+		return true
+	}
 	if err != nil {
 		return false // absent, or a real error the append will surface
 	}
@@ -302,11 +307,11 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.unchanged(w, r, in, ns, reg, rec, "live", payload) {
-		return
-	}
 	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
 	in.PayloadRaw, in.State = payload, "live"
+	if s.unchanged(w, r, "live", payload, in) {
+		return
+	}
 	s.appendAs(w, r, key, in, "Record published successfully")
 }
 
@@ -345,11 +350,25 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "revoke replaces an existing record; use If-Match, not If-None-Match")
 		return
 	}
+	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
 	// Revoking an already-revoked record is a no-op, not a second revocation.
 	if current.State == "revoked" {
-		writeJSON(w, http.StatusOK, envelope{Message: "Record is already revoked; no new version appended",
-			Data: versionData(current, true)})
-		return
+		lockedCurrent, err := s.Store.ResolveCurrentForWrite(r.Context(), in)
+		if errors.Is(err, store.ErrVersionConflict) {
+			conflict(w, err)
+			return
+		}
+		if err != nil {
+			internal(w, err)
+			return
+		}
+		if lockedCurrent.State != "revoked" {
+			current = lockedCurrent
+		} else {
+			writeJSON(w, http.StatusOK, envelope{Message: "Record is already revoked; no new version appended",
+				Data: versionData(lockedCurrent, true)})
+			return
+		}
 	}
 
 	payload := current.PayloadRaw
@@ -365,7 +384,6 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
 	in.PayloadRaw, in.State = payload, "revoked"
 	s.appendAs(w, r, key, in, "Record revoked successfully")
 }
