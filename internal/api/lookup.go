@@ -98,12 +98,39 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		internal(w, err)
 		return
 	}
+	if revokedAndUnresolvable(r, e, vid, asOn) {
+		notFound(w, "record")
+		return
+	}
 	versions, err := s.Store.Versions(r.Context(), "record", e.Namespace, e.Registry, e.RecordName)
 	if err != nil {
 		internal(w, err)
 		return
 	}
 	s.respondLookup(w, r, "Record retrieved successfully", recordData(e, versions, s.TTL), e)
+}
+
+// revokedAndUnresolvable reports whether this read must not resolve because
+// the record's current version is revoked.
+//
+// Resolving a record means asking what it currently binds to. A revoked
+// participant binds to nothing: continuing to answer with its url and
+// signing_public_key is what revocation exists to stop. The Beckn wildcard
+// path (store.FindBecknSubscriber) has always filtered on state, but the
+// direct three-part path did not — and that is the path ONIX's LookupNode
+// uses, which reads neither `state` nor `status` and treats any 200 as a live
+// participant. A revoked BPP therefore kept getting routed to, and kept having
+// its signatures validated, indefinitely. Only a non-200 stops it.
+//
+// History stays fully reachable, because this only gates the "what is it now"
+// read. A version-pinned read (?version_id= / ?as_on=) is a question about the
+// past and still answers, as does ?include_revoked=true and /dedi/versions.
+// Nothing is hidden — only the live binding is withdrawn.
+func revokedAndUnresolvable(r *http.Request, e store.Entry, vid *int64, asOn *time.Time) bool {
+	if e.State != "revoked" || vid != nil || asOn != nil {
+		return false
+	}
+	return r.URL.Query().Get("include_revoked") != "true"
 }
 
 // setCacheHeaders emits ETag/Cache-Control and answers 304 when the caller

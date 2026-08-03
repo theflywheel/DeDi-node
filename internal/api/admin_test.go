@@ -63,7 +63,9 @@ func currentPrecondition(t *testing.T, srv *httptest.Server, adminPath string) p
 	for i := 1; i+1 < len(seg); i += 2 {
 		parts = append(parts, seg[i+1])
 	}
-	resp, err := http.Get(srv.URL + "/dedi/lookup/" + strings.Join(parts, "/"))
+	// include_revoked: a revoked record no longer resolves by default, but its
+	// digest is still what a subsequent write must match.
+	resp, err := http.Get(srv.URL + "/dedi/lookup/" + strings.Join(parts, "/") + "?include_revoked=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +194,12 @@ func TestRevokeHidesFromBecknLookup(t *testing.T) {
 	if n := vs["data"].(map[string]any)["total_versions"].(float64); n != 2 {
 		t.Fatalf("total_versions = %v, want 2 (publish + revoke)", n)
 	}
-	// The revoked version carries the reason.
-	cur := getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/KEY-1", http.StatusOK)
+	// The direct three-part path withholds it too, and must: that is the path
+	// ONIX's LookupNode uses, and it reads neither state nor status.
+	getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/KEY-1", http.StatusNotFound)
+
+	// The revoked version carries the reason, for a caller that asks for it.
+	cur := getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/KEY-1?include_revoked=true", http.StatusOK)
 	if reason := cur["data"].(map[string]any)["details"].(map[string]any)["revocation_reason"]; reason != "key compromise" {
 		t.Fatalf("revocation_reason = %v", reason)
 	}
