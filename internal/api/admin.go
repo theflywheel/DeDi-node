@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -84,6 +88,83 @@ func decodePayload(w http.ResponseWriter, r *http.Request) (json.RawMessage, boo
 	return req.Payload, true
 }
 
+// PayloadDigest is the digest the store records for a payload: SHA-256 over
+// the compacted JSON. Recomputed here so a caller's precondition and a
+// replayed write are compared against exactly what was stored.
+func PayloadDigest(payload []byte) (string, error) {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, payload); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// precondition enforces If-Match against the record's current digest, and
+// collapses an exact replay into a no-op.
+//
+// Two different problems, one place. If-Match is lost-update protection: two
+// operators editing the same participant should not silently overwrite each
+// other. The replay check is what makes a double-clicked Save — or a captured
+// request replayed inside the signature's timestamp window — stop forking a
+// participant's history.
+//
+// Returns the existing entry and true when the caller should stop.
+func (s *Server) precondition(w http.ResponseWriter, r *http.Request, ns, reg, rec, state string, payload []byte) (store.Entry, bool) {
+	current, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, nil, nil)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		// Nothing published yet. An If-Match asking for a specific version
+		// cannot be satisfied; If-Match: * means "must already exist".
+		if m := r.Header.Get("If-Match"); m != "" {
+			writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
+				"If-Match was given but the record does not exist yet")
+			return store.Entry{}, true
+		}
+		return store.Entry{}, false
+	case err != nil:
+		internal(w, err)
+		return store.Entry{}, true
+	}
+
+	currentDigest := hex.EncodeToString(current.Digest)
+	if m := strings.Trim(r.Header.Get("If-Match"), `"`); m != "" && m != "*" && m != currentDigest {
+		writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
+			"record has changed: current digest is "+currentDigest)
+		return store.Entry{}, true
+	}
+
+	newDigest, err := PayloadDigest(payload)
+	if err != nil {
+		badRequest(w, "payload is not valid JSON")
+		return store.Entry{}, true
+	}
+	if newDigest == currentDigest && current.State == state {
+		// Byte-identical to what is already live: return the existing version
+		// rather than appending a duplicate.
+		writeJSON(w, http.StatusOK, envelope{Message: "Record already at this version; no new version appended",
+			Data: versionData(current, true)})
+		return current, true
+	}
+	return current, false
+}
+
+// versionData renders a written (or unchanged) version.
+func versionData(e store.Entry, unchanged bool) map[string]any {
+	return map[string]any{
+		"namespace":   e.Namespace,
+		"registry":    e.Registry,
+		"record_name": e.RecordName,
+		"version":     fmt.Sprintf("%d", e.Seq),
+		"version_num": e.VersionNum,
+		"state":       e.State,
+		"digest":      hex.EncodeToString(e.Digest),
+		"created_by":  e.CreatedBy,
+		"created_at":  e.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00"),
+		"unchanged":   unchanged,
+	}
+}
+
 // appendAs performs the write and renders the new version. CreatedBy carries
 // the publisher key id, so the log records which credential made each change.
 func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.Key, in store.AppendInput, msg string) {
@@ -99,17 +180,7 @@ func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.
 		internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, envelope{Message: msg, Data: map[string]any{
-		"namespace":   e.Namespace,
-		"registry":    e.Registry,
-		"record_name": e.RecordName,
-		"version":     fmt.Sprintf("%d", e.Seq),
-		"version_num": e.VersionNum,
-		"state":       e.State,
-		"digest":      fmt.Sprintf("%x", e.Digest),
-		"created_by":  e.CreatedBy,
-		"created_at":  e.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00"),
-	}})
+	writeJSON(w, http.StatusOK, envelope{Message: msg, Data: versionData(e, false)})
 }
 
 func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request) {
@@ -150,9 +221,12 @@ func (s *Server) publishRecord(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
+	if _, stop := s.precondition(w, r, ns, reg, rec, "live", payload); stop {
+		return
+	}
 	s.appendAs(w, r, key, store.AppendInput{
-		EntryType: "record", Namespace: r.PathValue("namespace"),
-		Registry: r.PathValue("registry_name"), RecordName: r.PathValue("record_name"),
+		EntryType: "record", Namespace: ns, Registry: reg, RecordName: rec,
 		PayloadRaw: payload, State: "live",
 	}, "Record published successfully")
 }
@@ -184,6 +258,18 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if m := strings.Trim(r.Header.Get("If-Match"), `"`); m != "" && m != "*" && m != hex.EncodeToString(current.Digest) {
+		writeErr(w, http.StatusPreconditionFailed, "PRECONDITION_FAILED",
+			"record has changed: current digest is "+hex.EncodeToString(current.Digest))
+		return
+	}
+	// Revoking an already-revoked record is a no-op, not a second revocation.
+	if current.State == "revoked" {
+		writeJSON(w, http.StatusOK, envelope{Message: "Record is already revoked; no new version appended",
+			Data: versionData(current, true)})
+		return
+	}
+
 	payload := current.PayloadRaw
 	if req.Reason != "" {
 		var obj map[string]any

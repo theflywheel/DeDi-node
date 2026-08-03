@@ -267,3 +267,125 @@ func TestPublishEnforcesRegistrySchema(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+// setupRegistry publishes a namespace and registry, returning the record path.
+func setupRegistry(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, ns, reg, rec string) string {
+	t.Helper()
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/"+ns, []byte(`{"payload":{}}`)).Body.Close()
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/"+ns+"/registries/"+reg, []byte(`{"payload":{}}`)).Body.Close()
+	return "/admin/namespaces/" + ns + "/registries/" + reg + "/records/" + rec
+}
+
+func versionsOf(t *testing.T, srv *httptest.Server, ns, reg, rec string) float64 {
+	t.Helper()
+	m := getJSON(t, srv.URL+"/dedi/versions/"+ns+"/"+reg+"/"+rec, http.StatusOK)
+	return m["data"].(map[string]any)["total_versions"].(float64)
+}
+
+// A double-clicked Save — or a captured request replayed inside the signature
+// window — must not fork a participant's history.
+func TestPublishIsIdempotentForIdenticalPayload(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	body := []byte(`{"payload":{"subscriber_id":"a","type":"BPP"}}`)
+
+	first := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", body))
+	if first["data"].(map[string]any)["unchanged"] != false {
+		t.Fatalf("first publish reported unchanged: %v", first)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 1 {
+		t.Fatalf("after first publish: %v versions", n)
+	}
+
+	// Same payload again: no new version, and the response says so.
+	second := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", body))
+	data := second["data"].(map[string]any)
+	if data["unchanged"] != true {
+		t.Fatalf("replay appended a version: %v", second)
+	}
+	if data["version"] != first["data"].(map[string]any)["version"] {
+		t.Fatalf("replay returned a different version: %v vs %v", data["version"], first["data"])
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 1 {
+		t.Fatalf("replay forked history: %v versions", n)
+	}
+
+	// A genuine change still appends.
+	changed := []byte(`{"payload":{"subscriber_id":"a","type":"BAP"}}`)
+	if bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", changed))["data"].(map[string]any)["unchanged"] != false {
+		t.Fatal("a changed payload was treated as a replay")
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
+		t.Fatalf("after real change: %v versions, want 2", n)
+	}
+}
+
+// If-Match is lost-update protection: two operators editing the same
+// participant must not silently overwrite each other.
+func TestPublishHonoursIfMatch(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	first := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"v":1}}`)))
+	digest := first["data"].(map[string]any)["digest"].(string)
+
+	// Stale digest: refused.
+	req := func(ifMatch string, body string) *http.Response {
+		r, _ := http.NewRequest("POST", srv.URL+path+"/publish", bytes.NewReader([]byte(body)))
+		now := time.Now().UTC()
+		r.Header.Set(publisher.HeaderKeyID, "op-1")
+		r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+		r.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", path+"/publish", []byte(body), now))
+		r.Header.Set("If-Match", ifMatch)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	if resp := req("0000000000000000000000000000000000000000000000000000000000000000", `{"payload":{"v":2}}`); resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("stale If-Match: status %d, want 412", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 1 {
+		t.Fatalf("refused write still appended: %v versions", n)
+	}
+	// Current digest: accepted.
+	if resp := req(digest, `{"payload":{"v":2}}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("current If-Match: status %d, want 200", resp.StatusCode)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
+		t.Fatalf("accepted write did not append: %v versions", n)
+	}
+	// If-Match on a record that does not exist yet cannot be satisfied.
+	other := "/admin/namespaces/ns/registries/r/records/KEY-NEW/publish"
+	r, _ := http.NewRequest("POST", srv.URL+other, bytes.NewReader([]byte(`{"payload":{}}`)))
+	now := time.Now().UTC()
+	r.Header.Set(publisher.HeaderKeyID, "op-1")
+	r.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+	r.Header.Set(publisher.HeaderSignature, publisher.Sign(priv, "POST", other, []byte(`{"payload":{}}`), now))
+	r.Header.Set("If-Match", digest)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("If-Match on a new record: status %d, want 412", resp.StatusCode)
+	}
+}
+
+func TestRevokeIsIdempotent(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	path := setupRegistry(t, srv, priv, "ns", "r", "KEY-1")
+	signedDo(t, srv, priv, "POST", path+"/publish", []byte(`{"payload":{"subscriber_id":"a"}}`)).Body.Close()
+
+	if bodyOf(t, signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`)))["data"].(map[string]any)["unchanged"] != false {
+		t.Fatal("first revoke reported unchanged")
+	}
+	second := bodyOf(t, signedDo(t, srv, priv, "POST", path+"/revoke", []byte(`{"reason":"x"}`)))
+	if second["data"].(map[string]any)["unchanged"] != true {
+		t.Fatalf("second revoke appended a version: %v", second)
+	}
+	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
+		t.Fatalf("versions = %v, want 2 (publish + one revoke)", n)
+	}
+}
