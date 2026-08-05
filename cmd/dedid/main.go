@@ -7,14 +7,17 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/mod/sumdb/note"
 
@@ -219,6 +222,81 @@ func openStore(ctx context.Context) (*store.Store, error) {
 	return s, nil
 }
 
+// nodeKey resolves the identity key that signs this node's checkpoints, and
+// returns it with its verifier key when that is known.
+//
+// Three sources, in descending order of how explicitly the operator asked for
+// them: DEDI_KEY, a key file, and failing both, the node's own database. The
+// last one is what makes a node deployable in one click — a platform that hands
+// you a Postgres and nothing else is the common case, and demanding a key
+// minted on a laptop first turns every "deploy this" into "deploy this, but
+// first install Go". The key is generated once and kept, so the node keeps the
+// identity its existing checkpoints were signed under.
+//
+// The verifier key comes back empty for the explicit sources: a note private
+// key does not carry its public half in a form we can recover without
+// reimplementing the note format, and operators supplying their own key already
+// have the verifier key that keygen printed alongside it.
+func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey string, err error) {
+	if k := strings.TrimSpace(os.Getenv("DEDI_KEY")); k != "" {
+		return k, "", nil
+	}
+	// An explicitly configured file that cannot be read is a misconfiguration,
+	// not an invitation to mint a new identity: silently signing under a
+	// different key would look like a forked history to every witness watching.
+	explicit := os.Getenv("DEDI_KEY_FILE")
+	keyFile := explicit
+	if keyFile == "" {
+		keyFile = "dedid.key"
+	}
+	b, readErr := os.ReadFile(keyFile)
+	switch {
+	case readErr == nil:
+		return strings.TrimSpace(string(b)), "", nil
+	case explicit != "":
+		return "", "", fmt.Errorf("read node key from DEDI_KEY_FILE: %w", readErr)
+	case !errors.Is(readErr, fs.ErrNotExist):
+		return "", "", fmt.Errorf("read node key %s: %w", keyFile, readErr)
+	}
+
+	// The generated key is only a candidate — if this node already has an
+	// identity, or another replica claims one first, EnsureIdentity returns the
+	// stored one and this key is discarded.
+	candidateSKey, candidateVKey, err := note.GenerateKey(rand.Reader, noteName(origin))
+	if err != nil {
+		return "", "", fmt.Errorf("generate node key: %w", err)
+	}
+	skey, vkey, err = s.EnsureIdentity(ctx, candidateSKey, candidateVKey)
+	if err != nil {
+		return "", "", fmt.Errorf("claim node identity: %w", err)
+	}
+	if skey == candidateSKey {
+		log.Printf("generated node identity for origin %s", origin)
+	}
+	// Printed on every boot, not just the first: this is the key third parties
+	// need to verify this node's checkpoints, and an operator who did not
+	// capture it at creation has no other way to recover it.
+	log.Printf("node verifier key (distribute to clients and witnesses):\n%s", vkey)
+	return skey, vkey, nil
+}
+
+// noteName adapts an origin into a signed-note key name. The name appears in
+// every checkpoint signature, so tying it to the origin keeps the signature
+// self-describing; note names may not contain '+' or whitespace, which an
+// origin is under no obligation to respect.
+func noteName(origin string) string {
+	name := strings.Map(func(r rune) rune {
+		if r == '+' || unicode.IsSpace(r) {
+			return '-'
+		}
+		return r
+	}, origin)
+	if name == "" {
+		return "dedi.local"
+	}
+	return name
+}
+
 func serve() error {
 	ctx := context.Background()
 	s, err := openStore(ctx)
@@ -227,18 +305,10 @@ func serve() error {
 	}
 	defer s.Close()
 
-	// The node signing key comes from DEDI_KEY when set, else from a file.
-	// Container platforms inject secrets as environment variables and have no
-	// persistent filesystem by default, so requiring a file makes the node
-	// undeployable there.
-	skey := strings.TrimSpace(os.Getenv("DEDI_KEY"))
-	if skey == "" {
-		keyFile := envOr("DEDI_KEY_FILE", "dedid.key")
-		skeyBytes, err := os.ReadFile(keyFile)
-		if err != nil {
-			return fmt.Errorf("read node key: set DEDI_KEY, or run 'dedid keygen': %w", err)
-		}
-		skey = strings.TrimSpace(string(skeyBytes))
+	origin := envOr("DEDI_ORIGIN", "dev.dedi.local/log")
+	skey, vkey, err := nodeKey(ctx, s, origin)
+	if err != nil {
+		return err
 	}
 	interval, err := time.ParseDuration(envOr("DEDI_CHECKPOINT_INTERVAL", "30s"))
 	if err != nil {
@@ -255,7 +325,7 @@ func serve() error {
 	cp := &checkpoint.Checkpointer{
 		Store:    s,
 		SKey:     skey,
-		Origin:   envOr("DEDI_ORIGIN", "dev.dedi.local/log"),
+		Origin:   origin,
 		Interval: interval,
 	}
 	go cp.Run(ctx)
@@ -320,7 +390,11 @@ func serve() error {
 		return fmt.Errorf("DEDI_STATS_FLUSH_INTERVAL must be positive")
 	}
 
-	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
+	// A node that minted its own key already knows its verifier key, so the
+	// explorer can show it without the operator copying it back in by hand.
+	// An explicit DEDI_VERIFIER_KEY still wins, since only the operator knows
+	// the public half of a key they supplied themselves.
+	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: envOr("DEDI_VERIFIER_KEY", vkey),
 		DemoURL: os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
