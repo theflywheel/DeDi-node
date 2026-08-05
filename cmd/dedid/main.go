@@ -321,7 +321,7 @@ func serve() error {
 	}
 
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
-		WildcardNamespaces: wildcard}
+		DemoURL: os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
 	}

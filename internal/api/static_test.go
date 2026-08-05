@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -64,6 +65,35 @@ func TestDocsServed(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("docs page missing %q", want)
 		}
+	}
+}
+
+// The pages are embedded, so every node ships the same markup: the "Demo" tab
+// has to be substituted per node or each one sends its visitors to the flywheel
+// reference demo. Neither page may leak the raw placeholder either way.
+func TestDemoURLSubstituted(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		demoURL string
+		want    string
+	}{
+		{"operator configured", "https://schemes.example.org/", "https://schemes.example.org/"},
+		{"unset falls back", "", defaultDemoURL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{DemoURL: tc.demoURL}
+			for path, h := range map[string]http.HandlerFunc{"/": s.explorer, "/docs": s.docs} {
+				rec := httptest.NewRecorder()
+				h(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				body := rec.Body.String()
+				if !strings.Contains(body, `<a href="`+tc.want+`">Demo</a>`) {
+					t.Errorf("%s: demo link not pointed at %q", path, tc.want)
+				}
+				if strings.Contains(body, "{{DEMO_URL}}") {
+					t.Errorf("%s: demo placeholder left unsubstituted", path)
+				}
+			}
+		})
 	}
 }
 
