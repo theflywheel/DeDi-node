@@ -157,7 +157,8 @@ func serve() error {
 		log.Printf("anchoring checkpoints to %s every %s", backend, aiv)
 	}
 
-	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY")}
+	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: os.Getenv("DEDI_VERIFIER_KEY"),
+		DemoURL: os.Getenv("DEDI_DEMO_URL")}
 	listen := envOr("DEDI_LISTEN", ":8080")
 	log.Printf("dedid read plane listening on %s", listen)
 	server := &http.Server{

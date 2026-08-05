@@ -12,6 +12,7 @@ type Server struct {
 	CP          *checkpoint.Checkpointer
 	TTL         int    // cache hint surfaced in ttl fields (seconds)
 	VerifierKey string // node verifier key, injected into the explorer page (may be empty)
+	DemoURL     string // target of the pages' "Demo" nav tab; empty falls back to defaultDemoURL
 }
 
 func (s *Server) Handler() http.Handler {
