@@ -81,7 +81,15 @@ sequenceDiagram
 <tr><td><code>/dedi/versions/{namespace}[/{registry}[/{record}]]</code></td><td>full version history</td></tr>
 <tr><td><code>/dedi/log/checkpoint</code></td><td>signed tree head (C2SP checkpoint)</td></tr>
 <tr><td><code>/dedi/log/proof/consistency?old=&amp;new=</code></td><td>append-only proof between two tree sizes</td></tr>
+<tr><td><code>/dedi/stats</code></td><td>requests served, by status class, plus uptime</td></tr>
+<tr><td><code>/healthz</code></td><td>liveness for probes: <code>200</code> if the database is reachable, <code>503</code> if not</td></tr>
 </table>
+<p><code>/healthz</code> answers a flat document rather than the usual envelope, so uptime monitors
+can assert on it directly. It also reports <code>tree_size</code> and
+<code>checkpoint_age_seconds</code>, but never fails on them: the checkpointer is idempotent and
+writes nothing while the tree is unchanged, so on a quiet registry the newest checkpoint is
+legitimately old. Neither <code>/healthz</code> nor <code>/dedi/stats</code> counts toward the
+served-request total, so polling them does not inflate the number they report.</p>
 <p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
 signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
 <code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against the public

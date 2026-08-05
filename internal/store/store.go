@@ -37,3 +37,9 @@ func Open(ctx context.Context, dbURL string) (*Store, error) {
 }
 
 func (s *Store) Close() { s.pool.Close() }
+
+// Ping checks the database is actually reachable. Open pings once at startup,
+// but a pool that was healthy then can be unreachable now, and every read path
+// would fail while the process itself keeps answering — so health probes need
+// their own round trip rather than trusting the pool's existence.
+func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

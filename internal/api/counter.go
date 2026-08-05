@@ -76,7 +76,9 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 
 // counted wraps h so every served request lands in a counter. The dashboard's
 // own traffic is excluded — the page polls /dedi/stats on a timer, and counting
-// that would make the number climb with nobody using the node.
+// that would make the number climb with nobody using the node. Health probes are
+// excluded for the same reason: an uptime monitor checking once a minute would
+// contribute over a thousand requests a day that nobody made.
 func (s *Server) counted(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if selfTraffic(r.URL.Path) {
@@ -92,7 +94,7 @@ func (s *Server) counted(h http.Handler) http.Handler {
 func selfTraffic(path string) bool {
 	return path == "/" || path == "/docs" || path == "/docs/" ||
 		path == "/admin" || path == "/admin/" ||
-		path == "/dedi/stats" || strings.HasPrefix(path, "/static/")
+		path == "/dedi/stats" || path == "/healthz" || strings.HasPrefix(path, "/static/")
 }
 
 // flushCounts drains the in-memory counters into the store. On failure the

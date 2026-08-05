@@ -43,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/log/checkpoint", s.logCheckpoint)
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
 	mux.HandleFunc("GET /dedi/stats", s.stats)
+	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)

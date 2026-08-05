@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -23,6 +24,21 @@ func (s *Store) LatestCheckpoint(ctx context.Context) (int64, string, error) {
 		return 0, "", ErrNoCheckpoint
 	}
 	return size, text, err
+}
+
+// LatestCheckpointAt reports the size and publication time of the newest
+// checkpoint. Callers that only need the note itself want LatestCheckpoint;
+// this exists for health reporting, where when the log was last signed matters
+// as much as what it says.
+func (s *Store) LatestCheckpointAt(ctx context.Context) (int64, time.Time, error) {
+	var size int64
+	var at time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT tree_size, created_at FROM checkpoints ORDER BY tree_size DESC LIMIT 1`).Scan(&size, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, time.Time{}, ErrNoCheckpoint
+	}
+	return size, at, err
 }
 
 // TruncateForTest empties all log state. Test support only.
