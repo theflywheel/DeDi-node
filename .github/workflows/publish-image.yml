@@ -1,0 +1,64 @@
+# Publishes the node image so a deployment does not require the source.
+#
+# The one-click Railway template deploys this image rather than building from
+# the repository: a template that builds from source can only be used by people
+# who can read the source, which makes "self-hostable" contingent on repository
+# visibility. An image on a public registry is installable by anyone, and drops
+# a cold deploy from a Go build to a pull.
+name: publish image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dedi-node
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+            # A manual run is an explicit decision to publish, so it may move
+            # :latest even from a branch. Without this the template button would
+            # have to point at a branch-shaped tag until the first merge to main.
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          # arm64 is not optional: a good share of self-hosters are on Apple
+          # silicon or Graviton, and an amd64-only image fails there at run time
+          # rather than at pull time, which is a confusing way to find out.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
