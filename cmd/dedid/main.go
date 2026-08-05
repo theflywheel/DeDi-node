@@ -32,13 +32,15 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: dedid <keygen|pubkeygen|sign|serve|seed> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: dedid <keygen|pubkey|pubkeygen|sign|serve|seed> [flags]")
 		os.Exit(2)
 	}
 	var err error
 	switch os.Args[1] {
 	case "keygen":
 		err = keygen(os.Args[2:])
+	case "pubkey":
+		err = pubkey(os.Args[2:])
 	case "pubkeygen":
 		err = pubkeygen(os.Args[2:])
 	case "sign":
@@ -76,6 +78,66 @@ func keygen(args []string) error {
 	}
 	fmt.Printf("private key written to %s\npublic verifier key (distribute to clients):\n%s\n", *out, vkey)
 	return nil
+}
+
+// pubkey recovers the verifier key for a node identity key.
+//
+// The verifier key is public, and it is the only thing a relying party or a
+// witness needs in order to check this node's checkpoints — but keygen prints
+// it once and an operator who did not keep it has, until now, no way back to it
+// short of rotating the identity and invalidating every checkpoint already
+// signed. It is derivable from the private key, so losing it should be an
+// inconvenience rather than an incident.
+func pubkey(args []string) error {
+	fs := flag.NewFlagSet("pubkey", flag.ExitOnError)
+	keyFile := fs.String("key", "", "node private key file (default: $DEDI_KEY, else dedid.key)")
+	fs.Parse(args)
+
+	skey := strings.TrimSpace(os.Getenv("DEDI_KEY"))
+	if *keyFile != "" || skey == "" {
+		path := *keyFile
+		if path == "" {
+			path = "dedid.key"
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read node key: %w", err)
+		}
+		skey = strings.TrimSpace(string(b))
+	}
+
+	vkey, err := verifierKeyFor(skey)
+	if err != nil {
+		return err
+	}
+	fmt.Println(vkey)
+	return nil
+}
+
+// verifierKeyFor derives the public verifier key from a signed-note private
+// key. The encoding is fixed by the note format: "PRIVATE+KEY", the key name,
+// the key hash, and the base64 of an algorithm byte followed by the Ed25519
+// seed. The hash is recomputed from the public key rather than copied out of
+// the private key, so a corrupted input fails to verify later rather than
+// producing a plausible-looking key that matches nothing.
+func verifierKeyFor(skey string) (string, error) {
+	// Split at most five ways: base64 uses '+' as a symbol, so the trailing
+	// field has to be taken whole rather than split on its own contents.
+	parts := strings.SplitN(skey, "+", 5)
+	if len(parts) != 5 || parts[0] != "PRIVATE" || parts[1] != "KEY" {
+		return "", fmt.Errorf("not a node private key: expected PRIVATE+KEY+<name>+<hash>+<base64>")
+	}
+	name, encoded := parts[2], parts[4]
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("node private key is not valid base64: %w", err)
+	}
+	// One algorithm byte, then the seed.
+	if len(raw) != 1+ed25519.SeedSize {
+		return "", fmt.Errorf("node private key has unexpected length %d", len(raw))
+	}
+	pub := ed25519.NewKeyFromSeed(raw[1:]).Public().(ed25519.PublicKey)
+	return note.NewEd25519VerifierKey(name, pub)
 }
 
 // pubkeygen mints a publisher credential for the write plane. The private key
