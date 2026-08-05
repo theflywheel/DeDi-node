@@ -41,5 +41,26 @@ Note: a stock ONIX adapter pins the registry URL to `fabric.nfh.global` via a si
 
 ## Live demo
 
-- **Node A (primary):** https://dedi.proto.theflywheel.in/ — explorer + [/docs](https://dedi.proto.theflywheel.in/docs) (sequence diagrams + test cases).
-- **Node B (witness):** https://dedi-witness.proto.theflywheel.in/ — an independent node that continuously verifies A's log is append-only (signed checkpoints + consistency proofs) and records each verdict under its own `_witness` namespace. This is the decentralised-trust property: A can't rewrite history without B detecting it. Set `DEDI_WITNESS_TARGET_URL` + `DEDI_WITNESS_TARGET_KEY` to make any node witness another.
+Three independently operated nodes carry the `beckn-testnet` registry, arranged in a witness ring
+— A watches B, B watches C, C watches A — so every node is watched by another and none is
+privileged. Each node has its own identity key, its own Postgres and its own log; they are separate
+operators, not replicas. Every node's explorer shows the whole network and which peers are up.
+
+- **Node A:** https://dedi.beckn.try-dough.com/ — the node carrying the Beckn subscribers, plus [/docs](https://dedi.beckn.try-dough.com/docs) (sequence diagrams + test cases).
+- **Node B:** https://dedi-b-production.up.railway.app/
+- **Node C:** https://dedi-c-production.up.railway.app/ — stood up from scratch with `scripts/deploy_railway.py`, key and all.
+- **Status page:** https://status.beckn.try-dough.com/ — per-node health, log and network monitors, plus the trust ring.
+
+The ring is the decentralised-trust property: a node cannot rewrite its history without the node
+watching it holding a consistency proof that says so, recorded in that node's own `_witness`
+namespace. Set `DEDI_WITNESS_TARGET_URL` + `DEDI_WITNESS_TARGET_KEY` to make any node witness
+another, and `DEDI_PEERS` to have it display the network it belongs to.
+
+### Run a node of your own
+
+    scripts/deploy_railway.py --name my-dedi-node
+
+Provisions a Postgres, the node, and a domain, and waits until the node is actually serving. The
+node mints its own identity key on first boot and keeps it in its database, so nothing has to be
+generated beforehand — `dedid pubkey` recovers the verifier key later if you need to hand it to
+someone verifying you.

@@ -82,6 +82,7 @@ sequenceDiagram
 <tr><td><code>/dedi/log/checkpoint</code></td><td>signed tree head (C2SP checkpoint)</td></tr>
 <tr><td><code>/dedi/log/proof/consistency?old=&amp;new=</code></td><td>append-only proof between two tree sizes</td></tr>
 <tr><td><code>/dedi/stats</code></td><td>requests served, by status class, plus uptime</td></tr>
+<tr><td><code>/dedi/network</code></td><td>the nodes carrying this network, and whether each is answering</td></tr>
 <tr><td><code>/healthz</code></td><td>liveness for probes: <code>200</code> if the database is reachable, <code>503</code> if not</td></tr>
 </table>
 <p><code>/healthz</code> answers a flat document rather than the usual envelope, so uptime monitors
@@ -90,6 +91,12 @@ can assert on it directly. It also reports <code>tree_size</code> and
 writes nothing while the tree is unchanged, so on a quiet registry the newest checkpoint is
 legitimately old. Neither <code>/healthz</code> nor <code>/dedi/stats</code> counts toward the
 served-request total, so polling them does not inflate the number they report.</p>
+<p><code>/dedi/network</code> lists the nodes an operator configured as peers (<code>DEDI_PEERS</code>)
+and reports whether each answered with a signed checkpoint. That is an <em>observation</em>, and it is
+deliberately weaker than witnessing: reachability says a node replied, while a witness verdict is a
+proof that a node has not rewritten its history. The explorer renders them separately for that
+reason. Nodes do not replicate each other's records — each keeps its own key, database and log, and
+federation beyond witnessing is an explicit non-goal (design.md &sect;3).</p>
 <p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
 signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
 <code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against the public
