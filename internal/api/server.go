@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
@@ -15,6 +16,20 @@ type Server struct {
 	TTL         int    // cache hint surfaced in ttl fields (seconds)
 	VerifierKey string // node verifier key, injected into the explorer page (may be empty)
 	DemoURL     string // target of the pages' "Demo" nav tab; empty falls back to defaultDemoURL
+
+	// NodeName labels this node in the network view. Empty falls back to the
+	// log origin, which is always set and always distinct between nodes.
+	NodeName string
+
+	// Network observes the other nodes carrying this directory network. nil on
+	// a standalone node, which then reports a network of one — accurately.
+	Network *network.Monitor
+
+	// WitnessTarget and WitnessTargetURL name the node this one witnesses, so
+	// the network view can distinguish a peer it merely reaches from the peer
+	// whose history it is actually proving. Empty when witnessing nothing.
+	WitnessTarget    string
+	WitnessTargetURL string
 
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
 	// lookup (design.md:256). nil means no restriction — permitted only while
@@ -43,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/log/checkpoint", s.logCheckpoint)
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
 	mux.HandleFunc("GET /dedi/stats", s.stats)
+	mux.HandleFunc("GET /dedi/network", s.networkView)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /docs", s.docs)

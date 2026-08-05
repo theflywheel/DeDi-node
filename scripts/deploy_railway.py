@@ -19,6 +19,8 @@ guesses which port to route to and a node that is running perfectly well answers
 Requires: the `railway` CLI, logged in (`railway login`).
 """
 
+from __future__ import annotations  # macOS still ships Python 3.9 as `python3`
+
 import argparse
 import json
 import os
@@ -251,8 +253,22 @@ def main() -> None:
 
     print(f"\nnode is serving: {url}")
     print(f"  health     {json.dumps(health)}")
-    with urllib.request.urlopen(url + "/dedi/log/checkpoint", timeout=10) as resp:
-        print("  checkpoint " + resp.read().decode().splitlines()[0])
+
+    # A brand new node is healthy before it is verifiable: the first checkpoint
+    # lands one checkpoint interval after boot, and until then this 404s. Worth
+    # waiting for rather than skipping, because a node that never signs one is
+    # broken in a way /healthz does not catch.
+    print("  waiting for the first signed checkpoint…")
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url + "/dedi/log/checkpoint", timeout=10) as resp:
+                print("  checkpoint " + resp.read().decode().splitlines()[0])
+                break
+        except Exception:
+            time.sleep(5)
+    else:
+        print("  checkpoint NOT published after 2 minutes — check the logs")
     print(f"\nIts verifier key is printed in the boot log; anyone verifying this node, or "
           f"witnessing it, needs it:\n  railway logs -s {service_id} | grep -A1 'verifier key'")
 

@@ -25,6 +25,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/anchor"
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 	"github.com/theflywheel/DeDi-node/internal/witness"
@@ -414,7 +415,9 @@ func serve() error {
 	// Optional: witness another node's log (decentralised trust). When
 	// DEDI_WITNESS_TARGET_URL is set, this node periodically verifies the
 	// target is append-only and records each verdict under `_witness`.
-	if wt := os.Getenv("DEDI_WITNESS_TARGET_URL"); wt != "" {
+	witnessTargetURL := os.Getenv("DEDI_WITNESS_TARGET_URL")
+	witnessTargetOrigin := envOr("DEDI_WITNESS_TARGET_ORIGIN", "target")
+	if wt := witnessTargetURL; wt != "" {
 		wiv, err := time.ParseDuration(envOr("DEDI_WITNESS_INTERVAL", "60s"))
 		if err != nil {
 			return fmt.Errorf("DEDI_WITNESS_INTERVAL: %w", err)
@@ -423,7 +426,7 @@ func serve() error {
 			Store:     s,
 			TargetURL: wt,
 			TargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
-			Origin:    envOr("DEDI_WITNESS_TARGET_ORIGIN", "target"),
+			Origin:    witnessTargetOrigin,
 			Interval:  wiv,
 		}).Run(ctx)
 		log.Printf("witnessing %s every %s", wt, wiv)
@@ -475,7 +478,32 @@ func serve() error {
 	// explorer can show it without the operator copying it back in by hand.
 	// An explicit DEDI_VERIFIER_KEY still wins, since only the operator knows
 	// the public half of a key they supplied themselves.
+	// The other nodes carrying this network. Observing them is a different and
+	// weaker thing than witnessing one of them: this only establishes that a
+	// peer answered, which is what a network overview should claim and no more.
+	peers, err := network.ParsePeers(os.Getenv("DEDI_PEERS"))
+	if err != nil {
+		return fmt.Errorf("DEDI_PEERS: %w", err)
+	}
+	var netmon *network.Monitor
+	if len(peers) > 0 {
+		peerInterval, err := time.ParseDuration(envOr("DEDI_PEER_INTERVAL", "30s"))
+		if err != nil {
+			return fmt.Errorf("DEDI_PEER_INTERVAL: %w", err)
+		}
+		netmon = &network.Monitor{Peers: peers, Interval: peerInterval}
+		go netmon.Run(ctx)
+		names := make([]string, 0, len(peers))
+		for _, p := range peers {
+			names = append(names, p.Name)
+		}
+		log.Printf("network of %d nodes; watching %s every %s",
+			len(peers)+1, strings.Join(names, ", "), peerInterval)
+	}
+
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: envOr("DEDI_VERIFIER_KEY", vkey),
+		NodeName: os.Getenv("DEDI_NODE_NAME"), Network: netmon,
+		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		DemoURL: os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}

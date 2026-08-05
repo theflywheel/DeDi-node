@@ -16,6 +16,14 @@
   .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
   #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
   nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  /* The network table can outgrow a phone; let it scroll rather than the page. */
+  #network { overflow-x: auto; }
+  table.net { border-collapse: collapse; font-size: .92em; }
+  table.net th, table.net td { border: 1px solid #ccc; padding: .25em .5em; text-align: left; white-space: nowrap; }
+  table.net th { background: #f4f4f4; font-weight: normal; }
+  table.net td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .self { font-weight: bold; }
+  .dot { font-size: 1.1em; line-height: 1; }
 </style>
 </head>
 <body>
@@ -26,6 +34,9 @@
 <p id="stats" class="mut">requests served: <span id="served">...</span></p>
 <p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
 checkpoint signature are checked in your browser; the server is trusted for neither.</p>
+
+<h2>Network <span id="netcount" class="mut"></span></h2>
+<div id="network" class="mut">loading...</div>
 
 <hr>
 
@@ -41,7 +52,7 @@ checkpoint signature are checked in your browser; the server is trusted for neit
 
 <hr>
 <p class="mut">API: <code>/dedi/lookup</code> &middot; <code>/dedi/query</code> &middot;
-<code>/dedi/versions</code> &middot; <code>/dedi/log/checkpoint</code></p>
+<code>/dedi/versions</code> &middot; <code>/dedi/log/checkpoint</code> &middot; <code>/dedi/network</code></p>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -135,6 +146,46 @@ async function loadStats(){
   if(d.uptime_seconds != null) out += ' <span class="mut">&middot; up '+fmtDur(d.uptime_seconds)+'</span>';
   $('served').innerHTML = out;
 }
+// Network overview. Two different kinds of claim are on this table and the
+// wording keeps them apart: "up" means the node answered when this node asked,
+// which is an observation anyone could make. Witnessing is the cryptographic
+// claim, and it is stated separately below the table rather than as a column,
+// so a green dot is never mistaken for a proof of anything.
+async function loadNetwork(){
+  const d = (await jget('/dedi/network')).data;
+  const nodes = d.nodes || [];
+  $('netcount').textContent = '· ' + d.reachable + ' of ' + d.total + ' nodes up';
+
+  let out = '<table class="net"><tr><th></th><th>node</th><th>log origin</th>' +
+            '<th>entries</th><th>latency</th><th>state</th></tr>';
+  for(const n of nodes){
+    const up = n.reachable;
+    const dot = '<span class="dot ' + (up ? 'ok' : 'no') + '">' + (up ? '●' : '○') + '</span>';
+    const state = up ? 'up' : (n.error || 'not yet checked');
+    const label = n.self ? esc(n.name) + ' <span class="mut">(this node)</span>' : esc(n.name);
+    out += '<tr class="' + (n.self ? 'self' : '') + '">' +
+      '<td>' + dot + '</td>' +
+      '<td>' + (n.url ? '<a href="' + esc(n.url) + '">' + label + '</a>' : label) + '</td>' +
+      '<td class="mut">' + esc(n.origin || '—') + '</td>' +
+      '<td class="num">' + (n.tree_size != null ? Number(n.tree_size).toLocaleString() : '—') + '</td>' +
+      '<td class="num mut">' + (n.latency_ms != null ? n.latency_ms + 'ms' : '—') + '</td>' +
+      '<td class="' + (up ? 'ok' : 'no') + '">' + esc(state) + '</td>' +
+      '</tr>';
+  }
+  out += '</table>';
+
+  out += '<p class="mut">Each node keeps its own key, its own database and its own log; ' +
+         'they are independent operators, not replicas of one another. "Up" here means the node ' +
+         'answered with a signed checkpoint when this one asked.</p>';
+  if(d.witness_url){
+    out += '<p class="mut">This node <b>witnesses</b> <code>' + esc(d.witnessing || d.witness_url) +
+           '</code>: it demands consistency proofs from it and records every verdict in its own log, ' +
+           'so that node cannot rewrite its history without this one holding the evidence. ' +
+           'Verdicts are under the <code>_witness</code> namespace.</p>';
+  }
+  $('network').innerHTML = out;
+}
+
 function fmtDur(s){
   s = Math.floor(s);
   if(s < 60) return s+'s';
@@ -215,6 +266,11 @@ loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint e
 const statsFail = () => $('served').innerHTML = '<span class="mut">unavailable</span>';
 loadStats().catch(statsFail);
 setInterval(() => loadStats().catch(statsFail), 5000);
+const netFail = e => $('network').innerHTML = '<span class="no">network unavailable: ' + esc(e.message) + '</span>';
+loadNetwork().catch(netFail);
+// Slower than the stats poll: peer observations only refresh server-side every
+// DEDI_PEER_INTERVAL, so polling faster would redraw the same numbers.
+setInterval(() => loadNetwork().catch(netFail), 15000);
 browse();
 </script>
 </body>
