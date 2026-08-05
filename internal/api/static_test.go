@@ -79,6 +79,8 @@ func TestDemoURLSubstituted(t *testing.T) {
 	}{
 		{"operator configured", "https://schemes.example.org/", "https://schemes.example.org/"},
 		{"unset falls back", "", defaultDemoURL},
+		{"escapes attribute metacharacters", `https://example.com/" onclick="alert(1)`, "https://example.com/&#34; onclick=&#34;alert(1)"},
+		{"rejects non-http schemes", "javascript:alert(1)", defaultDemoURL},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Server{DemoURL: tc.demoURL}

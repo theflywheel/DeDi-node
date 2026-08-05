@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -210,13 +211,31 @@ func openStore(ctx context.Context) (*store.Store, error) {
 		"postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable"))
 	s, err := store.Open(ctx, dbURL)
 	if err != nil {
-		return nil, fmt.Errorf("connect database: %w", err)
+		return nil, fmt.Errorf("connect database %s: %s", redactDatabaseURL(dbURL), redactDatabaseError(err, dbURL))
 	}
 	if err := s.Migrate(ctx); err != nil {
 		s.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func redactDatabaseError(err error, dbURL string) string {
+	msg := err.Error()
+	redacted := redactDatabaseURL(dbURL)
+	if redacted != dbURL {
+		msg = strings.ReplaceAll(msg, dbURL, redacted)
+	}
+	return msg
+}
+
+func redactDatabaseURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = url.UserPassword("redacted", "redacted")
+	return u.String()
 }
 
 func serve() error {
