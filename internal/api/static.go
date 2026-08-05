@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	_ "embed"
+	"html"
 	"net/http"
+	"net/url"
 )
 
 //go:embed static/index.html
@@ -25,7 +27,7 @@ const defaultDemoURL = "https://schemes.proto.theflywheel.in/"
 // inclusion proofs and simply reports the signature as unchecked.
 func (s *Server) explorer(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(explorerHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
-	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoURL()), 1)
+	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
 }
@@ -37,12 +39,20 @@ func (s *Server) demoURL() string {
 	if s.DemoURL == "" {
 		return defaultDemoURL
 	}
+	u, err := url.Parse(s.DemoURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return defaultDemoURL
+	}
 	return s.DemoURL
+}
+
+func (s *Server) demoHref() string {
+	return html.EscapeString(s.demoURL())
 }
 
 // docs serves the embedded explainer page (sequence diagrams + test cases).
 func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
-	page := bytes.Replace(docsHTML, []byte("{{DEMO_URL}}"), []byte(s.demoURL()), 1)
+	page := bytes.Replace(docsHTML, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
 }
