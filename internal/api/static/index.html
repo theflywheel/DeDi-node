@@ -213,69 +213,285 @@ function clusterBlock(c){
 // about itself you would want independently. Each replica is asked for its own
 // signed checkpoint, and the roots are compared here. Identical roots is a real
 // statement about replication; "the leader says everyone is fine" is not.
+//
+// Latency is measured here too, and it is the reader's latency to each replica
+// rather than the cluster's internal timing — which is the number that decides
+// whether a lookup feels fast, and one this node could not report on its peers'
+// behalf even if it wanted to.
+
+let REPL_MEMBERS = [];      // last known membership, so the panel can refresh alone
+let REPL_HIST = new Map();  // replica id -> recent samples, for the sparklines
+let REPL_PIN = null;        // which replica the reader has opened
+let REPL_BUSY = false;      // guards against overlapping refreshes on a slow network
+const REPL_KEEP = 30;
+
+async function probeReplica(m){
+  const base = {id: m.id, self: !!m.self, leader: !!m.leader, url: m.http_url};
+  if(!m.http_url) return Object.assign(base, {err: 'no public URL configured'});
+  const started = performance.now();
+  try{
+    const [netRes, cpRes] = await Promise.all([
+      fetch(m.http_url + '/dedi/network').then(r => r.json()),
+      fetch(m.http_url + '/dedi/log/checkpoint').then(r => r.text())
+    ]);
+    const latency = Math.round(performance.now() - started);
+    const cl = (netRes.data && netRes.data.cluster) || {};
+    const parts = cpRes.split('\n');
+    return Object.assign(base, {
+      latency,
+      applied: cl.applied_index, commit: cl.commit_index,
+      lag: cl.lag_entries || 0, role: cl.role,
+      size: parts[1], root: parts[2]
+    });
+  }catch(e){
+    // A cross-origin failure lands here too, so this says "could not reach"
+    // rather than claiming the replica is down — from here those are the same
+    // observation and only one of them is a fact.
+    return Object.assign(base, {err: 'could not reach it from your browser'});
+  }
+}
+
+function replState(r, roots){
+  if(r.err) return 'unreachable';
+  if(roots.size > 1 && r.root !== roots.majority) return 'diverged';
+  if(r.lag > 0) return 'lagging';
+  return 'insync';
+}
+
+const REPL_COLOUR = {
+  insync:      {stroke: '#0a0', fill: '#eefaee', text: '#060'},
+  lagging:     {stroke: '#c60', fill: '#fdf3e7', text: '#a50'},
+  diverged:    {stroke: '#b00', fill: '#fdeeee', text: '#b00'},
+  unreachable: {stroke: '#999', fill: '#f4f4f4', text: '#666'}
+};
+
+// The cluster drawn as a star, because that is what Raft is: one leader that
+// every follower replicates from. A ring would imply peers exchanging entries
+// with each other, which is the witness ring's shape and not this one — and
+// the two must not be made to look alike.
+function clusterSVG(rows, leaderId){
+  const W = 620, H = 300, cx = 310, cy = 150;
+  const leader = rows.find(r => r.id === leaderId);
+  const others = rows.filter(r => r.id !== leaderId);
+  const roots = rootTally(rows);
+
+  let defs = '<defs>' +
+    '<marker id="rarrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">' +
+    '<path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>' +
+    '<marker id="rarrowlag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">' +
+    '<path d="M0,0 L10,5 L0,10 z" fill="#c60"/></marker>' +
+    '</defs>';
+
+  // No leader: an election is in progress, so there is no centre to draw from.
+  // Showing one anyway would assert a thing that is not true at that moment.
+  if(!leader){
+    let out = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:' + W + 'px">' + defs;
+    rows.forEach((r, i) => {
+      const a = (2 * Math.PI * i / rows.length) - Math.PI / 2;
+      out += replNode(r, cx + 150 * Math.cos(a), cy + 95 * Math.sin(a), 30, false, roots);
+    });
+    out += '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" font-size="12" fill="#c60">' +
+           'no leader — election in progress</text></svg>';
+    return out;
+  }
+
+  let out = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:' + W + 'px">' + defs;
+  const k = Math.max(others.length, 1);
+  const pos = others.map((r, i) => {
+    const a = (2 * Math.PI * i / k) - Math.PI / 2 + Math.PI / k;
+    return {r, x: cx + 210 * Math.cos(a), y: cy + 105 * Math.sin(a)};
+  });
+
+  // Edges first so the nodes sit on top of them.
+  for(const p of pos){
+    const dx = p.x - cx, dy = p.y - cy, len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const x1 = cx + ux * 42, y1 = cy + uy * 42;
+    const x2 = p.x - ux * 34, y2 = p.y - uy * 34;
+    const st = replState(p.r, roots);
+    const lagging = st === 'lagging' || st === 'diverged';
+    const dash = st === 'unreachable' ? ' stroke-dasharray="4 4"' : '';
+    out += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+      'stroke="' + (lagging ? '#c60' : '#999') + '" stroke-width="1.5"' + dash +
+      ' marker-end="url(#' + (lagging ? 'rarrowlag' : 'rarrow') + ')"/>';
+    // The edge label is the honest summary of that replication link: entries
+    // behind if any, round-trip if not.
+    const mx = cx + ux * len * 0.52, my = cy + uy * len * 0.52 - 6;
+    let label = '';
+    if(p.r.err) label = 'unreachable';
+    else if(p.r.lag > 0) label = p.r.lag + ' behind';
+    else label = 'in sync';
+    out += '<text x="' + mx + '" y="' + my + '" text-anchor="middle" font-size="10" ' +
+      'fill="' + (lagging ? '#a50' : '#666') + '">' + esc(label) + '</text>';
+  }
+
+  out += replNode(leader, cx, cy, 40, true, roots);
+  for(const p of pos) out += replNode(p.r, p.x, p.y, 30, false, roots);
+  out += '</svg>';
+  return out;
+}
+
+// One replica. The leader is drawn larger, at the centre, with a doubled ring
+// and the word "leader" — three signals rather than one, so it survives a
+// small screen, a colour-blind reader and a grayscale print.
+function replNode(r, x, y, radius, isLeader, roots){
+  const st = replState(r, roots);
+  const c = REPL_COLOUR[st];
+  const dash = st === 'unreachable' ? ' stroke-dasharray="4 4"' : '';
+  let out = '<g class="replnode" data-id="' + esc(r.id) + '" style="cursor:pointer">';
+  if(isLeader){
+    out += '<circle cx="' + x + '" cy="' + y + '" r="' + (radius + 5) + '" fill="none" stroke="' +
+      c.stroke + '" stroke-width="1" opacity=".45"/>';
+  }
+  out += '<circle cx="' + x + '" cy="' + y + '" r="' + radius + '" fill="' + c.fill +
+    '" stroke="' + c.stroke + '" stroke-width="' + (isLeader ? 2.5 : 1.5) + '"' + dash + '/>';
+  if(isLeader){
+    out += '<text x="' + x + '" y="' + (y - 8) + '" text-anchor="middle" font-size="9" fill="' +
+      c.text + '">LEADER</text>';
+  }
+  // Inside the circle: what this replica actually holds.
+  out += '<text x="' + x + '" y="' + (y + (isLeader ? 6 : 2)) + '" text-anchor="middle" ' +
+    'font-size="12" fill="' + c.text + '">' + esc(r.err ? '—' : (r.size || '?')) + '</text>';
+  out += '<text x="' + x + '" y="' + (y + (isLeader ? 18 : 14)) + '" text-anchor="middle" ' +
+    'font-size="8" fill="#666">entries</text>';
+  // Outside: who it is and how far away it is from the reader.
+  out += '<text x="' + x + '" y="' + (y + radius + 14) + '" text-anchor="middle" font-size="11" ' +
+    (r.self ? 'font-weight="bold" ' : '') + 'fill="#222">' + esc(r.id) + (r.self ? ' (you)' : '') + '</text>';
+  out += '<text x="' + x + '" y="' + (y + radius + 26) + '" text-anchor="middle" font-size="10" fill="#666">' +
+    (r.err ? 'unreachable' : r.latency + 'ms') + '</text>';
+  out += '</g>';
+  return out;
+}
+
+// Which root the majority of reachable replicas served. Used to decide which
+// replica is the odd one out rather than colouring all of them red — if two
+// agree and one does not, it is the one that does not that has the problem.
+function rootTally(rows){
+  const counts = new Map();
+  for(const r of rows){
+    if(r.err || !r.root) continue;
+    counts.set(r.root, (counts.get(r.root) || 0) + 1);
+  }
+  let majority = null, best = 0;
+  for(const [root, n] of counts){ if(n > best){ best = n; majority = root; } }
+  const set = new Set(counts.keys());
+  set.majority = majority;
+  return set;
+}
+
+// A short history, so a reader can tell a momentary blip from a trend. Latency
+// especially: one slow sample means nothing, five in a row means something.
+function sparkline(samples, key, colour){
+  const vals = samples.map(s => s[key]).filter(v => v != null);
+  if(vals.length < 2) return '<span class="mut">—</span>';
+  const max = Math.max(...vals, 1), min = Math.min(...vals);
+  const span = (max - min) || 1;
+  const w = 60, h = 14;
+  const pts = vals.map((v, i) =>
+    (i * w / (vals.length - 1)).toFixed(1) + ',' + (h - 1 - ((v - min) / span) * (h - 2)).toFixed(1)
+  ).join(' ');
+  return '<svg width="' + w + '" height="' + h + '" style="vertical-align:middle">' +
+    '<polyline points="' + pts + '" fill="none" stroke="' + colour + '" stroke-width="1"/></svg>';
+}
+
 async function loadReplication(members){
   const el = $('repl');
   if(!el) return;
-  const rows = await Promise.all(members.map(async m => {
-    if(!m.http_url) return {id: m.id, self: m.self, leader: m.leader, err: 'no public URL configured'};
-    try{
-      const [netRes, cpRes] = await Promise.all([
-        fetch(m.http_url + '/dedi/network').then(r => r.json()),
-        fetch(m.http_url + '/dedi/log/checkpoint').then(r => r.text())
-      ]);
-      const cl = (netRes.data && netRes.data.cluster) || {};
-      const parts = cpRes.split('\n');
-      return {
-        id: m.id, self: m.self, leader: m.leader,
-        applied: cl.applied_index, lag: cl.lag_entries,
-        size: parts[1], root: parts[2]
-      };
-    }catch(e){
-      // Cross-origin failures land here too, so this says "could not reach"
-      // rather than claiming the replica is down.
-      return {id: m.id, self: m.self, leader: m.leader, err: 'could not reach it from your browser'};
-    }
-  }));
+  if(REPL_BUSY) return;
+  REPL_BUSY = true;
+  try{
+    REPL_MEMBERS = members;
+    const rows = await Promise.all(members.map(probeReplica));
 
-  let out = '<table class="net"><tr><th>replica</th><th>entries</th><th>applied</th>' +
-            '<th>behind</th><th>signed root</th></tr>';
-  for(const r of rows){
-    if(r.err){
-      out += '<tr><td>' + esc(r.id) + '</td><td colspan="4" class="mut">' + esc(r.err) + '</td></tr>';
-      continue;
+    for(const r of rows){
+      const hist = REPL_HIST.get(r.id) || [];
+      hist.push({latency: r.err ? null : r.latency, lag: r.err ? null : r.lag});
+      while(hist.length > REPL_KEEP) hist.shift();
+      REPL_HIST.set(r.id, hist);
     }
-    out += '<tr class="' + (r.self ? 'self' : '') + '">' +
-      '<td>' + esc(r.id) + (r.leader ? ' <span class="mut">(leader)</span>' : '') + '</td>' +
-      '<td class="num">' + esc(r.size || '?') + '</td>' +
-      '<td class="num mut">' + Number(r.applied || 0).toLocaleString() + '</td>' +
-      '<td class="num ' + (r.lag > 0 ? 'no' : 'mut') + '">' + (r.lag > 0 ? r.lag : '\u2014') + '</td>' +
-      '<td class="mut">' + esc((r.root || '?').slice(0, 16)) + '\u2026</td>' +
-      '</tr>';
-  }
-  out += '</table>';
 
-  const seen = rows.filter(r => !r.err && r.root);
-  const roots = new Set(seen.map(r => r.root));
-  if(seen.length === 0){
-    out += '<p class="mut">No replica could be reached from your browser, so nothing is ' +
-      'claimed here either way.</p>';
-  }else if(roots.size === 1 && seen.length === rows.length){
-    out += '<p class="ok">&#10003; All ' + seen.length + ' replicas served the same signed root, ' +
-      'checked by your browser against each of them directly. They hold identical logs.</p>';
-  }else if(roots.size === 1){
-    out += '<p class="mut">The ' + seen.length + ' replicas your browser could reach served the ' +
-      'same signed root. The others were unreachable, so nothing is claimed about them.</p>';
-  }else{
-    // Either genuine divergence or a follower mid-catch-up. Both deserve to be
-    // visible; claiming which one it is would be guessing.
-    out += '<p class="no">&#10007; The replicas served <b>different signed roots</b>. That is ' +
-      'either a follower still catching up &mdash; check the "behind" column &mdash; or a real ' +
-      'divergence, which would be serious. Reload in a few seconds: if it persists, it is not lag.</p>';
+    const leaderId = (rows.find(r => r.leader) || {}).id;
+    const roots = rootTally(rows);
+    let out = clusterSVG(rows, leaderId);
+    out += '<p class="mut">Each replica is asked directly by your browser, so the round trips are ' +
+      'yours and the entry counts are each replica&rsquo;s own claim about itself. Click one for detail.</p>';
+    out += '<div id="replpin"></div>';
+
+    out += '<table class="net"><tr><th>replica</th><th>role</th><th>entries</th><th>applied</th>' +
+           '<th>behind</th><th>latency</th><th>trend</th><th>signed root</th></tr>';
+    for(const r of rows){
+      const st = replState(r, roots);
+      if(r.err){
+        out += '<tr class="' + (r.self ? 'self' : '') + '"><td>' + esc(r.id) + '</td>' +
+          '<td colspan="7" class="mut">' + esc(r.err) + '</td></tr>';
+        continue;
+      }
+      out += '<tr class="' + (r.self ? 'self' : '') + '">' +
+        '<td>' + esc(r.id) + (r.self ? ' <span class="mut">(you)</span>' : '') + '</td>' +
+        '<td class="' + (r.leader ? 'ok' : 'mut') + '">' + (r.leader ? 'leader' : 'follower') + '</td>' +
+        '<td class="num">' + esc(r.size || '?') + '</td>' +
+        '<td class="num mut">' + Number(r.applied || 0).toLocaleString() + '</td>' +
+        '<td class="num ' + (r.lag > 0 ? 'no' : 'mut') + '">' + (r.lag > 0 ? r.lag : '—') + '</td>' +
+        '<td class="num">' + r.latency + 'ms</td>' +
+        '<td>' + sparkline(REPL_HIST.get(r.id) || [], 'latency', '#888') + '</td>' +
+        '<td class="' + (st === 'diverged' ? 'no' : 'mut') + '">' + esc((r.root || '?').slice(0, 12)) + '…</td>' +
+        '</tr>';
+    }
+    out += '</table>';
+
+    const seen = rows.filter(r => !r.err && r.root);
+    if(seen.length === 0){
+      out += '<p class="mut">No replica could be reached from your browser, so nothing is ' +
+        'claimed here either way.</p>';
+    }else if(roots.size === 1 && seen.length === rows.length){
+      out += '<p class="ok">&#10003; All ' + seen.length + ' replicas served the same signed root, ' +
+        'checked by your browser against each of them directly. They hold identical logs.</p>';
+    }else if(roots.size === 1){
+      out += '<p class="mut">The ' + seen.length + ' replicas your browser could reach served the ' +
+        'same signed root. The others were unreachable, so nothing is claimed about them.</p>';
+    }else{
+      // Either genuine divergence or a follower mid-catch-up. Both deserve to be
+      // visible; claiming which one it is would be guessing.
+      out += '<p class="no">&#10007; The replicas served <b>different signed roots</b>. That is ' +
+        'either a follower still catching up &mdash; check the "behind" column &mdash; or a real ' +
+        'divergence, which would be serious. Watch for a few seconds: if it persists, it is not lag.</p>';
+    }
+    el.innerHTML = out;
+
+    for(const g of el.querySelectorAll('.replnode')){
+      g.addEventListener('click', () => {
+        REPL_PIN = (REPL_PIN === g.dataset.id) ? null : g.dataset.id;
+        showReplPin(rows);
+      });
+    }
+    showReplPin(rows);
+  }finally{
+    REPL_BUSY = false;
   }
-  el.innerHTML = out;
 }
 
-let WITNESS = null;
+function showReplPin(rows){
+  const pane = $('replpin');
+  if(!pane) return;
+  const r = rows.find(x => x.id === REPL_PIN);
+  if(!r){ pane.innerHTML = ''; return; }
+  if(r.err){
+    pane.innerHTML = '<pre>' + esc(r.id) + '\n' + esc(r.url || '(no URL)') + '\n\n' + esc(r.err) + '</pre>';
+    return;
+  }
+  const hist = REPL_HIST.get(r.id) || [];
+  const lats = hist.map(h => h.latency).filter(v => v != null);
+  const worst = lats.length ? Math.max(...lats) : r.latency;
+  pane.innerHTML = '<pre>' + esc(r.id) + (r.leader ? '  (leader — accepts writes)' : '  (follower — serves reads)') +
+    '\n' + esc(r.url) +
+    '\n\nentries in the log      ' + esc(r.size || '?') +
+    '\napplied raft index     ' + Number(r.applied || 0).toLocaleString() +
+    '\ncommitted raft index   ' + Number(r.commit || 0).toLocaleString() +
+    '\nbehind by              ' + (r.lag > 0 ? r.lag + ' entries' : 'nothing') +
+    '\nround trip from you    ' + r.latency + 'ms  (worst of last ' + lats.length + ': ' + worst + 'ms)' +
+    '\nsigned root            ' + esc(r.root || '?') +
+    '\n\ncurl ' + esc(r.url) + '/dedi/log/checkpoint</pre>';
+}
 
 // Is the witness still running? A stalled one keeps its last verdict frozen and
 // still reading consistency_ok, so without this it is indistinguishable from a
@@ -507,6 +723,17 @@ loadNetwork().catch(netFail);
 // Slower than the stats poll: peer observations only refresh server-side every
 // DEDI_PEER_INTERVAL, so polling faster would redraw the same numbers.
 setInterval(() => loadNetwork().catch(netFail), 15000);
+
+// The replication panel ticks faster than the rest of the page, on its own.
+//
+// It is the only part of this page showing a quantity that moves second to
+// second, and a 15s sample is too coarse to tell a blip from a trend — five
+// samples of a sparkline would take over a minute to draw. It refreshes from
+// the membership it already has rather than re-reading the whole network view,
+// so the extra requests go to the replicas being measured and nowhere else.
+setInterval(() => {
+  if(REPL_MEMBERS.length) loadReplication(REPL_MEMBERS).catch(() => {});
+}, 4000);
 browse();
 </script>
 </body>
