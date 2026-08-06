@@ -191,3 +191,60 @@ func TestWitnessDetectsForkedHistory(t *testing.T) {
 		t.Fatalf("forked-history verdict state %q want revoked", e.State)
 	}
 }
+
+func TestWitnessAdvancesAfterFirstSeeingAnEmptyTarget(t *testing.T) {
+	s, cp, srv, vkey, _ := setup(t)
+	ctx := context.Background()
+
+	// A brand new target publishes a checkpoint over an empty log, which is the
+	// normal state for a node that has just been deployed.
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+
+	first, err := w.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatalf("witnessing an empty target: %v", err)
+	}
+	if first.Size != 0 || !first.ConsistencyOK {
+		t.Fatalf("first verdict: %+v, want size 0 and consistent", first)
+	}
+
+	// The target then publishes something. There is no consistency proof from an
+	// empty tree — ProveTree requires an old size of at least 1 — so a witness
+	// that asked for one would error here on every run from now on, for ever,
+	// while its stored verdict still said consistency_ok. It would look healthy
+	// and have stopped working.
+	seed(t, s, "a", "b")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second, err := w.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatalf("witness wedged after its target grew from empty: %v", err)
+	}
+	if !second.Fresh {
+		t.Fatal("want a fresh verdict once the target grew")
+	}
+	if second.Size <= first.Size {
+		t.Fatalf("verdict did not advance: %d -> %d", first.Size, second.Size)
+	}
+	if !second.ConsistencyOK {
+		t.Fatal("growth from an empty log is append-only by definition")
+	}
+
+	// And it must keep working from a non-empty baseline afterwards.
+	seed(t, s, "c")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	third, err := w.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatalf("third run: %v", err)
+	}
+	if !third.ConsistencyOK || third.Size <= second.Size {
+		t.Fatalf("third verdict: %+v", third)
+	}
+}

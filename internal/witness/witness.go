@@ -170,7 +170,13 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	}
 
 	consistencyOK := true
-	if have {
+	// last == 0 is "the target's log was empty when we last looked", and the
+	// empty tree is a prefix of every tree, so there is nothing to prove. It has
+	// to be special-cased because ProveTree rejects an old size below 1: without
+	// this, a witness that first saw its target empty could never advance again.
+	// It would fail on every run, silently, while its stored verdict still read
+	// consistency_ok — a witness that has stopped witnessing but still looks fine.
+	if have && last > 0 {
 		if size < last {
 			consistencyOK = false // target shrank — impossible for an append-only log
 		} else {

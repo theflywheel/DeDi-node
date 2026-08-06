@@ -248,7 +248,8 @@ async function verifyWitness(){
     // 1. The verdict is in this node's own signed log.
     const reg = encodeURIComponent(WITNESS.witnessing);
     const j = await jget('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion');
-    const rec = j.data, p = rec.proof;
+    // The proof rides beside the envelope's data, not inside it.
+    const rec = j.data, p = j.proof;
     if(!p) throw new Error('this node returned no inclusion proof for its verdict');
     const lh = await leafHash(leafBytes(p.leaf));
     const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, lh);
@@ -294,13 +295,37 @@ async function verifyWitness(){
     }
     const oldRoot = b64d(witnessed.root);
     let consistent;
+    if(witnessed.size === 0){
+      // Every tree contains the empty tree, so there is no append-only claim to
+      // check yet. Saying so plainly beats a green tick that proves nothing:
+      // this state means the target had published nothing when it was last
+      // witnessed, not that its history has been verified.
+      steps.push('<li class="mut">the target&rsquo;s log was empty when it was last witnessed, ' +
+        'so there is no history yet to prove append-only (it is at size ' + tcb.size + ' now). ' +
+        'This check becomes meaningful once the target has been witnessed at a non-empty size.</li>');
+      box.innerHTML = '<ul>' + steps.join('') + '</ul>' +
+        '<p class="mut"><b>Verified as far as it goes:</b> the verdict is genuinely in this ' +
+        'node&rsquo;s log and the target&rsquo;s checkpoint is genuinely the target&rsquo;s. ' +
+        'There is simply no target history to contradict yet.</p>';
+      return;
+    }
     if(tcb.size === witnessed.size){
       consistent = eq(oldRoot, tcb.root);
       step(consistent, 'the target is unchanged since it was witnessed (size ' + tcb.size +
            '), and its root still matches');
     } else {
-      const cp = await (await fetch(base + '/dedi/log/proof/consistency?old=' +
-        witnessed.size + '&new=' + tcb.size)).json();
+      let cp;
+      try {
+        const r = await fetch(base + '/dedi/log/proof/consistency?old=' +
+          witnessed.size + '&new=' + tcb.size);
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        cp = await r.json();
+        if(!cp.data || !cp.data.proof) throw new Error('no proof returned');
+      } catch(e){
+        step(false, 'the target would not supply a consistency proof from ' + witnessed.size +
+             ' to ' + tcb.size + ' (' + esc(e.message) + ') &mdash; its history cannot be checked');
+        render(false); return;
+      }
       consistent = await checkTree(cp.data.proof.map(b64d), tcb.size, tcb.root, witnessed.size, oldRoot);
       step(consistent, 'the target grew from ' + witnessed.size + ' to ' + tcb.size +
            ' by appending only &mdash; nothing witnessed earlier was altered or removed');
