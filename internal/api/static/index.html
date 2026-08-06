@@ -211,6 +211,7 @@ async function loadNetwork(){
            '</code>: it demands consistency proofs from it and records every verdict in its own log, ' +
            'so that node cannot rewrite its history without this one holding the evidence. ' +
            'Verdicts are under the <code>_witness</code> namespace.</p>' +
+           witnessHealthLine(d.witness_health) +
            '<p><button onclick="verifyWitness()">Verify this claim yourself</button> ' +
            '<span class="mut">runs the checks in your browser, against both nodes directly</span></p>' +
            '<div id="witnessproof"></div>';
@@ -220,6 +221,36 @@ async function loadNetwork(){
 }
 
 let WITNESS = null;
+
+// Is the witness still running? A stalled one keeps its last verdict frozen and
+// still reading consistency_ok, so without this it is indistinguishable from a
+// witness that checked a second ago and found nothing new.
+//
+// Stated as this node's own claim about itself, because that is what it is. It
+// is not evidence — the evidence is the verdict and its consistency proof, which
+// the button below checks without this node's help. This only tells you whether
+// that evidence is still being refreshed.
+function witnessHealthLine(h){
+  if(!h) return '';
+  if(h.checking === false){
+    return '<p class="no">&#10007; This node has not completed a single witness check' +
+      (h.last_error ? ': ' + esc(h.last_error) : '') + '</p>';
+  }
+  const ago = fmtDur(h.seconds_since_success);
+  if(h.stale){
+    return '<p class="no">&#10007; The witness has not completed a check for ' + ago +
+      ' (it should run every ' + fmtDur(h.interval_seconds) + '). The verdict below is ' +
+      'still whatever it last recorded, so treat it as out of date' +
+      (h.last_error ? '. Last error: ' + esc(h.last_error) : '') + '.</p>';
+  }
+  let out = '<p class="mut">Last completed a check <b>' + ago + ' ago</b>, every ' +
+    fmtDur(h.interval_seconds) + ' &middot; ' + h.attempts + ' checks, ' + h.failures + ' failed' +
+    ' <span class="mut">(this node&rsquo;s own report &mdash; the proof is below)</span></p>';
+  if(h.last_error){
+    out += '<p class="no">&#10007; the most recent check failed: ' + esc(h.last_error) + '</p>';
+  }
+  return out;
+}
 
 // Reproduce this node's witness claim in the visitor's browser.
 //

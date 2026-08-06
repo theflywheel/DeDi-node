@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"golang.org/x/mod/sumdb/note"
@@ -34,6 +35,9 @@ type Witness struct {
 	Origin    string // stable label for the target; used as the registry name
 	Interval  time.Duration
 	Client    *http.Client
+
+	mu     sync.Mutex
+	health Health
 }
 
 // Result is the outcome of a single verification.
@@ -207,10 +211,57 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	return Result{Size: size, Root: rootB64, ConsistencyOK: consistencyOK, Fresh: true}, nil
 }
 
+// Health describes whether this witness is still doing its job.
+//
+// It exists because a stalled witness is otherwise invisible. The verdict in
+// the log is only rewritten when the target's tree changes, so a witness that
+// has been failing on every run for hours still presents a last verdict reading
+// consistency_ok — indistinguishable from one that checked a second ago and
+// found nothing new. Verdict age cannot stand in for this: on a quiet target the
+// newest verdict is legitimately old.
+//
+// What is trustworthy here is only that this node believes it ran. It is this
+// node's report about itself and nobody should take it as proof; the proof is
+// the verdict and its consistency chain. This is an operational signal, for
+// noticing that the proof has stopped being refreshed.
+type Health struct {
+	LastAttemptAt time.Time // when a check was last started
+	LastSuccessAt time.Time // when a check last completed without error
+	LastError     string    // why the most recent check failed; empty if it did not
+	Attempts      int64
+	Failures      int64
+	Interval      time.Duration
+}
+
+// Status returns a snapshot of this witness's own liveness.
+func (w *Witness) Status() Health {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	h := w.health
+	h.Interval = w.Interval
+	return h
+}
+
+func (w *Witness) record(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	now := time.Now().UTC()
+	w.health.LastAttemptAt = now
+	w.health.Attempts++
+	if err != nil {
+		w.health.Failures++
+		w.health.LastError = err.Error()
+		return
+	}
+	w.health.LastSuccessAt = now
+	w.health.LastError = ""
+}
+
 // Run verifies on Interval until ctx is done.
 func (w *Witness) Run(ctx context.Context) {
 	verify := func() {
 		r, err := w.VerifyOnce(ctx)
+		w.record(err)
 		switch {
 		case err != nil:
 			log.Printf("witness(%s): %v", w.Origin, err)

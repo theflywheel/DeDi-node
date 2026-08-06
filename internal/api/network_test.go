@@ -131,3 +131,54 @@ func TestNetworkViewIsExcludedFromTheRequestCount(t *testing.T) {
 		t.Fatal("/dedi/network should not count as served traffic")
 	}
 }
+
+func TestWitnessHealthDistinguishesNeverRanFromStalled(t *testing.T) {
+	// "never completed a check" and "worked, then stopped" are different
+	// operational stories and a reader must be able to tell them apart.
+	never := witnessHealth(WitnessState{Interval: time.Minute})
+	if never["checking"] != false || never["stale"] != true {
+		t.Fatalf("a witness that never ran: %+v", never)
+	}
+	if _, reported := never["seconds_since_success"]; reported {
+		t.Error("a witness that never succeeded must not report a time since success")
+	}
+
+	stalled := witnessHealth(WitnessState{
+		Interval:      time.Minute,
+		LastSuccessAt: time.Now().Add(-10 * time.Minute),
+		LastAttemptAt: time.Now(),
+		LastError:     "consistency status 400",
+		Attempts:      10, Failures: 9,
+	})
+	if stalled["checking"] != true {
+		t.Error("a witness that once succeeded has been checking")
+	}
+	if stalled["stale"] != true {
+		t.Error("ten intervals without a completed check is stale")
+	}
+	if stalled["last_error"] != "consistency status 400" {
+		t.Errorf("the reason must survive to the reader: %+v", stalled)
+	}
+}
+
+func TestWitnessHealthToleratesOneMissedRun(t *testing.T) {
+	// The witness is not stale the instant it is a second late; alarming that
+	// eagerly would cry wolf on every slow poll.
+	healthy := witnessHealth(WitnessState{
+		Interval:      time.Minute,
+		LastSuccessAt: time.Now().Add(-90 * time.Second),
+		Attempts:      5,
+	})
+	if healthy["stale"] != false {
+		t.Fatalf("a single missed interval should not read as stale: %+v", healthy)
+	}
+}
+
+func TestNetworkViewOmitsWitnessHealthWhenNotWitnessing(t *testing.T) {
+	// A node witnessing nobody should not imply it has a broken witness.
+	srv, _ := networkServer(t, nil)
+	data := getJSON(t, srv.URL+"/dedi/network", http.StatusOK)["data"].(map[string]any)
+	if _, present := data["witness_health"]; present {
+		t.Fatal("a node that witnesses nobody must not report witness health")
+	}
+}

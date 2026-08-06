@@ -37,6 +37,12 @@ type Server struct {
 	// a verifier key is what you hand out precisely so others can check you.
 	WitnessTargetKey string
 
+	// WitnessHealth reports whether the witness loop is still running. Supplied
+	// as a function rather than a *witness.Witness so this package does not
+	// import witness — witness's own tests import this one, and the cycle would
+	// not build.
+	WitnessHealth func() WitnessState
+
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
 	// lookup (design.md:256). nil means no restriction — permitted only while
 	// the write plane is closed; see serve().

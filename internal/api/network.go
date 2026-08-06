@@ -47,6 +47,9 @@ func (s *Server) networkView(w http.ResponseWriter, r *http.Request) {
 		// the target's own key, without this node in the loop.
 		"witness_key": s.WitnessTargetKey,
 	}
+	if s.WitnessHealth != nil {
+		data["witness_health"] = witnessHealth(s.WitnessHealth())
+	}
 	ok(w, "Network retrieved successfully", data)
 }
 
@@ -101,6 +104,58 @@ func peerNode(peer network.Status) map[string]any {
 		node["error"] = peer.Error
 	}
 	return node
+}
+
+// WitnessState is a witness's report on its own liveness, as supplied by the
+// process running it.
+type WitnessState struct {
+	LastAttemptAt time.Time
+	LastSuccessAt time.Time
+	LastError     string
+	Attempts      int64
+	Failures      int64
+	Interval      time.Duration
+}
+
+// witnessHealth renders the witness's liveness for the network view.
+//
+// This is the node talking about itself and is not evidence of anything — the
+// evidence is the verdict and its consistency proof, which a reader checks
+// without this node's help. What it is for is noticing that the evidence has
+// stopped being refreshed: a witness failing on every run keeps its last verdict
+// frozen, still reading consistency_ok, looking exactly like one that checked a
+// moment ago and found nothing new.
+//
+// `stale` is computed here rather than left to each caller so the page, the
+// uptime monitor and anyone reading the JSON agree on what counts as too long.
+// Three intervals allows a missed run and a slow one before crying wolf.
+func witnessHealth(state WitnessState) map[string]any {
+	health := map[string]any{
+		"attempts": state.Attempts,
+		"failures": state.Failures,
+	}
+	if state.Interval > 0 {
+		health["interval_seconds"] = int64(state.Interval.Seconds())
+	}
+	if state.LastError != "" {
+		health["last_error"] = state.LastError
+	}
+	if !state.LastAttemptAt.IsZero() {
+		health["last_attempt_at"] = state.LastAttemptAt.Format(time.RFC3339)
+	}
+	if state.LastSuccessAt.IsZero() {
+		// Never completed a check. Not the same as stale-after-working, and a
+		// reader should be able to tell those apart.
+		health["checking"] = false
+		health["stale"] = true
+		return health
+	}
+	since := time.Since(state.LastSuccessAt)
+	health["last_success_at"] = state.LastSuccessAt.Format(time.RFC3339)
+	health["seconds_since_success"] = int64(since.Seconds())
+	health["checking"] = true
+	health["stale"] = state.Interval > 0 && since > 3*state.Interval
+	return health
 }
 
 func (s *Server) origin() string {

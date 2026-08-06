@@ -417,18 +417,20 @@ func serve() error {
 	// target is append-only and records each verdict under `_witness`.
 	witnessTargetURL := os.Getenv("DEDI_WITNESS_TARGET_URL")
 	witnessTargetOrigin := envOr("DEDI_WITNESS_TARGET_ORIGIN", "target")
+	var wit *witness.Witness
 	if wt := witnessTargetURL; wt != "" {
 		wiv, err := time.ParseDuration(envOr("DEDI_WITNESS_INTERVAL", "60s"))
 		if err != nil {
 			return fmt.Errorf("DEDI_WITNESS_INTERVAL: %w", err)
 		}
-		go (&witness.Witness{
+		wit = &witness.Witness{
 			Store:     s,
 			TargetURL: wt,
 			TargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 			Origin:    witnessTargetOrigin,
 			Interval:  wiv,
-		}).Run(ctx)
+		}
+		go wit.Run(ctx)
 		log.Printf("witnessing %s every %s", wt, wiv)
 	}
 
@@ -506,6 +508,19 @@ func serve() error {
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
+	if wit != nil {
+		// Adapted rather than passed through, so the api package stays free of a
+		// dependency on witness: witness's own tests import api, and the cycle
+		// would not build.
+		srv.WitnessHealth = func() api.WitnessState {
+			h := wit.Status()
+			return api.WitnessState{
+				LastAttemptAt: h.LastAttemptAt, LastSuccessAt: h.LastSuccessAt,
+				LastError: h.LastError, Attempts: h.Attempts, Failures: h.Failures,
+				Interval: h.Interval,
+			}
+		}
+	}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
 	}

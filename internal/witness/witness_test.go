@@ -248,3 +248,55 @@ func TestWitnessAdvancesAfterFirstSeeingAnEmptyTarget(t *testing.T) {
 		t.Fatalf("third verdict: %+v", third)
 	}
 }
+
+func TestHealthReportsAWitnessThatIsFailing(t *testing.T) {
+	s, _, srv, vkey, _ := setup(t)
+	dead := srv.URL
+	srv.Close() // the target goes away
+
+	w := &Witness{Store: s, TargetURL: dead + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: 20 * time.Millisecond,
+		Client: &http.Client{Timeout: time.Second}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && w.Status().Attempts == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	h := w.Status()
+	if h.Attempts == 0 {
+		t.Fatal("the witness never recorded an attempt")
+	}
+	// The whole point: a witness that cannot reach its target must say so, since
+	// its last stored verdict would otherwise keep reading consistency_ok.
+	if h.Failures == 0 || h.LastError == "" {
+		t.Fatalf("a failing witness must report the failure: %+v", h)
+	}
+	if !h.LastSuccessAt.IsZero() {
+		t.Fatalf("no check succeeded, so there is no success time: %+v", h)
+	}
+}
+
+func TestHealthReportsAWitnessThatIsWorking(t *testing.T) {
+	s, cp, srv, vkey, _ := setup(t)
+	ctx := context.Background()
+	seed(t, s, "a")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+
+	if _, err := w.VerifyOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w.record(nil) // Run does this; VerifyOnce alone is the unit under test elsewhere
+
+	h := w.Status()
+	if h.LastSuccessAt.IsZero() || h.Failures != 0 || h.LastError != "" {
+		t.Fatalf("a healthy witness: %+v", h)
+	}
+}
