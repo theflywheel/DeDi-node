@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/mod/sumdb/tlog"
 
 	"github.com/theflywheel/DeDi-node/internal/merkle"
@@ -146,15 +147,10 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 // replicable at all. Nothing in here may consult a clock, a random source, or
 // any state outside the transaction.
 func (s *Store) Apply(ctx context.Context, in AppendInput) (Entry, error) {
-	if err := validateAppend(&in); err != nil {
+	raw, err := prepareAppend(&in)
+	if err != nil {
 		return Entry{}, err
 	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, in.PayloadRaw); err != nil {
-		return Entry{}, fmt.Errorf("compact payload: %w", err)
-	}
-	raw := append([]byte(nil), buf.Bytes()...)
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Entry{}, err
@@ -164,7 +160,34 @@ func (s *Store) Apply(ctx context.Context, in AppendInput) (Entry, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, logWriteLock); err != nil {
 		return Entry{}, err
 	}
+	e, err := applyLocked(ctx, tx, in, raw)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Entry{}, err
+	}
+	return e, nil
+}
 
+// prepareAppend validates and canonicalises the command. Separated from the
+// transaction so both the plain and the replicated apply paths share exactly
+// one definition of what a valid command is.
+func prepareAppend(in *AppendInput) ([]byte, error) {
+	if err := validateAppend(in); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, in.PayloadRaw); err != nil {
+		return nil, fmt.Errorf("compact payload: %w", err)
+	}
+	return append([]byte(nil), buf.Bytes()...), nil
+}
+
+// applyLocked performs the state transition inside an open transaction that
+// already holds the write lock. It does not commit: the replicated path has to
+// record the applied Raft index in the same transaction.
+func applyLocked(ctx context.Context, tx pgx.Tx, in AppendInput, raw []byte) (Entry, error) {
 	// Parent must exist (any version).
 	switch in.EntryType {
 	case "registry":
@@ -244,9 +267,6 @@ func (s *Store) Apply(ctx context.Context, in AppendInput) (Entry, error) {
 		if _, err := tx.Exec(ctx, `INSERT INTO tree_hashes (idx, hash) VALUES ($1,$2)`, base+int64(i), h[:]); err != nil {
 			return Entry{}, err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Entry{}, err
 	}
 	return Entry{
 		Seq: seq, EntryType: in.EntryType, Namespace: in.Namespace, Registry: in.Registry,

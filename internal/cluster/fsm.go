@@ -59,7 +59,10 @@ func (f *fsm) Apply(l *raft.Log) any {
 
 	switch cmd.Kind {
 	case cmdAppend:
-		entry, err := f.store.Apply(ctx, *cmd.Input)
+		entry, skipped, err := f.store.ApplyReplicated(ctx, l.Index, *cmd.Input)
+		if skipped {
+			return nil
+		}
 		if err != nil {
 			if isDeterministicRejection(err) {
 				return err
@@ -70,7 +73,10 @@ func (f *fsm) Apply(l *raft.Log) any {
 		return entry
 
 	case cmdSignCheckpoint:
-		err := f.store.SaveCheckpoint(ctx, cmd.TreeSize, cmd.RootHash, cmd.NoteText)
+		skipped, err := f.store.SaveCheckpointReplicated(ctx, int64(l.Index), cmd.TreeSize, cmd.RootHash, cmd.NoteText)
+		if skipped {
+			return nil
+		}
 		if errors.Is(err, store.ErrCheckpointFork) {
 			// Deterministic, but not survivable. Under Raft this is unreachable:
 			// committed entries are never lost, so no two leaders can compute
@@ -106,6 +112,10 @@ func isDeterministicRejection(err error) bool {
 type snapshotData struct {
 	Entries     []store.Entry      `json:"entries"`
 	Checkpoints []store.Checkpoint `json:"checkpoints"`
+	// AppliedIndex is how far the captured state had consumed the command
+	// stream. Without it a restored replica would replay from the beginning and
+	// apply everything the snapshot already contains a second time.
+	AppliedIndex uint64 `json:"applied_index"`
 }
 
 // Snapshot captures the state so old Raft log entries can be discarded. Raft
@@ -122,7 +132,13 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("snapshot checkpoints: %w", err)
 	}
-	return &snapshot{data: snapshotData{Entries: entries, Checkpoints: checkpoints}}, nil
+	applied, err := f.store.AppliedIndex(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot applied index: %w", err)
+	}
+	return &snapshot{data: snapshotData{
+		Entries: entries, Checkpoints: checkpoints, AppliedIndex: applied,
+	}}, nil
 }
 
 // Restore rebuilds this replica from a snapshot, discarding local state. It
@@ -136,7 +152,7 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*applyTimeout)
 	defer cancel()
-	return f.store.Restore(ctx, data.Entries, data.Checkpoints)
+	return f.store.Restore(ctx, data.Entries, data.Checkpoints, data.AppliedIndex)
 }
 
 type snapshot struct{ data snapshotData }

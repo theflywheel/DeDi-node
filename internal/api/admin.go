@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
@@ -240,8 +241,17 @@ func versionData(e store.Entry, unchanged bool) map[string]any {
 // the publisher key id, so the log records which credential made each change.
 func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.Key, in store.AppendInput, msg string) {
 	in.CreatedBy = "publisher:" + key.KID
-	e, err := s.Store.Append(r.Context(), in)
+	e, err := s.writer().Append(r.Context(), in)
 	if err != nil {
+		// In a cluster only the leader appends. That is not a failure — the
+		// directory is up, this replica just is not the one that writes — so
+		// send the client to the leader rather than returning an error. 307
+		// preserves the method and body, which matters because the body carries
+		// the signature.
+		if errors.Is(err, cluster.ErrNotLeader) {
+			s.redirectToLeader(w, r)
+			return
+		}
 		// A malformed write is the caller's fault, not the node's; only
 		// genuine failures should read as 500.
 		if errors.Is(err, store.ErrInvalidWrite) {

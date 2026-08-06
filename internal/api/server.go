@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -42,6 +43,17 @@ type Server struct {
 	// import witness — witness's own tests import this one, and the cycle would
 	// not build.
 	WitnessHealth func() WitnessState
+
+	// Writer appends to the log. nil writes straight to Store, which is the
+	// standalone case; in a cluster it is the Raft proposer, and writes that
+	// arrive at a follower are redirected to the leader rather than applied
+	// locally.
+	Writer Appender
+
+	// Cluster reports Raft membership and leadership, for the network view and
+	// for redirecting writes. nil on an unreplicated node, which then reports a
+	// cluster of one — accurately.
+	Cluster func() cluster.State
 
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
 	// lookup (design.md:256). nil means no restriction — permitted only while

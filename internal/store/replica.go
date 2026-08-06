@@ -43,9 +43,12 @@ func (s *Store) AllEntries(ctx context.Context) ([]Entry, error) {
 // from the captured one the snapshot and this build disagree about the leaf
 // encoding, and restoring would hand back a replica that silently serves a
 // different tree — so it is checked, and it is fatal.
-func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Checkpoint) error {
+// appliedIndex is the Raft index the snapshot was taken at; it is restored
+// with the state so the rebuilt replica does not replay the commands the
+// snapshot already contains.
+func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Checkpoint, appliedIndex uint64) error {
 	if _, err := s.pool.Exec(ctx,
-		`TRUNCATE log_entries, tree_hashes, checkpoints`); err != nil {
+		`TRUNCATE log_entries, tree_hashes, checkpoints, raft_applied`); err != nil {
 		return fmt.Errorf("clear replica state: %w", err)
 	}
 	for _, e := range entries {
@@ -72,5 +75,5 @@ func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Chec
 			return fmt.Errorf("restore checkpoint %d: %w", c.TreeSize, err)
 		}
 	}
-	return nil
+	return s.markApplied(ctx, appliedIndex)
 }

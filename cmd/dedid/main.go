@@ -25,6 +25,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/anchor"
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -379,6 +380,51 @@ func redactDatabaseURL(raw string) string {
 	return u.String()
 }
 
+// openCluster starts Raft replication if DEDI_CLUSTER_ID is set, and returns
+// nil otherwise — an unclustered node keeps behaving exactly as before, which
+// is what every existing deployment expects.
+func openCluster(s *store.Store) (*cluster.Node, error) {
+	id := os.Getenv("DEDI_CLUSTER_ID")
+	if id == "" {
+		return nil, nil
+	}
+	peers, err := cluster.ParsePeers(os.Getenv("DEDI_CLUSTER_PEERS"))
+	if err != nil {
+		return nil, fmt.Errorf("DEDI_CLUSTER_PEERS: %w", err)
+	}
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("DEDI_CLUSTER_ID is set but DEDI_CLUSTER_PEERS is empty")
+	}
+	if len(peers)%2 == 0 {
+		// An even cluster tolerates no more failures than the odd one below it
+		// and has more ways to lose quorum. Worth saying out loud rather than
+		// silently accepting a configuration that costs a machine for nothing.
+		log.Printf("cluster: %d members is an even number — %d members would tolerate the same "+
+			"single failure with one machine fewer", len(peers), len(peers)-1)
+	}
+	node, err := cluster.Open(cluster.Config{
+		ID:        id,
+		BindAddr:  os.Getenv("DEDI_CLUSTER_BIND"),
+		DataDir:   envOr("DEDI_CLUSTER_DATA_DIR", "/data/raft"),
+		Peers:     peers,
+		Bootstrap: os.Getenv("DEDI_CLUSTER_BOOTSTRAP") == "true",
+		LogOutput: log.Writer(),
+		OnHalt: func(err error) {
+			// A replica that cannot apply a committed entry has no safe way to
+			// carry on: continuing means serving a tree that differs from the
+			// rest of the cluster while looking perfectly healthy. Dying is
+			// visible, and the supervisor will restart it to try again.
+			log.Fatalf("cluster: halting this replica rather than diverging: %v", err)
+		},
+	}, s)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("cluster %q: %d members, bootstrap=%v", id, len(peers),
+		os.Getenv("DEDI_CLUSTER_BOOTSTRAP") == "true")
+	return node, nil
+}
+
 func serve() error {
 	ctx := context.Background()
 	s, err := openStore(ctx)
@@ -404,11 +450,30 @@ func serve() error {
 		return fmt.Errorf("DEDI_TTL: %w", err)
 	}
 
+	// Optional: replicate the log across a cluster (high availability). Raft
+	// gives every replica the same ordered commands so they compute the same
+	// tree; it is crash tolerance, not trust — a quorum run by one operator
+	// agrees with that operator. Tamper evidence stays with the witness ring.
+	clu, err := openCluster(s)
+	if err != nil {
+		return err
+	}
+	if clu != nil {
+		defer clu.Close()
+	}
+
 	cp := &checkpoint.Checkpointer{
 		Store:    s,
 		SKey:     skey,
 		Origin:   origin,
 		Interval: interval,
+	}
+	if clu != nil {
+		// Only the leader signs, and the signed note is replicated rather than
+		// each replica re-signing its own view — two replicas at slightly
+		// different sizes would otherwise produce two roots under one key.
+		cp.Publish = clu.SignCheckpoint
+		cp.IsWriter = clu.IsLeader
 	}
 	go cp.Run(ctx)
 
@@ -429,6 +494,13 @@ func serve() error {
 			TargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 			Origin:    witnessTargetOrigin,
 			Interval:  wiv,
+		}
+		if clu != nil {
+			// Verdicts are log entries, so they go through the leader like any
+			// other write; followers stand by rather than each polling the same
+			// target to learn the same fact.
+			wit.Writer = clu
+			wit.IsWriter = clu.IsLeader
 		}
 		go wit.Run(ctx)
 		log.Printf("witnessing %s every %s", wt, wiv)
@@ -508,6 +580,10 @@ func serve() error {
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
+	if clu != nil {
+		srv.Writer = clu
+		srv.Cluster = clu.State
+	}
 	if wit != nil {
 		// Adapted rather than passed through, so the api package stays free of a
 		// dependency on witness: witness's own tests import api, and the cycle
@@ -517,7 +593,7 @@ func serve() error {
 			return api.WitnessState{
 				LastAttemptAt: h.LastAttemptAt, LastSuccessAt: h.LastSuccessAt,
 				LastError: h.LastError, Attempts: h.Attempts, Failures: h.Failures,
-				Interval: h.Interval,
+				Interval: h.Interval, Standby: h.Standby,
 			}
 		}
 	}

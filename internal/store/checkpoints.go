@@ -97,6 +97,6 @@ func (s *Store) TruncateForTest(ctx context.Context) error {
 	// node_identity is included because it is log state too: the key that signed
 	// the checkpoints being truncated has no meaning once they are gone, and a
 	// surviving identity would silently carry into the next test's fresh log.
-	_, err := s.pool.Exec(ctx, `TRUNCATE log_entries, tree_hashes, checkpoints, request_counts, node_identity`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE log_entries, tree_hashes, checkpoints, request_counts, node_identity, raft_applied`)
 	return err
 }

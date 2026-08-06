@@ -27,6 +27,14 @@ import (
 
 const witnessNS = "_witness"
 
+// Appender is how a verdict reaches the log. On a standalone node it is the
+// store itself; in a cluster it is the Raft proposer, so a verdict is
+// replicated like any other entry rather than written to one replica's
+// database where the others would never see it.
+type Appender interface {
+	Append(ctx context.Context, in store.AppendInput) (store.Entry, error)
+}
+
 // Witness periodically verifies a target node and records the verdict.
 type Witness struct {
 	Store     *store.Store
@@ -35,6 +43,18 @@ type Witness struct {
 	Origin    string // stable label for the target; used as the registry name
 	Interval  time.Duration
 	Client    *http.Client
+
+	// Writer records verdicts. nil writes straight to Store.
+	Writer Appender
+
+	// IsWriter reports whether this process should be running the witness loop
+	// at all. In a cluster only the leader appends, so followers stand by; nil
+	// means "always", which is what a standalone node wants.
+	//
+	// Followers deliberately do not verify. Three replicas independently
+	// polling the same target would triple the load on it to learn the same
+	// fact, and the verdict is replicated to them anyway.
+	IsWriter func() bool
 
 	mu     sync.Mutex
 	health Health
@@ -46,6 +66,13 @@ type Result struct {
 	Root          string // base64
 	ConsistencyOK bool
 	Fresh         bool // the target's checkpoint advanced since last time
+}
+
+func (w *Witness) appender() Appender {
+	if w.Writer != nil {
+		return w.Writer
+	}
+	return w.Store
 }
 
 func (w *Witness) httpClient() *http.Client {
@@ -142,14 +169,14 @@ func (w *Witness) fetchConsistency(ctx context.Context, old, size int64) (tlog.T
 // ensureParents creates the _witness namespace and target registry on first use.
 func (w *Witness) ensureParents(ctx context.Context) error {
 	if _, err := w.Store.Resolve(ctx, "namespace", witnessNS, "", "", nil, nil); errors.Is(err, store.ErrNotFound) {
-		if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: witnessNS,
+		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: witnessNS,
 			PayloadRaw: []byte(`{"description":"checkpoints this node has independently witnessed"}`), CreatedBy: "witness"}); err != nil {
 			return err
 		}
 	}
 	if _, err := w.Store.Resolve(ctx, "registry", witnessNS, w.Origin, "", nil, nil); errors.Is(err, store.ErrNotFound) {
 		p, _ := json.Marshal(map[string]any{"description": "witnessed checkpoints of " + w.Origin, "target": w.TargetURL})
-		if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS, Registry: w.Origin,
+		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS, Registry: w.Origin,
 			PayloadRaw: p, CreatedBy: "witness"}); err != nil {
 			return err
 		}
@@ -204,7 +231,7 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	if !consistencyOK {
 		state = "revoked"
 	}
-	if _, err := w.Store.Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS, Registry: w.Origin,
+	if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS, Registry: w.Origin,
 		RecordName: "checkpoint", PayloadRaw: payload, State: state, CreatedBy: "witness"}); err != nil {
 		return Result{}, err
 	}
@@ -231,6 +258,12 @@ type Health struct {
 	Attempts      int64
 	Failures      int64
 	Interval      time.Duration
+
+	// Standby means this replica is deliberately not witnessing because it is
+	// not the cluster's writer. Without it a follower would look identical to a
+	// stalled witness — no recent attempt, no recent success — and the liveness
+	// check would raise an alarm on two of every three healthy replicas.
+	Standby bool
 }
 
 // Status returns a snapshot of this witness's own liveness.
@@ -242,9 +275,25 @@ func (w *Witness) Status() Health {
 	return h
 }
 
+// standing reports whether this process should witness right now.
+func (w *Witness) standing() bool {
+	if w.IsWriter == nil {
+		return true
+	}
+	return w.IsWriter()
+}
+
+func (w *Witness) recordStandby() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.health.Standby = true
+	w.health.LastError = ""
+}
+
 func (w *Witness) record(err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.health.Standby = false
 	now := time.Now().UTC()
 	w.health.LastAttemptAt = now
 	w.health.Attempts++
@@ -260,6 +309,10 @@ func (w *Witness) record(err error) {
 // Run verifies on Interval until ctx is done.
 func (w *Witness) Run(ctx context.Context) {
 	verify := func() {
+		if !w.standing() {
+			w.recordStandby()
+			return
+		}
 		r, err := w.VerifyOnce(ctx)
 		w.record(err)
 		switch {

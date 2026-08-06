@@ -50,7 +50,50 @@ func (s *Server) networkView(w http.ResponseWriter, r *http.Request) {
 	if s.WitnessHealth != nil {
 		data["witness_health"] = witnessHealth(s.WitnessHealth())
 	}
+	data["cluster"] = s.clusterView()
 	ok(w, "Network retrieved successfully", data)
+}
+
+// clusterView reports this node's replication group.
+//
+// This is a different thing from the network above and from the witness ring,
+// and the three must not be run together. The witness ring is about trust:
+// independent operators proving each other's history is append-only. A cluster
+// is about crash tolerance: replicas of *one* node, run by one operator, which
+// therefore prove nothing about each other. A reader who confuses "three
+// replicas agree" for "three parties verified" has drawn precisely the wrong
+// conclusion, so the wire format keeps them in separate objects and the UI
+// draws them separately.
+func (s *Server) clusterView() map[string]any {
+	if s.Cluster == nil {
+		// An unreplicated node is a cluster of one, and says so plainly rather
+		// than omitting the field — absent would be indistinguishable from a
+		// node too old to report it.
+		return map[string]any{"enabled": false, "size": 1, "role": "sole writer"}
+	}
+	st := s.Cluster()
+	members := make([]map[string]any, 0, len(st.Members))
+	for _, m := range st.Members {
+		members = append(members, map[string]any{
+			"id": m.ID, "raft_addr": m.RaftAddr, "http_url": m.HTTPURL,
+			"leader": m.Leader, "self": m.Self,
+		})
+	}
+	return map[string]any{
+		"enabled":    true,
+		"node_id":    st.NodeID,
+		"role":       st.Role,
+		"leader_id":  st.LeaderID,
+		"leader_url": st.LeaderURL,
+		"members":    members,
+		"size":       len(members),
+		// A replica that is up but persistently behind is the failure a plain
+		// liveness check cannot see, so the lag is published rather than
+		// summarised into a green tick.
+		"commit_index":  st.CommitIndex,
+		"applied_index": st.AppliedIndex,
+		"lag_entries":   st.LagEntries,
+	}
 }
 
 // selfNode describes this node, which it can report with more confidence than
@@ -115,6 +158,9 @@ type WitnessState struct {
 	Attempts      int64
 	Failures      int64
 	Interval      time.Duration
+	// Standby means this replica is deliberately not witnessing because it is
+	// not the cluster's writer.
+	Standby bool
 }
 
 // witnessHealth renders the witness's liveness for the network view.
@@ -139,6 +185,16 @@ func witnessHealth(state WitnessState) map[string]any {
 	}
 	if state.LastError != "" {
 		health["last_error"] = state.LastError
+	}
+	if state.Standby {
+		// A follower is not witnessing on purpose: the leader does it and the
+		// verdict is replicated here. Without saying so, a healthy follower
+		// would be indistinguishable from a stalled witness — no recent attempt,
+		// no recent success — and two of every three replicas would alarm.
+		health["standby"] = true
+		health["checking"] = false
+		health["stale"] = false
+		return health
 	}
 	if !state.LastAttemptAt.IsZero() {
 		health["last_attempt_at"] = state.LastAttemptAt.Format(time.RFC3339)
