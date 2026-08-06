@@ -17,6 +17,17 @@ var docsHTML []byte
 //go:embed static/admin.html
 var adminHTML []byte
 
+//go:embed static/verify.html
+var verifyHTML []byte
+
+// verifyJS holds the proof-checking primitives. It is served as a file rather
+// than inlined into each page so both the explorer and the evidence page run the
+// same implementation: two copies would eventually disagree, and the page that
+// was wrong would still be showing green ticks.
+//
+//go:embed static/verify.js
+var verifyJS []byte
+
 // defaultDemoURL is the flywheel reference demo, used when the operator sets
 // no DEDI_DEMO_URL of their own.
 const defaultDemoURL = "https://schemes.proto.theflywheel.in/"
@@ -48,6 +59,22 @@ func (s *Server) demoURL() string {
 
 func (s *Server) demoHref() string {
 	return html.EscapeString(s.demoURL())
+}
+
+// verify serves the evidence page: every witness claim with the bytes it rests
+// on, recomputed in the reader's browser. It takes the verifier key for the same
+// reason the explorer does — without it the page can display a checkpoint but
+// not establish that this node signed it.
+func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
+	page := bytes.Replace(verifyHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
+	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(page)
+}
+
+func (s *Server) verifyScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Write(verifyJS)
 }
 
 // docs serves the embedded explainer page (sequence diagrams + test cases).

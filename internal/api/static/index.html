@@ -54,95 +54,12 @@ checkpoint signature are checked in your browser; the server is trusted for neit
 <p class="mut">API: <code>/dedi/lookup</code> &middot; <code>/dedi/query</code> &middot;
 <code>/dedi/versions</code> &middot; <code>/dedi/log/checkpoint</code> &middot; <code>/dedi/network</code></p>
 
+<script src="/static/verify.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let CK = null, CUR = null;
 let VKEY = document.querySelector('meta[name="dedi-verifier-key"]').content.trim();
 if (VKEY.startsWith('{{')) VKEY = '';
-
-// ---- crypto helpers ----
-const te = new TextEncoder();
-async function sha256(b){ return new Uint8Array(await crypto.subtle.digest('SHA-256', b)); }
-function cat(...xs){ let n=0; for(const x of xs) n+=x.length; const o=new Uint8Array(n); let i=0;
-  for(const x of xs){ o.set(x,i); i+=x.length; } return o; }
-const leafHash = b => sha256(cat(new Uint8Array([0]), b));
-const nodeHash = (l,r) => sha256(cat(new Uint8Array([1]), l, r));
-function b64d(s){ const bin=atob(s); const u=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u; }
-function eq(a,b){ if(a.length!==b.length) return false; for(let i=0;i<a.length;i++) if(a[i]!==b[i]) return false; return true; }
-function maxpow2(n){ let k=1; while((k<<1) < n) k<<=1; return k; } // largest power of two < n, n>=2
-
-// Recursive RFC 6962 record-proof verification, matching x/mod/sumdb/tlog.
-async function proofRoot(path, t, n, leaf){
-  if(t===1){ if(path.length!==0) throw new Error('proof len'); return leaf; }
-  if(path.length===0) throw new Error('empty path');
-  const k = maxpow2(t), top = path[path.length-1], rest = path.slice(0,-1);
-  if(n < k){ return nodeHash(await proofRoot(rest, k, n, leaf), top); }
-  return nodeHash(top, await proofRoot(rest, t-k, n-k, leaf));
-}
-
-// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes. JSON.stringify
-// and Go json.Marshal agree for ASCII payloads (no <,>,& in these fields).
-function leafBytes(L){
-  return te.encode(JSON.stringify([
-    "dedi/v1/leaf", L.entry_type, L.namespace, L.registry, L.record_name,
-    L.version_num, L.digest, L.created_by, L.created_at ]));
-}
-
-// RFC 6962 consistency-proof verification, matching x/mod/sumdb/tlog.CheckTree.
-// Proves the tree of size n with root h is a prefix of the tree of size t with
-// root th — i.e. nothing already logged was changed or removed, only appended.
-async function treeProofRun(p, lo, hi, n, old){
-  if(n === hi){
-    if(lo === 0){
-      if(p.length !== 0) throw new Error('consistency proof: unexpected extra hashes');
-      return [old, old];
-    }
-    if(p.length !== 1) throw new Error('consistency proof: wrong length');
-    return [p[0], p[0]];
-  }
-  if(p.length === 0) throw new Error('consistency proof: proof is empty');
-  const k = maxpow2(hi - lo);
-  const top = p[p.length-1], rest = p.slice(0, -1);
-  if(n <= lo + k){
-    const [oh, th] = await treeProofRun(rest, lo, lo+k, n, old);
-    return [oh, await nodeHash(th, top)];
-  }
-  const [oh, th] = await treeProofRun(rest, lo+k, hi, n, old);
-  return [await nodeHash(top, oh), await nodeHash(top, th)];
-}
-async function checkTree(p, t, th, n, h){
-  if(t < 1 || n < 1 || n > t) throw new Error('consistency proof: invalid tree sizes');
-  if(n === t) return eq(th, h); // same tree: nothing to prove beyond equality
-  const [h2, th2] = await treeProofRun(p, 0, t, n, h);
-  return eq(th2, th) && eq(h2, h);
-}
-
-// Parse a sumdb/note: signed bytes = body (text incl. trailing \n); signatures
-// follow a blank line as "— <name> <base64>".
-function parseNote(txt){
-  const m = txt.indexOf('\n\n— ');
-  if(m < 0) return null;
-  const body = txt.slice(0, m+1);
-  const sigLine = txt.slice(m+2).split('\n')[0];
-  const parts = sigLine.split(' ');
-  return { body, sigB64: parts[parts.length-1] };
-}
-function parseCheckpointBody(body){
-  const L = body.split('\n');
-  return { origin:L[0], size:parseInt(L[1],10), rootB64:L[2], root:b64d(L[2]) };
-}
-async function verifyCheckpointSig(note, vkey){
-  if(!vkey || !crypto.subtle) return null;
-  try {
-    const i1=vkey.indexOf('+'), i2=vkey.indexOf('+', i1+1);
-    const pub = b64d(vkey.slice(i2+1)).slice(1); // drop 1 alg byte -> 32-byte pub
-    const parsed = parseNote(note);
-    const sig = b64d(parsed.sigB64).slice(4);    // 4-byte keyhash prefix + 64 sig
-    const key = await crypto.subtle.importKey('raw', pub, {name:'Ed25519'}, false, ['verify']);
-    return await crypto.subtle.verify('Ed25519', key, sig, te.encode(parsed.body));
-  } catch(e){ return null; }
-}
 
 // ---- data ----
 async function jget(path){
@@ -213,7 +130,8 @@ async function loadNetwork(){
            'Verdicts are under the <code>_witness</code> namespace.</p>' +
            witnessHealthLine(d.witness_health) +
            '<p><button onclick="verifyWitness()">Verify this claim yourself</button> ' +
-           '<span class="mut">runs the checks in your browser, against both nodes directly</span></p>' +
+           '<span class="mut">runs the checks in your browser, against both nodes directly</span> ' +
+           '&middot; <a href="/verify">see every hash and byte behind them</a></p>' +
            '<div id="witnessproof"></div>';
     WITNESS = d;
   }

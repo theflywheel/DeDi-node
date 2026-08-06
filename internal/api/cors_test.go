@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +57,57 @@ func TestIsReadPlaneDoesNotMatchOnPrefixAlone(t *testing.T) {
 	} {
 		if got := isReadPlane(path); got != want {
 			t.Errorf("isReadPlane(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestVerificationCodeIsServedOnceForBothPages(t *testing.T) {
+	srv, _, _ := testServer(t)
+
+	// Both pages must pull the same file. If either ever carries its own copy of
+	// the proof-checking code, the two can drift and the wrong one still renders
+	// green ticks.
+	for _, page := range []string{"/", "/verify"} {
+		resp, err := http.Get(srv.URL + page)
+		if err != nil {
+			t.Fatalf("%s: %v", page, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !bytes.Contains(body, []byte(`src="/static/verify.js"`)) {
+			t.Errorf("%s does not load the shared verifier", page)
+		}
+		// The tell-tale of an inlined copy.
+		if bytes.Contains(body, []byte("async function proofRoot(")) {
+			t.Errorf("%s carries its own copy of the proof verifier", page)
+		}
+	}
+
+	resp, err := http.Get(srv.URL + "/static/verify.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/static/verify.js: status %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
+		t.Errorf("Content-Type %q — a browser will refuse to execute it", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	for _, fn := range []string{"function checkTree", "async function proofRoot",
+		"function leafBytes", "async function checkTreeTraced"} {
+		if !bytes.Contains(body, []byte(fn)) {
+			t.Errorf("verify.js is missing %q", fn)
+		}
+	}
+}
+
+func TestEvidencePageDoesNotCountAsServedTraffic(t *testing.T) {
+	// It polls nothing, but it is this node's own page, like /docs and /admin.
+	for _, p := range []string{"/verify", "/verify/", "/static/verify.js"} {
+		if !selfTraffic(p) {
+			t.Errorf("%s should not count as served traffic", p)
 		}
 	}
 }
