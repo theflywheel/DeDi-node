@@ -12,24 +12,20 @@ import "context"
 // recognise. So the first identity to land wins permanently, and callers are
 // expected to use what comes back rather than what they sent.
 //
-// The insert and the read are one statement because two replicas booting
-// against an empty database is the normal case on a platform that starts
-// several containers at once. Doing this as SELECT-then-INSERT would let both
-// see no row, both generate, and both believe they own the identity the other
-// stored. ON CONFLICT DO NOTHING makes the loser's insert a no-op, and the
-// UNION ALL arm then hands it the winner's key.
+// The insert and the conflict handler are one statement because two replicas
+// booting against an empty database is the normal case on a platform that
+// starts several containers at once. Doing this as SELECT-then-INSERT would let
+// both see no row, both generate, and both believe they own the identity the
+// other stored. ON CONFLICT uses a no-op update so the loser waits for the
+// winner and still gets the winner's key back from RETURNING.
 func (s *Store) EnsureIdentity(ctx context.Context, skey, vkey string) (string, string, error) {
 	var gotSKey, gotVKey string
 	err := s.pool.QueryRow(ctx, `
-		WITH claimed AS (
-			INSERT INTO node_identity (id, skey, vkey) VALUES (TRUE, $1, $2)
-			ON CONFLICT (id) DO NOTHING
-			RETURNING skey, vkey
-		)
-		SELECT skey, vkey FROM claimed
-		UNION ALL
-		SELECT skey, vkey FROM node_identity WHERE id = TRUE
-		LIMIT 1`, skey, vkey).Scan(&gotSKey, &gotVKey)
+		INSERT INTO node_identity (id, skey, vkey) VALUES (TRUE, $1, $2)
+		ON CONFLICT (id) DO UPDATE
+			SET skey = node_identity.skey,
+				vkey = node_identity.vkey
+		RETURNING skey, vkey`, skey, vkey).Scan(&gotSKey, &gotVKey)
 	if err != nil {
 		return "", "", err
 	}
