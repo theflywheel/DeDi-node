@@ -51,6 +51,18 @@ type AppendInput struct {
 	ExpectedPrevDigest []byte // the latest version's digest must equal this
 	ExpectedPrevState  string // when set, the latest version's state must equal this too
 	ExpectedAbsent     bool   // no version may exist yet
+
+	// CreatedAt stamps the entry. It is part of the Merkle leaf preimage
+	// (merkle.LeafBytes), so it must travel *with* the command rather than be
+	// read from the clock at apply time: under replication the same command is
+	// applied on every replica, and three clocks would produce three different
+	// leaf hashes and three different roots for the same entry. That divergence
+	// is silent until a consistency proof fails, which is the most expensive
+	// moment to discover it.
+	//
+	// Zero means "stamp it now", which is what a single unreplicated node wants
+	// and what Append does. Apply requires it to be set.
+	CreatedAt time.Time
 }
 
 // checkPrecondition compares the caller's expectation against the resource as
@@ -110,10 +122,30 @@ func validateAppend(in *AppendInput) error {
 	if strings.TrimSpace(in.CreatedBy) == "" {
 		return fmt.Errorf("%w: created_by is required — every log entry must name its author", ErrInvalidWrite)
 	}
+	if in.CreatedAt.IsZero() {
+		return fmt.Errorf("%w: created_at is required — it is hashed into the leaf, so it must be "+
+			"decided once by the proposer, not re-read from each replica's clock", ErrInvalidWrite)
+	}
 	return nil
 }
 
+// Append stamps the entry with this node's clock and applies it. It is the
+// entry point for an unreplicated node; a replicated one stamps the command
+// before proposing it and calls Apply on every replica.
 func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
+	if in.CreatedAt.IsZero() {
+		in.CreatedAt = time.Now()
+	}
+	return s.Apply(ctx, in)
+}
+
+// Apply is the log's state transition: a pure function of the current log state
+// and the command, modulo the database it writes to. Given the same prior
+// entries and the same ordered commands it produces byte-identical leaves,
+// tree hashes and roots on every replica — which is what makes the log
+// replicable at all. Nothing in here may consult a clock, a random source, or
+// any state outside the transaction.
+func (s *Store) Apply(ctx context.Context, in AppendInput) (Entry, error) {
 	if err := validateAppend(&in); err != nil {
 		return Entry{}, err
 	}
@@ -185,9 +217,11 @@ func (s *Store) Append(ctx context.Context, in AppendInput) (Entry, error) {
 	}
 	vnum := currentVersion + 1
 
-	// Truncate to Postgres timestamptz precision so the stored value
-	// reproduces the hashed leaf bytes exactly.
-	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	// Truncate to Postgres timestamptz precision so the stored value reproduces
+	// the hashed leaf bytes exactly. Normalising here rather than trusting the
+	// proposer keeps the leaf a function of the command alone: two replicas
+	// cannot disagree because one of them rounded.
+	createdAt := in.CreatedAt.UTC().Truncate(time.Microsecond)
 	digest := sha256.Sum256(raw)
 	leafBytes := merkle.LeafBytes(in.EntryType, in.Namespace, in.Registry, in.RecordName, vnum, digest[:], in.CreatedBy, createdAt)
 	leafHash := tlog.RecordHash(leafBytes)
