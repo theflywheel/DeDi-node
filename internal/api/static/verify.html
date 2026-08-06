@@ -6,27 +6,65 @@
 <meta name="dedi-verifier-key" content="{{VERIFIER_KEY}}">
 <title>DeDi &middot; Witness evidence</title>
 <style>
-  body { font-family: monospace; max-width: 76em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
-  h1 { font-size: 1.3em; }
-  h2 { font-size: 1.05em; margin: 1.8em 0 .4em; border-bottom: 1px solid #ddd; padding-bottom: .2em; }
-  h3 { font-size: .95em; margin: 1.1em 0 .3em; font-weight: normal; color: #444; }
+  :root {
+    --ink: #1a1a1a; --mut: #6b6b6b; --line: #d8d8d8; --panel: #f6f6f4;
+    --ok: #1a7f37; --okbg: #eaf4ec; --bad: #b42318; --badbg: #fbeceb;
+    --new: #1f6feb; --newbg: #e8f0fe; --warn: #8a6d1f; --warnbg: #fbf5e3;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
+         max-width: 78em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
   nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
-  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: .3em 0; }
-  code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
-  ul { margin: .3em 0; padding-left: 1.4em; } li { margin: .15em 0; }
-  table { border-collapse: collapse; font-size: .9em; width: 100%; }
-  th, td { border: 1px solid #ccc; padding: .25em .5em; text-align: left; vertical-align: top; }
-  th { background: #f4f4f4; font-weight: normal; }
-  td.h { word-break: break-all; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  h1 { font-size: 1.35em; margin-bottom: .2em; }
+  h2 { font-size: 1.05em; margin: 2em 0 .5em; border-bottom: 1px solid var(--line); padding-bottom: .25em; }
+  h3 { font-size: .95em; font-weight: normal; color: var(--mut); margin: 1.2em 0 .4em; }
+  p { margin: .5em 0; }
+  .mut { color: var(--mut); } .ok { color: var(--ok); } .no { color: var(--bad); }
+  pre { background: var(--panel); padding: .6em; overflow-x: auto; white-space: pre-wrap;
+        word-break: break-all; margin: .4em 0; font-size: .88em; }
+  code { background: var(--panel); padding: 0 .2em; }
   .wrap { overflow-x: auto; }
-  .step { color: #888; }
-  .box { border-left: 3px solid #ccc; padding-left: .8em; margin: .5em 0 1.2em; }
-  .verdict { font-size: 1.05em; padding: .5em .7em; margin: .6em 0; }
-  .verdict.pass { background: #eefaee; border-left: 4px solid green; }
-  .verdict.fail { background: #fdeeee; border-left: 4px solid #b00; }
-  .fetch { font-size: .88em; }
+  table { border-collapse: collapse; font-size: .88em; width: 100%; }
+  th, td { border: 1px solid var(--line); padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: var(--panel); font-weight: normal; }
+  td.h { word-break: break-all; } td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* progressive disclosure: the picture first, the bytes on request */
+  details { margin: .5em 0; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  details > summary { cursor: pointer; padding: .4em .6em; background: var(--panel);
+                      font-size: .9em; user-select: none; }
+  details > summary:hover { color: var(--new); }
+  details > div { padding: .5em .6em; }
+
+  /* the four checks, as a strip */
+  .steps { display: flex; flex-wrap: wrap; gap: .5em; margin: .8em 0; }
+  .chip { border: 1px solid var(--line); border-left-width: 4px; border-radius: 4px;
+          padding: .35em .7em; font-size: .88em; cursor: pointer; background: #fff; }
+  .chip:hover { border-color: var(--new); }
+  .chip.pass { border-left-color: var(--ok); background: var(--okbg); }
+  .chip.fail { border-left-color: var(--bad); background: var(--badbg); }
+  .chip.skip { border-left-color: var(--warn); background: var(--warnbg); }
+  .chip .n { color: var(--mut); }
+
+  .verdict { padding: .6em .8em; margin: .8em 0; border-left: 4px solid; border-radius: 4px; }
+  .verdict.pass { border-color: var(--ok); background: var(--okbg); }
+  .verdict.fail { border-color: var(--bad); background: var(--badbg); }
+
+  svg { max-width: 100%; height: auto; display: block; }
+  svg text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hit { cursor: pointer; }
+  .hit:hover rect, .hit:hover circle { stroke: var(--new); stroke-width: 2.5; }
+
+  /* the click-target detail pane shared by all diagrams */
+  .inspect { border: 1px solid var(--line); border-left: 4px solid var(--new);
+             background: #fff; padding: .5em .7em; margin: .6em 0; font-size: .88em; min-height: 3em; }
+  .inspect .t { color: var(--mut); }
+  .inspect .v { word-break: break-all; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 1em; font-size: .85em; color: var(--mut); margin: .4em 0; }
+  .legend i { display: inline-block; width: .8em; height: .8em; border: 1px solid var(--line);
+              vertical-align: -1px; margin-right: .3em; }
+  .stamp { font-size: .85em; color: var(--mut); }
 </style>
 </head>
 <body>
@@ -34,12 +72,12 @@
 <nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="/verify">Evidence</a> <a href="{{DEMO_URL}}">Demo</a></nav>
 
 <h1>Witness evidence</h1>
-<p>Every claim this node makes about the node it witnesses, with the bytes each one rests on.
-Nothing here is asserted: each check is recomputed in your browser from data you can fetch
-yourself, and the commands to fetch it are at the bottom of each section.</p>
-<p class="mut">Two of the three checks never touch this node &mdash; your browser goes to the
-target directly. If this node were lying about the target, it would fail here, on your machine,
-against bytes this node never handled.</p>
+<p>Every claim this node makes about the node it witnesses, and the bytes each one rests on.
+Nothing here is asserted: each check is recomputed in your browser, and you can open any step to
+see the exact input.</p>
+<p class="mut">Two of the checks never touch this node &mdash; your browser goes to the target
+directly. If this node were lying about the target, it would fail here, on your machine.</p>
+<p class="stamp" id="stamp"></p>
 
 <div id="out">running the checks…</div>
 
@@ -51,223 +89,406 @@ if (VKEY.startsWith('{{')) VKEY = '';
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const hx = u => b64e(u);
-function short(s, n){ s = String(s); return s.length > n ? s.slice(0, n) + '…' : s; }
+const short = (s, n) => { s = String(s); return s.length > n ? s.slice(0, n) + '…' : s; };
 
-// Every request made, in order, so the page can end with a list of exactly what
-// was fetched and from where. A reader who wants to redo this by hand should not
-// have to guess which URLs were involved.
+// Which <details> the reader has opened. A refresh that silently collapsed
+// everything would punish anyone reading closely, which is the whole audience.
+const OPEN = new Set();
+function restoreOpenState(){
+  document.querySelectorAll('details[data-k]').forEach(d => {
+    d.open = OPEN.has(d.dataset.k);
+    d.addEventListener('toggle', () => d.open ? OPEN.add(d.dataset.k) : OPEN.delete(d.dataset.k));
+  });
+}
+function drop(key, title, inner){
+  return '<details data-k="' + esc(key) + '"><summary>' + esc(title) +
+         '</summary><div>' + inner + '</div></details>';
+}
+
+// Values worth inspecting are registered here and addressed by index, so a
+// diagram click can pull up the full bytes without inlining them into markup.
+let INSPECT = [];
+function pin(title, value, note){ INSPECT.push({title, value, note}); return INSPECT.length - 1; }
+function showPin(i, paneId){
+  const d = INSPECT[i];
+  $(paneId).innerHTML = '<div class="t">' + esc(d.title) + '</div>' +
+    '<div class="v">' + esc(d.value) + '</div>' +
+    (d.note ? '<div class="t">' + esc(d.note) + '</div>' : '');
+}
+
 const FETCHES = [];
 async function trace(url, kind){
   const r = await fetch(url);
-  FETCHES.push({url, status: r.status, kind});
+  FETCHES.push({url, status: r.status});
   if(!r.ok) throw new Error(url + ' returned HTTP ' + r.status);
   return kind === 'json' ? r.json() : r.text();
 }
 
-function hashTable(steps, caption){
-  if(!steps.length) return '<p class="mut">No combinations were needed &mdash; the proof is empty at this size.</p>';
-  let out = '<div class="wrap"><table><tr><th>#</th><th>left</th><th>right</th>' +
-            '<th>SHA-256(0x01 ‖ left ‖ right)</th><th></th></tr>';
-  steps.forEach((s, i) => {
-    out += '<tr><td class="num">' + (i+1) + '</td>' +
-      '<td class="h">' + esc(short(hx(s.left), 24)) + '</td>' +
-      '<td class="h">' + esc(short(hx(s.right), 24)) + '</td>' +
-      '<td class="h">' + esc(short(hx(s.out), 24)) + '</td>' +
-      '<td class="step">' + esc(s.side || s.note || '') + '</td></tr>';
+// ---------------------------------------------------------------- diagrams
+
+// The ring, drawn from what every node says about itself rather than from this
+// node's account of the others. Each peer is asked for its own /dedi/network, so
+// the arrows are each node's own statement of who it watches. A node that
+// disagreed with its neighbours would show up as a broken ring rather than be
+// averaged away.
+function ringSVG(nodes, paneId){
+  const R = 92, cx = 150, cy = 118, n = nodes.length;
+  const at = i => { const a = -Math.PI/2 + i * 2*Math.PI/n;
+                    return [cx + R*Math.cos(a), cy + R*Math.sin(a)]; };
+  const idx = {};
+  nodes.forEach((x, i) => { idx[x.origin] = i; if(x.url) idx[x.url] = i; });
+
+  let out = '<svg viewBox="0 0 300 240" role="img" aria-label="witness ring">' +
+    '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" ' +
+    'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b6b6b"/></marker></defs>';
+
+  // arrows first, so node circles sit on top of them
+  nodes.forEach((node, i) => {
+    const j = node.watchesIndex;
+    if(j == null || j === i) return;
+    const [x1,y1] = at(i), [x2,y2] = at(j);
+    const dx = x2-x1, dy = y2-y1, len = Math.hypot(dx,dy) || 1;
+    const pad = 30, sx = x1 + dx/len*pad, sy = y1 + dy/len*pad;
+    const ex = x2 - dx/len*pad, ey = y2 - dy/len*pad;
+    const mx = (sx+ex)/2 + dy/len*16, my = (sy+ey)/2 - dx/len*16;
+    out += '<path d="M' + sx + ',' + sy + ' Q' + mx + ',' + my + ' ' + ex + ',' + ey +
+           '" fill="none" stroke="#6b6b6b" stroke-width="1.4" marker-end="url(#ar)"/>';
   });
-  return out + '</table></div>' + (caption ? '<p class="mut">' + caption + '</p>' : '');
+
+  nodes.forEach((node, i) => {
+    const [x,y] = at(i);
+    const fill = node.self ? '#e8f0fe' : (node.reachable ? '#eaf4ec' : '#fbeceb');
+    const stroke = node.self ? '#1f6feb' : (node.reachable ? '#1a7f37' : '#b42318');
+    const p = pin(node.name + (node.self ? ' (this node)' : ''),
+      'origin: ' + node.origin + '\nentries: ' + (node.size == null ? 'unknown' : node.size) +
+      (node.url ? '\nurl: ' + node.url : '') +
+      (node.watches ? '\nwitnesses: ' + node.watches : ''),
+      node.self ? 'the node serving this page' : 'click the label to open its own evidence page');
+    out += '<g class="hit" onclick="showPin(' + p + ',\'' + paneId + '\')">' +
+      '<circle cx="' + x + '" cy="' + y + '" r="26" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"/>' +
+      '<text x="' + x + '" y="' + (y+2) + '" text-anchor="middle" font-size="9">' + esc(short(node.name, 9)) + '</text>' +
+      '<text x="' + x + '" y="' + (y+13) + '" text-anchor="middle" font-size="8" fill="#6b6b6b">' +
+        (node.size == null ? '?' : node.size) + '</text></g>';
+    if(node.url && !node.self){
+      out += '<a href="' + esc(node.url) + '/verify"><text x="' + x + '" y="' + (y+40) +
+             '" text-anchor="middle" font-size="8" fill="#1f6feb">evidence →</text></a>';
+    }
+  });
+  out += '<text x="150" y="232" text-anchor="middle" font-size="8" fill="#6b6b6b">' +
+         'arrow points from witness to the node it proves append-only</text></svg>';
+  return out;
 }
 
+// The audit path as a ladder: the running hash climbs from the leaf, absorbing
+// one sibling per rung, and the top rung must equal the signed root. A full tree
+// drawing would be mostly empty space at these sizes; the ladder shows the only
+// thing that matters, which is what got combined with what, in order.
+function ladderSVG(leafHashB64, steps, rootB64, expectedB64, paneId){
+  const rows = steps.length, rowH = 44, w = 560, h = rows * rowH + 78;
+  let out = '<svg viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="inclusion proof">';
+  const box = (x, y, bw, label, value, fill, stroke, note) => {
+    const p = pin(label, value, note);
+    return '<g class="hit" onclick="showPin(' + p + ',\'' + paneId + '\')">' +
+      '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="26" rx="4" fill="' + fill +
+      '" stroke="' + stroke + '"/><text x="' + (x+8) + '" y="' + (y+17) + '" font-size="10">' +
+      esc(short(value, 22)) + '</text></g>';
+  };
+
+  let y = h - 40;
+  out += '<text x="0" y="' + (y - 8) + '" font-size="9" fill="#6b6b6b">leaf hash of the verdict record</text>';
+  out += box(0, y, 250, 'leaf hash', leafHashB64, '#e8f0fe', '#1f6feb',
+             'SHA-256(0x00 ‖ canonical leaf preimage)');
+
+  steps.forEach((s, i) => {
+    const ny = y - rowH;
+    out += '<path d="M125,' + y + ' L125,' + (ny+26) + '" stroke="#6b6b6b" stroke-width="1.2"/>';
+    // The sibling is whichever side the running hash is not on.
+    const sibling = s.side === 'sibling on the right' ? s.right : s.left;
+    out += box(280, y - rowH/2, 250, 'sibling ' + (i+1) + ' from the audit path', hx(sibling),
+               '#f6f6f4', '#d8d8d8', s.side || '');
+    out += '<path d="M280,' + (y - rowH/2 + 13) + ' L200,' + (ny+13) + '" stroke="#d8d8d8" stroke-width="1.2"/>';
+    const top = i === steps.length - 1;
+    out += box(0, ny, 250, 'after combining sibling ' + (i+1), hx(s.out),
+               top ? '#eaf4ec' : '#fff', top ? '#1a7f37' : '#d8d8d8',
+               'SHA-256(0x01 ‖ left ‖ right)');
+    y = ny;
+  });
+
+  out += '<text x="0" y="' + (y - 8) + '" font-size="9" fill="#6b6b6b">' +
+         'recomputed root — must equal the root in the signed checkpoint</text>';
+  out += '</svg>';
+  return out;
+}
+
+// Which entries the proof actually speaks about. The left block is the range
+// that was witnessed and must be byte-identical now; the right block is what the
+// target added since. Seeing the proportion is the point: it makes "append-only"
+// concrete rather than a word.
+function spanSVG(oldSize, newSize, paneId){
+  const w = 560, h = 76, total = Math.max(newSize, 1);
+  const oldW = Math.max(2, Math.round(w * (oldSize / total)));
+  const pOld = pin('proven unchanged', 'entries 0 … ' + (oldSize - 1) + '  (' + oldSize + ' entries)',
+    'this range was witnessed earlier; the consistency proof shows none of it was altered or removed');
+  const pNew = pin('appended since', 'entries ' + oldSize + ' … ' + (newSize - 1) +
+    '  (' + (newSize - oldSize) + ' entries)', 'added by the target after it was witnessed');
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="append-only span">' +
+    '<g class="hit" onclick="showPin(' + pOld + ',\'' + paneId + '\')">' +
+    '<rect x="0" y="18" width="' + oldW + '" height="30" fill="#eaf4ec" stroke="#1a7f37"/>' +
+    '<text x="6" y="38" font-size="10">0 … ' + (oldSize-1) + '</text></g>' +
+    '<g class="hit" onclick="showPin(' + pNew + ',\'' + paneId + '\')">' +
+    '<rect x="' + oldW + '" y="18" width="' + (w-oldW) + '" height="30" fill="#e8f0fe" stroke="#1f6feb"/>' +
+    '<text x="' + (oldW+6) + '" y="38" font-size="10">' + oldSize + ' … ' + (newSize-1) + '</text></g>' +
+    '<text x="0" y="12" font-size="9" fill="#6b6b6b">witnessed at size ' + oldSize + '</text>' +
+    '<text x="' + w + '" y="12" font-size="9" fill="#6b6b6b" text-anchor="end">now size ' + newSize + '</text>' +
+    '<text x="0" y="66" font-size="9" fill="#6b6b6b">proven unchanged</text>' +
+    '<text x="' + w + '" y="66" font-size="9" fill="#6b6b6b" text-anchor="end">appended since</text></svg>';
+}
+
+function hashTable(steps){
+  if(!steps.length) return '<p class="mut">No combinations were needed at this size.</p>';
+  return '<div class="wrap"><table><tr><th>#</th><th>left</th><th>right</th>' +
+    '<th>SHA-256(0x01 ‖ left ‖ right)</th><th></th></tr>' +
+    steps.map((s,i) => '<tr><td class="num">' + (i+1) + '</td><td class="h">' + esc(hx(s.left)) +
+      '</td><td class="h">' + esc(hx(s.right)) + '</td><td class="h">' + esc(hx(s.out)) +
+      '</td><td class="mut">' + esc(s.side || s.note || '') + '</td></tr>').join('') + '</table></div>';
+}
 function kv(rows){
   return '<div class="wrap"><table>' + rows.map(r =>
-    '<tr><th style="width:16em">' + esc(r[0]) + '</th><td class="h">' + r[1] + '</td></tr>').join('') +
-    '</table></div>';
+    '<tr><th style="width:17em">' + esc(r[0]) + '</th><td class="h">' + r[1] + '</td></tr>').join('') + '</table></div>';
 }
-
 const yes = t => '<span class="ok">&check; ' + t + '</span>';
 const no  = t => '<span class="no">&#10007; ' + t + '</span>';
 
+// ---------------------------------------------------------------- the checks
+
 async function run(){
+  INSPECT = []; FETCHES.length = 0;
   const parts = [];
+  const chips = [];
   let allOK = true;
   const fail = m => { allOK = false; return no(m); };
 
   const net = (await trace('/dedi/network', 'json')).data;
   if(!net.witness_url){
     $('out').innerHTML = '<p class="mut">This node witnesses no other node, so there is no ' +
-      'witness evidence to show. Set <code>DEDI_WITNESS_TARGET_URL</code> to have it watch one.</p>';
+      'evidence to show. Set <code>DEDI_WITNESS_TARGET_URL</code> to have it watch one.</p>';
     return;
   }
   const targetBase = net.witness_url.replace(/\/dedi$/, '');
 
-  // ---------- 1. this node's own log ----------
-  const selfNote = await trace('/dedi/log/checkpoint', 'text');
-  const selfParsed = parseNote(selfNote);
-  const selfCP = parseCheckpointBody(selfParsed.body);
-  const selfSig = await verifyCheckpointSig(selfNote, VKEY);
+  // ---- the ring, from each node's own account of itself ----
+  const ringNodes = [];
+  const self = net.nodes.find(n => n.self) || {};
+  ringNodes.push({name: self.name || 'this node', origin: self.origin || '', size: self.tree_size,
+                  self: true, reachable: true, watches: net.witnessing, url: ''});
+  for(const peer of net.nodes.filter(n => !n.self)){
+    let watches = null;
+    try {
+      const pv = await trace(peer.url + '/dedi/network', 'json');
+      watches = pv.data.witnessing;
+    } catch(e){ /* a peer that will not answer simply has no arrow */ }
+    ringNodes.push({name: peer.name, origin: peer.origin || '', size: peer.tree_size,
+                    self: false, reachable: !!peer.reachable, watches, url: peer.url});
+  }
+  const byOrigin = {};
+  ringNodes.forEach((n, i) => { if(n.origin) byOrigin[n.origin] = i; });
+  ringNodes.forEach(n => {
+    n.watchesIndex = n.watches != null && byOrigin[n.watches] != null ? byOrigin[n.watches] : null;
+  });
 
-  parts.push('<h2>1. This node&rsquo;s own signed log</h2>' +
-    '<p>The verdict is only worth anything if it is committed to a log this node cannot ' +
-    'quietly edit. That log is summarised by a checkpoint it signs.</p>' +
-    '<h3>The checkpoint, exactly as served</h3><pre>' + esc(selfNote) + '</pre>' +
+  parts.push('<h2 id="s0">The ring</h2>' +
+    '<p>Who watches whom. Each arrow is that node&rsquo;s own statement, read from its own ' +
+    '<code>/dedi/network</code> by your browser &mdash; not this node&rsquo;s account of its ' +
+    'neighbours. Click a node for its details, or follow its link to check it the same way.</p>' +
+    '<div style="max-width:22em">' + ringSVG(ringNodes, 'ringpane') + '</div>' +
+    '<div class="inspect" id="ringpane"><span class="t">click a node in the diagram</span></div>');
+
+  // ---- 1. this node's own signed log ----
+  const selfNote = await trace('/dedi/log/checkpoint', 'text');
+  const selfCP = parseCheckpointBody(parseNote(selfNote).body);
+  const selfSig = await verifyCheckpointSig(selfNote, VKEY);
+  chips.push(['1 · this node&rsquo;s log is signed', selfSig === true ? 'pass' : selfSig === false ? 'fail' : 'skip', 's1']);
+  if(selfSig === false) allOK = false;
+
+  parts.push('<h2 id="s1">1. This node&rsquo;s own signed log</h2>' +
+    '<p>A verdict is only worth something if it sits in a log this node cannot quietly edit. ' +
+    'That log is summarised by a checkpoint it signs with its own key.</p>' +
     kv([
       ['log origin', esc(selfCP.origin)],
       ['tree size', selfCP.size],
       ['root hash', esc(selfCP.rootB64)],
-      ['verifier key', VKEY ? esc(VKEY) : '<span class="mut">not published by this node</span>'],
       ['signature', selfSig === true ? yes('valid Ed25519 signature over the checkpoint body')
         : selfSig === false ? fail('INVALID signature')
-        : '<span class="mut">unchecked &mdash; this node publishes no verifier key, so nothing here binds it to its log</span>'],
-    ]));
+        : '<span class="mut">unchecked — this node publishes no verifier key, so nothing binds it to its log</span>'],
+    ]) +
+    drop('s1raw', 'the checkpoint, exactly as served', '<pre>' + esc(selfNote) + '</pre>' +
+      (VKEY ? kv([['verifier key used', esc(VKEY)]]) : '')));
 
-  // ---------- 2. the verdict, and its place in the log ----------
+  // ---- 2. the verdict and its place in the log ----
   const reg = encodeURIComponent(net.witnessing);
   const rj = await trace('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion', 'json');
   const rec = rj.data, p = rj.proof;
   if(!p) throw new Error('this node returned no inclusion proof for its own verdict');
   const w = rec.details || {};
-
   const leaf = leafBytes(p.leaf);
   const lh = await leafHash(leaf);
   const steps = [];
   const recomputed = await proofRootTraced(p.path.map(b64d), p.tree_size, p.leaf_index, lh, steps);
-  const included = eq(recomputed, selfCP.root) || eq(recomputed, parseCheckpointBody(parseNote(p.checkpoint).body).root);
   const proofCP = parseCheckpointBody(parseNote(p.checkpoint).body);
+  const included = eq(recomputed, proofCP.root);
+  if(!included) allOK = false;
+  chips.push(['2 · the verdict is in that log', included ? 'pass' : 'fail', 's2']);
 
-  parts.push('<h2>2. The verdict, and where it sits in that log</h2>' +
-    '<p>This is what the node recorded about its target, and the proof that the record is ' +
-    'entry ' + p.leaf_index + ' of the tree above &mdash; not a sentence composed for this page.</p>' +
-    '<h3>The recorded verdict</h3><pre>' + esc(JSON.stringify(w, null, 2)) + '</pre>' +
+  parts.push('<h2 id="s2">2. The verdict is entry ' + p.leaf_index + ' of that log</h2>' +
+    '<p>The record below is what this node concluded about its target. The ladder shows it being ' +
+    'hashed into the tree the checkpoint above signs: start at the leaf, absorb one sibling per ' +
+    'rung, and the top must equal the signed root. Click any box for its full value.</p>' +
     kv([
-      ['target', esc(w.target || '')],
       ['target tree size when witnessed', w.size],
-      ['target root when witnessed', esc(w.root || '')],
-      ['verdict', w.consistency_ok === true ? yes('append-only: no earlier entry had changed')
+      ['verdict', w.consistency_ok === true ? yes('append-only: nothing earlier had changed')
         : fail('the target FAILED its consistency check')],
       ['record state', rec.state === 'live' ? yes('live') : fail(esc(rec.state))],
       ['recorded at', esc(rec.updated_at || '')],
     ]) +
-    '<h3>The exact bytes that were hashed into the log</h3>' +
-    '<p class="mut">The leaf preimage is canonical: this node, any other node, and your ' +
-    'browser must all derive byte-identical input or the hashes below will not agree.</p>' +
-    '<pre>' + esc(new TextDecoder().decode(leaf)) + '</pre>' +
-    kv([
-      ['leaf hash, SHA-256(0x00 ‖ preimage)', esc(b64e(lh))],
-      ['leaf index', p.leaf_index],
-      ['tree size proved against', p.tree_size],
-    ]) +
-    '<h3>Recomputing the root from the leaf</h3>' +
-    '<p class="mut">Each row combines the running hash with one sibling from the audit path. ' +
-    'The last row must equal the root in the signed checkpoint.</p>' +
-    hashTable(steps) +
+    ladderSVG(b64e(lh), steps, b64e(recomputed), proofCP.rootB64, 'ladpane') +
+    '<div class="inspect" id="ladpane"><span class="t">click a box in the ladder</span></div>' +
     kv([
       ['recomputed root', esc(b64e(recomputed))],
       ['root in the signed checkpoint', esc(proofCP.rootB64)],
-      ['match', included ? yes('the verdict is in this node&rsquo;s log and cannot be withdrawn without breaking it')
+      ['match', included ? yes('the verdict cannot be withdrawn without breaking this node&rsquo;s history')
         : fail('recomputed root does NOT match the checkpoint')],
-    ]));
+    ]) +
+    drop('s2raw', 'the verdict payload, the leaf preimage, and every hash step',
+      '<h3>recorded verdict</h3><pre>' + esc(JSON.stringify(w, null, 2)) + '</pre>' +
+      '<h3>canonical leaf preimage — the exact bytes hashed into the log</h3>' +
+      '<pre>' + esc(new TextDecoder().decode(leaf)) + '</pre>' +
+      kv([['leaf hash, SHA-256(0x00 ‖ preimage)', esc(b64e(lh))],
+          ['leaf index', p.leaf_index], ['tree size proved against', p.tree_size]]) +
+      '<h3>every combination, in order</h3>' + hashTable(steps)));
 
-  // ---------- 3. the target's own checkpoint ----------
+  // ---- 3. the target's own checkpoint ----
   let targetNote, targetCP, targetSig = null, reached = true;
   try {
     targetNote = await trace(targetBase + '/dedi/log/checkpoint', 'text');
     targetCP = parseCheckpointBody(parseNote(targetNote).body);
     targetSig = await verifyCheckpointSig(targetNote, net.witness_key || '');
   } catch(e){
-    reached = false;
-    parts.push('<h2>3. The target&rsquo;s own signed log</h2>' +
-      '<p>' + fail('your browser could not reach the target directly: ' + esc(e.message)) + '</p>');
+    reached = false; allOK = false;
+    chips.push(['3 · the target signed its own log', 'fail', 's3']);
+    parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2><p>' +
+      no('your browser could not reach the target directly: ' + esc(e.message)) + '</p>');
   }
 
   if(reached){
-    parts.push('<h2>3. The target&rsquo;s own signed log</h2>' +
-      '<p>Fetched by your browser from <code>' + esc(targetBase) + '</code>. This node is not in ' +
-      'the path, and could not alter these bytes even if it wanted to.</p>' +
-      '<pre>' + esc(targetNote) + '</pre>' +
+    chips.push(['3 · the target signed its own log', targetSig === true ? 'pass' : targetSig === false ? 'fail' : 'skip', 's3']);
+    if(targetSig === false) allOK = false;
+    parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2>' +
+      '<p>Fetched by <em>your browser</em> from <code>' + esc(targetBase) + '</code>. This node is ' +
+      'not in that path and could not alter these bytes.</p>' +
       kv([
         ['log origin', esc(targetCP.origin)],
         ['tree size now', targetCP.size],
         ['root hash now', esc(targetCP.rootB64)],
-        ['target verifier key', net.witness_key ? esc(net.witness_key) : '<span class="mut">not published</span>'],
-        ['signature', targetSig === true ? yes('valid &mdash; signed by the target&rsquo;s own key, not by this node')
-          : targetSig === false ? fail('INVALID: these bytes were not signed by the key this node names')
-          : '<span class="mut">unchecked &mdash; no target key published</span>'],
-      ]));
+        ['signature', targetSig === true ? yes('valid — signed by the target&rsquo;s own key, not by this node')
+          : targetSig === false ? fail('INVALID: not signed by the key this node names')
+          : '<span class="mut">unchecked — no target key published</span>'],
+      ]) +
+      drop('s3raw', 'the target&rsquo;s checkpoint, exactly as it served it',
+        '<pre>' + esc(targetNote) + '</pre>' +
+        kv([['target verifier key', esc(net.witness_key || '(none published)')]])));
   }
 
-  // ---------- 4. append-only between then and now ----------
+  // ---- 4. append-only between then and now ----
   if(reached){
-    parts.push('<h2>4. The target has only appended since it was witnessed</h2>');
+    let body = '', state = 'pass';
     if(w.size === 0){
-      parts.push('<p class="mut">The target&rsquo;s log was empty when it was last witnessed, ' +
-        'and the empty tree is contained in every tree, so there is no history to contradict yet. ' +
-        'This check becomes meaningful once the target has been witnessed at a non-empty size ' +
-        '(it is at size ' + targetCP.size + ' now).</p>');
+      state = 'skip';
+      body = '<p class="mut">The target&rsquo;s log was empty when it was last witnessed, and the ' +
+        'empty tree is contained in every tree, so there is no history to contradict yet. This ' +
+        'check becomes meaningful once it has been witnessed at a non-empty size (it is at ' +
+        targetCP.size + ' now).</p>';
     } else if(targetCP.size < w.size){
-      parts.push('<p>' + fail('the target&rsquo;s log SHRANK, from ' + w.size + ' to ' +
-        targetCP.size + ' &mdash; an append-only log cannot do this') + '</p>');
+      state = 'fail'; allOK = false;
+      body = '<p>' + no('the target&rsquo;s log SHRANK, from ' + w.size + ' to ' + targetCP.size +
+        ' — an append-only log cannot do this') + '</p>';
     } else if(targetCP.size === w.size){
       const same = eq(b64d(w.root), targetCP.root);
-      parts.push('<p>The target has not grown since it was witnessed, so the two roots must be ' +
-        'identical byte for byte.</p>' +
-        kv([
+      if(!same){ state = 'fail'; allOK = false; }
+      body = '<p>The target has not grown since it was witnessed, so the two roots must be ' +
+        'identical byte for byte.</p>' + kv([
           ['root when witnessed', esc(w.root)],
           ['root now', esc(targetCP.rootB64)],
-          ['match', same ? yes('unchanged') : fail('same tree size but a DIFFERENT root &mdash; the target rewrote history')],
-        ]));
-      if(!same) allOK = false;
+          ['match', same ? yes('unchanged') : fail('same size but a DIFFERENT root — the target rewrote history')],
+        ]);
     } else {
       const cj = await trace(targetBase + '/dedi/log/proof/consistency?old=' + w.size +
         '&new=' + targetCP.size, 'json');
       const csteps = [];
       const res = await checkTreeTraced(cj.data.proof.map(b64d), targetCP.size, targetCP.root,
                                         w.size, b64d(w.root), csteps);
-      parts.push('<p>The target grew from ' + w.size + ' to ' + targetCP.size + '. Its consistency ' +
-        'proof must rebuild <em>both</em> the old root it was witnessed at and the new root it ' +
-        'publishes now, from the same hashes. It cannot do that if anything already logged was ' +
-        'altered or removed.</p>' +
-        '<h3>The proof, as the target served it</h3>' +
-        '<div class="wrap"><table><tr><th>#</th><th>hash</th></tr>' +
-        cj.data.proof.map((h, i) => '<tr><td class="num">' + (i+1) + '</td><td class="h">' +
-          esc(h) + '</td></tr>').join('') + '</table></div>' +
-        '<h3>Rebuilding both roots from it</h3>' + hashTable(csteps) +
+      if(!res.ok){ state = 'fail'; allOK = false; }
+      body = '<p>The target grew from ' + w.size + ' to ' + targetCP.size + '. Its proof has to ' +
+        'rebuild <em>both</em> the root it was witnessed at and the root it publishes now, from the ' +
+        'same hashes — impossible if anything in the green range below had been altered.</p>' +
+        spanSVG(w.size, targetCP.size, 'spanpane') +
+        '<div class="inspect" id="spanpane"><span class="t">click either block</span></div>' +
         kv([
           ['old root, rebuilt', esc(b64e(res.oldRoot))],
           ['old root this node witnessed', esc(w.root)],
           ['new root, rebuilt', esc(b64e(res.newRoot))],
           ['new root the target publishes', esc(targetCP.rootB64)],
           ['verdict', res.ok ? yes('append-only from ' + w.size + ' to ' + targetCP.size +
-              ' &mdash; nothing witnessed earlier was altered or removed')
-            : fail('the proof does NOT reconstruct both roots &mdash; the target&rsquo;s history is inconsistent')],
-        ]));
-      if(!res.ok) allOK = false;
+              ' — nothing witnessed earlier was altered or removed')
+            : fail('the proof does NOT reconstruct both roots')],
+        ]) +
+        drop('s4raw', 'the proof as served, and every hash step',
+          '<div class="wrap"><table><tr><th>#</th><th>hash</th></tr>' +
+          cj.data.proof.map((h,i) => '<tr><td class="num">' + (i+1) + '</td><td class="h">' +
+            esc(h) + '</td></tr>').join('') + '</table></div>' +
+          '<h3>rebuilding both roots</h3>' + hashTable(csteps));
     }
+    chips.push(['4 · only appended since', state, 's4']);
+    parts.push('<h2 id="s4">4. The target has only appended since it was witnessed</h2>' + body);
   }
 
-  // ---------- what was fetched ----------
-  parts.push('<h2>Redo this yourself</h2>' +
+  // ---- provenance of everything above ----
+  parts.push('<h2 id="s5">Redo this yourself</h2>' +
     '<p>Every request this page made, in order. Nothing else was consulted.</p>' +
-    '<div class="wrap"><table class="fetch"><tr><th>#</th><th>from</th><th>URL</th><th>status</th></tr>' +
-    FETCHES.map((f, i) => '<tr><td class="num">' + (i+1) + '</td><td>' +
-      (f.url.startsWith('http') ? 'the target' : 'this node') + '</td>' +
-      '<td class="h">' + esc(f.url) + '</td><td class="num">' + f.status + '</td></tr>').join('') +
-    '</table></div>' +
-    '<pre>' + FETCHES.map(f => 'curl -s ' +
-      esc(f.url.startsWith('http') ? f.url : location.origin + f.url)).join('\n') + '</pre>');
+    drop('s5raw', FETCHES.length + ' requests — URLs and curl commands',
+      '<div class="wrap"><table><tr><th>#</th><th>from</th><th>URL</th><th>status</th></tr>' +
+      FETCHES.map((f,i) => '<tr><td class="num">' + (i+1) + '</td><td>' +
+        (f.url.startsWith('http') ? 'another node' : 'this node') + '</td><td class="h">' +
+        esc(f.url) + '</td><td class="num">' + f.status + '</td></tr>').join('') + '</table></div>' +
+      '<pre>' + FETCHES.map(f => 'curl -s ' +
+        esc(f.url.startsWith('http') ? f.url : location.origin + f.url)).join('\n') + '</pre>'));
 
   const banner = allOK
-    ? '<div class="verdict pass">' + yes('All checks recomputed here, from the bytes above. ' +
-        'This node&rsquo;s witness claim holds, and nothing on this page was taken on its word.') + '</div>'
-    : '<div class="verdict fail">' + no('At least one check failed. The details are above &mdash; ' +
-        'a failure here is evidence, not a glitch, and is worth capturing.') + '</div>';
+    ? '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
+        'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>'
+    : '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
+        'is evidence, not a glitch, and is worth capturing.') + '</div>';
 
-  $('out').innerHTML = banner + parts.join('') + banner;
+  const strip = '<div class="steps">' + chips.map(c =>
+    '<div class="chip ' + c[1] + '" onclick="document.getElementById(\'' + c[2] +
+    '\').scrollIntoView({behavior:\'smooth\'})">' + c[0] + '</div>').join('') + '</div>';
+
+  $('out').innerHTML = banner + strip + parts.join('');
+  $('stamp').textContent = 'checked ' + new Date().toLocaleTimeString() + ' · refreshes every 60s';
+  restoreOpenState();
 }
 
-run().catch(e => $('out').innerHTML = '<div class="verdict fail"><span class="no">&#10007; ' +
-  esc(e.message) + '</span></div><p class="mut">The checks could not be completed. That is not ' +
-  'itself proof of misbehaviour &mdash; a node may simply be unreachable &mdash; but nothing on ' +
-  'this page should be believed until they run.</p>');
+function go(){
+  run().catch(e => {
+    $('out').innerHTML = '<div class="verdict fail"><span class="no">&#10007; ' + esc(e.message) +
+      '</span></div><p class="mut">The checks could not be completed. That is not itself proof of ' +
+      'misbehaviour — a node may simply be unreachable — but nothing here should be believed ' +
+      'until they run.</p>';
+  });
+}
+go();
+// Slow enough that a reader is not fighting the page mid-sentence, and open
+// sections survive the redraw.
+setInterval(go, 60000);
 </script>
 </body>
 </html>
