@@ -18,6 +18,10 @@ var (
 	// ErrVersionConflict marks an append whose caller-supplied precondition no
 	// longer holds: the resource moved on since the caller read it.
 	ErrVersionConflict = errors.New("version conflict")
+	// ErrCheckpointFork marks an attempt to sign a second, different root at a
+	// tree size already signed. It is never a normal condition and never
+	// retryable — see SaveCheckpoint.
+	ErrCheckpointFork = errors.New("checkpoint fork")
 )
 
 type Store struct {
