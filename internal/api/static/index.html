@@ -89,6 +89,35 @@ function leafBytes(L){
     L.version_num, L.digest, L.created_by, L.created_at ]));
 }
 
+// RFC 6962 consistency-proof verification, matching x/mod/sumdb/tlog.CheckTree.
+// Proves the tree of size n with root h is a prefix of the tree of size t with
+// root th — i.e. nothing already logged was changed or removed, only appended.
+async function treeProofRun(p, lo, hi, n, old){
+  if(n === hi){
+    if(lo === 0){
+      if(p.length !== 0) throw new Error('consistency proof: unexpected extra hashes');
+      return [old, old];
+    }
+    if(p.length !== 1) throw new Error('consistency proof: wrong length');
+    return [p[0], p[0]];
+  }
+  if(p.length === 0) throw new Error('consistency proof: proof is empty');
+  const k = maxpow2(hi - lo);
+  const top = p[p.length-1], rest = p.slice(0, -1);
+  if(n <= lo + k){
+    const [oh, th] = await treeProofRun(rest, lo, lo+k, n, old);
+    return [oh, await nodeHash(th, top)];
+  }
+  const [oh, th] = await treeProofRun(rest, lo+k, hi, n, old);
+  return [await nodeHash(top, oh), await nodeHash(top, th)];
+}
+async function checkTree(p, t, th, n, h){
+  if(t < 1 || n < 1 || n > t) throw new Error('consistency proof: invalid tree sizes');
+  if(n === t) return eq(th, h); // same tree: nothing to prove beyond equality
+  const [h2, th2] = await treeProofRun(p, 0, t, n, h);
+  return eq(th2, th) && eq(h2, h);
+}
+
 // Parse a sumdb/note: signed bytes = body (text incl. trailing \n); signatures
 // follow a blank line as "— <name> <base64>".
 function parseNote(txt){
@@ -181,9 +210,105 @@ async function loadNetwork(){
     out += '<p class="mut">This node <b>witnesses</b> <code>' + esc(d.witnessing || d.witness_url) +
            '</code>: it demands consistency proofs from it and records every verdict in its own log, ' +
            'so that node cannot rewrite its history without this one holding the evidence. ' +
-           'Verdicts are under the <code>_witness</code> namespace.</p>';
+           'Verdicts are under the <code>_witness</code> namespace.</p>' +
+           '<p><button onclick="verifyWitness()">Verify this claim yourself</button> ' +
+           '<span class="mut">runs the checks in your browser, against both nodes directly</span></p>' +
+           '<div id="witnessproof"></div>';
+    WITNESS = d;
   }
   $('network').innerHTML = out;
+}
+
+let WITNESS = null;
+
+// Reproduce this node's witness claim in the visitor's browser.
+//
+// The point is that none of this trusts the node serving the page. Step 1 shows
+// the verdict really is committed to this node's own append-only log, so it
+// cannot be a story invented for the page. Steps 2 and 3 go to the *target*
+// directly and re-derive the claim from the target's own signed bytes: if this
+// node were lying about the target, the target's signature or its consistency
+// proof would fail here, in the reader's browser, on the reader's network.
+//
+// This is why the read plane sets permissive CORS. Without it the browser could
+// only ask this node about the other node, which is the trust we are refusing.
+async function verifyWitness(){
+  const box = $('witnessproof');
+  if(!WITNESS){ box.innerHTML = '<span class="no">no witness target configured</span>'; return; }
+  box.innerHTML = '<p class="mut">verifying...</p>';
+  const steps = [];
+  const step = (ok, msg) => steps.push('<li class="' + (ok ? 'ok' : 'no') + '">' +
+    (ok ? '&check; ' : '&#10007; ') + msg + '</li>');
+  const render = verdict => box.innerHTML = '<ul>' + steps.join('') + '</ul>' +
+    (verdict !== null ? '<p class="' + (verdict ? 'ok' : 'no') + '"><b>' + (verdict
+      ? '&check; this node&rsquo;s witness claim holds, checked here, not taken on trust'
+      : '&#10007; the claim did NOT verify') + '</b></p>' : '');
+
+  try {
+    // 1. The verdict is in this node's own signed log.
+    const reg = encodeURIComponent(WITNESS.witnessing);
+    const j = await jget('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion');
+    const rec = j.data, p = rec.proof;
+    if(!p) throw new Error('this node returned no inclusion proof for its verdict');
+    const lh = await leafHash(leafBytes(p.leaf));
+    const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, lh);
+    const cb = parseCheckpointBody(parseNote(p.checkpoint).body);
+    const included = eq(root, cb.root) && cb.size === p.tree_size;
+    const selfSig = await verifyCheckpointSig(p.checkpoint, VKEY);
+    step(included, 'the verdict is entry ' + p.leaf_index + ' of this node&rsquo;s own log (size ' +
+         p.tree_size + ') &mdash; it cannot be retracted without breaking this node&rsquo;s history');
+    if(selfSig === true) step(true, 'this node&rsquo;s checkpoint is signed by ' + esc(cb.origin.replace('/log','')));
+    else if(selfSig === false) step(false, 'this node&rsquo;s checkpoint signature is INVALID');
+    else steps.push('<li class="mut">this node&rsquo;s checkpoint signature unchecked (no key / unsupported browser)</li>');
+
+    const witnessed = rec.details || {};
+    step(witnessed.consistency_ok === true,
+         'the recorded verdict says the target was append-only at size ' + witnessed.size);
+    if(!included || witnessed.consistency_ok !== true){ render(false); return; }
+
+    // 2. The target's current checkpoint, fetched from the target, signed by the
+    //    target. This node is not in the path.
+    const base = WITNESS.witness_url.replace(/\/dedi$/, '');
+    let targetNote;
+    try {
+      const r = await fetch(base + '/dedi/log/checkpoint');
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      targetNote = await r.text();
+    } catch(e){
+      step(false, 'could not reach the target directly from your browser (' + esc(e.message) + ')');
+      render(false); return;
+    }
+    const tcb = parseCheckpointBody(parseNote(targetNote).body);
+    const tSig = await verifyCheckpointSig(targetNote, WITNESS.witness_key || '');
+    if(tSig === true) step(true, 'the target&rsquo;s live checkpoint (size ' + tcb.size +
+      ') is signed by its own key &mdash; fetched by your browser from ' + esc(base));
+    else if(tSig === false){ step(false, 'the target&rsquo;s checkpoint signature is INVALID'); render(false); return; }
+    else steps.push('<li class="mut">target checkpoint signature unchecked (no key published / unsupported browser)</li>');
+
+    // 3. The target is append-only between what was witnessed and where it is
+    //    now, proved by the target's own proof.
+    if(tcb.size < witnessed.size){
+      step(false, 'the target&rsquo;s log SHRANK, from ' + witnessed.size + ' to ' + tcb.size +
+           ' &mdash; an append-only log cannot do this');
+      render(false); return;
+    }
+    const oldRoot = b64d(witnessed.root);
+    let consistent;
+    if(tcb.size === witnessed.size){
+      consistent = eq(oldRoot, tcb.root);
+      step(consistent, 'the target is unchanged since it was witnessed (size ' + tcb.size +
+           '), and its root still matches');
+    } else {
+      const cp = await (await fetch(base + '/dedi/log/proof/consistency?old=' +
+        witnessed.size + '&new=' + tcb.size)).json();
+      consistent = await checkTree(cp.data.proof.map(b64d), tcb.size, tcb.root, witnessed.size, oldRoot);
+      step(consistent, 'the target grew from ' + witnessed.size + ' to ' + tcb.size +
+           ' by appending only &mdash; nothing witnessed earlier was altered or removed');
+    }
+    render(consistent);
+  } catch(e){
+    box.innerHTML = '<ul>' + steps.join('') + '</ul><p class="no">&#10007; ' + esc(e.message) + '</p>';
+  }
 }
 
 function fmtDur(s){

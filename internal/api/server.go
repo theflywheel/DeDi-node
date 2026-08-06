@@ -31,6 +31,12 @@ type Server struct {
 	WitnessTarget    string
 	WitnessTargetURL string
 
+	// WitnessTargetKey is the target's public verifier key. It is published so a
+	// visitor's browser can check the target's checkpoint signature itself
+	// rather than believing this node's report of it. Public by construction —
+	// a verifier key is what you hand out precisely so others can check you.
+	WitnessTargetKey string
+
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
 	// lookup (design.md:256). nil means no restriction — permitted only while
 	// the write plane is closed; see serve().
@@ -82,5 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "route")
 	})
-	return s.counted(mux)
+	// CORS sits outside the counter so the header is present on every response
+	// the counter sees, including the ones it does not count.
+	return readPlaneCORS(s.counted(mux))
 }

@@ -504,7 +504,8 @@ func serve() error {
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: envOr("DEDI_VERIFIER_KEY", vkey),
 		NodeName: os.Getenv("DEDI_NODE_NAME"), Network: netmon,
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
-		DemoURL: os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
+		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
+		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
 	}

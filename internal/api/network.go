@@ -42,6 +42,10 @@ func (s *Server) networkView(w http.ResponseWriter, r *http.Request) {
 		"reachable":   reachable,
 		"witnessing":  s.WitnessTarget, // "" when this node witnesses nobody
 		"witness_url": s.WitnessTargetURL,
+		// Published so the claim can be checked rather than taken on trust: with
+		// this, a browser can verify the target's checkpoint signature against
+		// the target's own key, without this node in the loop.
+		"witness_key": s.WitnessTargetKey,
 	}
 	ok(w, "Network retrieved successfully", data)
 }
