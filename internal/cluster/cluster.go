@@ -135,11 +135,9 @@ func Open(cfg Config, s *store.Store) (*Node, error) {
 	rc.LocalID = raft.ServerID(cfg.ID)
 	rc.LogOutput = logOut
 
-	advertise, err := net.ResolveTCPAddr("tcp", self.RaftAddr)
-	if err != nil {
-		return nil, fmt.Errorf("cluster: resolve advertised address %q: %w", self.RaftAddr, err)
-	}
-	transport, err := raft.NewTCPTransport(cfg.BindAddr, advertise, 3, 10*time.Second, logOut)
+	// The advertised name is passed through unresolved on purpose — see
+	// transport.go.
+	transport, err := newHostnameTransport(cfg.BindAddr, self.RaftAddr, logOut)
 	if err != nil {
 		return nil, fmt.Errorf("cluster: transport on %s: %w", cfg.BindAddr, err)
 	}

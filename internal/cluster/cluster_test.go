@@ -81,6 +81,14 @@ type replica struct {
 
 func startCluster(t *testing.T, n int) []*replica {
 	t.Helper()
+	return startClusterAt(t, n, func() string { return freeAddr(t) })
+}
+
+// startClusterAt lets a test choose how peers address each other, so the
+// hostname path the deployment actually uses can be exercised rather than only
+// the IP-literal one.
+func startClusterAt(t *testing.T, n int, addr func() string) []*replica {
+	t.Helper()
 	ctx := context.Background()
 	dbs := replicaDBs(t, n)
 
@@ -88,7 +96,7 @@ func startCluster(t *testing.T, n int) []*replica {
 	for i := range peers {
 		peers[i] = Peer{
 			ID:       fmt.Sprintf("r%d", i),
-			RaftAddr: freeAddr(t),
+			RaftAddr: addr(),
 			HTTPURL:  fmt.Sprintf("http://replica-%d.example", i),
 		}
 	}
