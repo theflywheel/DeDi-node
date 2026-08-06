@@ -295,14 +295,18 @@ type Member struct {
 
 // State describes the cluster for the network view and health checks.
 type State struct {
-	Enabled      bool     `json:"enabled"`
-	NodeID       string   `json:"node_id"`
-	Role         string   `json:"role"` // leader | follower | candidate
-	LeaderID     string   `json:"leader_id,omitempty"`
-	LeaderURL    string   `json:"leader_url,omitempty"`
-	Members      []Member `json:"members"`
-	CommitIndex  uint64   `json:"commit_index"`
-	AppliedIndex uint64   `json:"applied_index"`
+	Enabled   bool     `json:"enabled"`
+	NodeID    string   `json:"node_id"`
+	Role      string   `json:"role"` // leader | follower | candidate
+	LeaderID  string   `json:"leader_id,omitempty"`
+	LeaderURL string   `json:"leader_url,omitempty"`
+	Members   []Member `json:"members"`
+	// Term counts elections. A term that keeps climbing is a cluster that keeps
+	// re-electing — the symptom of a flapping replica or a partition, and
+	// invisible in any single snapshot of who happens to be leader.
+	Term         uint64 `json:"term"`
+	CommitIndex  uint64 `json:"commit_index"`
+	AppliedIndex uint64 `json:"applied_index"`
 	// LagEntries is how far this replica's applied state trails what has been
 	// committed. Persistently non-zero is the signal that a replica is falling
 	// behind, which a bare "is it up" check would miss entirely.
@@ -317,6 +321,7 @@ func (n *Node) State() State {
 		Role:         strings.ToLower(n.raft.State().String()),
 		LeaderID:     leaderID,
 		LeaderURL:    leaderURL,
+		Term:         n.raft.CurrentTerm(),
 		CommitIndex:  n.raft.CommitIndex(),
 		AppliedIndex: n.raft.AppliedIndex(),
 	}

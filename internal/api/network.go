@@ -85,6 +85,7 @@ func (s *Server) clusterView() map[string]any {
 		"role":       st.Role,
 		"leader_id":  st.LeaderID,
 		"leader_url": st.LeaderURL,
+		"term":       st.Term,
 		"members":    members,
 		"size":       len(members),
 		// A replica that is up but persistently behind is the failure a plain

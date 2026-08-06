@@ -139,7 +139,7 @@ async function loadNetwork(){
   $('network').innerHTML = out;
 }
 
-// Replication, shown apart from everything above it.
+// Consensus and replication, shown apart from everything above them.
 //
 // The table above is other operators; this is copies of *this* node. They look
 // superficially alike — a list of machines with green dots — and conflating
@@ -148,44 +148,131 @@ async function loadNetwork(){
 // one node run by one operator agree with that operator by construction,
 // including about a rewritten history. So this sits under its own heading and
 // says what it is not.
+//
+// Consensus and replication are then split again, because they fail
+// separately. Consensus is agreement about *order*: who leads, which term,
+// how far the group has committed. Replication is whether each replica has
+// actually caught up with that order and holds the same data. A cluster with a
+// stable leader and a replica three hours behind is healthy by the first
+// measure and broken by the second, and one combined tick would hide it.
 function clusterBlock(c){
   if(!c) return '';
   if(!c.enabled){
-    return '<h3>Replication</h3><p class="mut">This node is a single instance &mdash; ' +
-      'no replicas. If it goes down the directory stops answering.</p>';
+    return '<h3>Consensus &amp; replication</h3><p class="mut">This node is a single instance ' +
+      '&mdash; no replicas, nothing to agree with. If it goes down the directory stops ' +
+      'answering.</p>';
   }
   const members = c.members || [];
-  let out = '<h3>Replication <span class="mut">· ' + members.length + ' replicas of this node</span></h3>';
+  let out = '<h3>Consensus <span class="mut">· agreement on the order of entries</span></h3>';
   out += '<table class="net"><tr><th></th><th>replica</th><th>role</th></tr>';
   for(const m of members){
     const isLeader = !!m.leader;
     out += '<tr class="' + (m.self ? 'self' : '') + '">' +
-      '<td><span class="dot ' + (isLeader ? 'ok' : '') + '">' + (isLeader ? '●' : '○') + '</span></td>' +
+      '<td><span class="dot ' + (isLeader ? 'ok' : '') + '">' + (isLeader ? '\u25cf' : '\u25cb') + '</span></td>' +
       '<td>' + (m.http_url ? '<a href="' + esc(m.http_url) + '">' + esc(m.id) + '</a>' : esc(m.id)) +
         (m.self ? ' <span class="mut">(this replica)</span>' : '') + '</td>' +
-      '<td class="mut">' + (isLeader ? 'leader — accepts writes' : 'follower — serves reads') + '</td>' +
+      '<td class="mut">' + (isLeader ? 'leader &mdash; accepts writes' : 'follower &mdash; serves reads') + '</td>' +
       '</tr>';
   }
   out += '</table>';
-
-  // Lag, not a green tick. A replica that is up but permanently behind is
-  // precisely what a liveness check cannot see.
-  if(c.lag_entries > 0){
-    out += '<p class="no">&#10007; This replica is ' + c.lag_entries +
-      ' entries behind what the cluster has committed.</p>';
-  }else{
-    out += '<p class="mut">This replica has applied everything committed (index ' +
-      Number(c.applied_index || 0).toLocaleString() + ').</p>';
-  }
   if(!c.leader_id){
-    out += '<p class="no">No leader right now &mdash; an election is in progress. ' +
-      'Reads are unaffected; writes wait.</p>';
+    out += '<p class="no">&#10007; No leader right now &mdash; an election is in progress. ' +
+      'Reads are unaffected; writes wait a second or two.</p>';
+  }else{
+    // The term is here because a single snapshot of "who is leader" cannot show
+    // a cluster that keeps re-electing. A term climbing on every refresh is a
+    // flapping replica or a partition, and it is worth being able to see.
+    out += '<p class="mut">Led by <b>' + esc(c.leader_id) + '</b> in election term ' +
+      Number(c.term || 0).toLocaleString() + '; the group has committed ' +
+      Number(c.commit_index || 0).toLocaleString() + ' entries. ' +
+      'A majority (' + (Math.floor(members.length / 2) + 1) + ' of ' + members.length +
+      ') must agree before any write is accepted, so ' + Math.floor((members.length - 1) / 2) +
+      ' replica(s) can fail without the directory stopping.</p>';
   }
+
+  out += '<h3>Replication <span class="mut">· whether each replica actually holds it</span></h3>' +
+    '<div id="repl" class="mut">checking each replica directly...</div>';
+  // Deliberately not awaited: the panel renders immediately and fills in.
+  loadReplication(members).catch(e => {
+    const el = $('repl');
+    if(el) el.innerHTML = '<p class="no">could not check the replicas: ' + esc(String(e)) + '</p>';
+  });
+
   out += '<p class="mut"><b>This is availability, not trust.</b> These replicas share one key ' +
     'and one log, and they are run by one operator &mdash; so they prove nothing about each ' +
     'other and none of them is a witness. They exist so the directory keeps answering when a ' +
     'machine dies. The trust claim is the witnessing above.</p>';
   return out;
+}
+
+// Ask every replica what it holds, from the browser, rather than relaying this
+// node's account of its peers.
+//
+// The distinction matters for the same reason it does in the witness ring: a
+// replica that has fallen behind or diverged is exactly the one whose report
+// about itself you would want independently. Each replica is asked for its own
+// signed checkpoint, and the roots are compared here. Identical roots is a real
+// statement about replication; "the leader says everyone is fine" is not.
+async function loadReplication(members){
+  const el = $('repl');
+  if(!el) return;
+  const rows = await Promise.all(members.map(async m => {
+    if(!m.http_url) return {id: m.id, self: m.self, leader: m.leader, err: 'no public URL configured'};
+    try{
+      const [netRes, cpRes] = await Promise.all([
+        fetch(m.http_url + '/dedi/network').then(r => r.json()),
+        fetch(m.http_url + '/dedi/log/checkpoint').then(r => r.text())
+      ]);
+      const cl = (netRes.data && netRes.data.cluster) || {};
+      const parts = cpRes.split('\n');
+      return {
+        id: m.id, self: m.self, leader: m.leader,
+        applied: cl.applied_index, lag: cl.lag_entries,
+        size: parts[1], root: parts[2]
+      };
+    }catch(e){
+      // Cross-origin failures land here too, so this says "could not reach"
+      // rather than claiming the replica is down.
+      return {id: m.id, self: m.self, leader: m.leader, err: 'could not reach it from your browser'};
+    }
+  }));
+
+  let out = '<table class="net"><tr><th>replica</th><th>entries</th><th>applied</th>' +
+            '<th>behind</th><th>signed root</th></tr>';
+  for(const r of rows){
+    if(r.err){
+      out += '<tr><td>' + esc(r.id) + '</td><td colspan="4" class="mut">' + esc(r.err) + '</td></tr>';
+      continue;
+    }
+    out += '<tr class="' + (r.self ? 'self' : '') + '">' +
+      '<td>' + esc(r.id) + (r.leader ? ' <span class="mut">(leader)</span>' : '') + '</td>' +
+      '<td class="num">' + esc(r.size || '?') + '</td>' +
+      '<td class="num mut">' + Number(r.applied || 0).toLocaleString() + '</td>' +
+      '<td class="num ' + (r.lag > 0 ? 'no' : 'mut') + '">' + (r.lag > 0 ? r.lag : '\u2014') + '</td>' +
+      '<td class="mut">' + esc((r.root || '?').slice(0, 16)) + '\u2026</td>' +
+      '</tr>';
+  }
+  out += '</table>';
+
+  const seen = rows.filter(r => !r.err && r.root);
+  const roots = new Set(seen.map(r => r.root));
+  if(seen.length === 0){
+    out += '<p class="mut">No replica could be reached from your browser, so nothing is ' +
+      'claimed here either way.</p>';
+  }else if(roots.size === 1 && seen.length === rows.length){
+    out += '<p class="ok">&#10003; All ' + seen.length + ' replicas served the same signed root, ' +
+      'checked by your browser against each of them directly. They hold identical logs.</p>';
+  }else if(roots.size === 1){
+    out += '<p class="mut">The ' + seen.length + ' replicas your browser could reach served the ' +
+      'same signed root. The others were unreachable, so nothing is claimed about them.</p>';
+  }else{
+    // Either genuine divergence or a follower mid-catch-up. Both deserve to be
+    // visible; claiming which one it is would be guessing.
+    out += '<p class="no">&#10007; The replicas served <b>different signed roots</b>. That is ' +
+      'either a follower still catching up &mdash; check the "behind" column &mdash; or a real ' +
+      'divergence, which would be serious. Reload in a few seconds: if it persists, it is not lag.</p>';
+  }
+  el.innerHTML = out;
 }
 
 let WITNESS = null;
