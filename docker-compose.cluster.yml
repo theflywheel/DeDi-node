@@ -1,0 +1,82 @@
+# A three-replica dedid cluster: one node, replicated for availability.
+#
+#   docker compose -f docker-compose.cluster.yml up --build
+#
+# This is NOT the witness ring (docker-compose.witness.yml). These three are
+# replicas of a single node sharing one identity key and one origin; they prove
+# nothing about each other and are not independent parties. They exist so the
+# directory keeps answering when a machine dies. See docs/replication.md.
+#
+# Each replica materialises into its own logical database on the shared
+# Postgres instance. Sharing one database between replicas would corrupt it.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dedi
+      POSTGRES_PASSWORD: dedi
+      POSTGRES_DB: dedi
+    ports:
+      - "5442:5432"
+    # The three logical databases are created on first boot; Postgres runs
+    # anything in this directory once, against an empty data volume.
+    volumes:
+      - ./scripts/cluster-databases.sql:/docker-entrypoint-initdb.d/10-cluster.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dedi"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  r1: &replica
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &replica_env
+      DEDI_DB_URL: postgres://dedi:dedi@db:5432/dedi_r1?sslmode=disable
+      # One identity for the whole cluster: from outside this is one node, and a
+      # checkpoint must verify against one key whichever replica served it.
+      DEDI_KEY: ${DEDI_CLUSTER_KEY:?run `dedid keygen` and export DEDI_CLUSTER_KEY}
+      DEDI_ORIGIN: cluster.dedi.local/log
+      DEDI_LISTEN: ":8080"
+      DEDI_CHECKPOINT_INTERVAL: 10s
+      DEDI_CLUSTER_ID: r1
+      DEDI_CLUSTER_PEERS: "r1=r1:7000=http://localhost:8091,r2=r2:7000=http://localhost:8092,r3=r3:7000=http://localhost:8093"
+      DEDI_CLUSTER_DATA_DIR: /data/raft
+      # Exactly one replica bootstraps, and only the first time. The others
+      # learn the configuration from it.
+      DEDI_CLUSTER_BOOTSTRAP: "true"
+    volumes:
+      - r1-raft:/data
+    ports:
+      - "8091:8080"
+
+  r2:
+    <<: *replica
+    environment:
+      <<: *replica_env
+      DEDI_DB_URL: postgres://dedi:dedi@db:5432/dedi_r2?sslmode=disable
+      DEDI_CLUSTER_ID: r2
+      DEDI_CLUSTER_BOOTSTRAP: "false"
+    volumes:
+      - r2-raft:/data
+    ports:
+      - "8092:8080"
+
+  r3:
+    <<: *replica
+    environment:
+      <<: *replica_env
+      DEDI_DB_URL: postgres://dedi:dedi@db:5432/dedi_r3?sslmode=disable
+      DEDI_CLUSTER_ID: r3
+      DEDI_CLUSTER_BOOTSTRAP: "false"
+    volumes:
+      - r3-raft:/data
+    ports:
+      - "8093:8080"
+
+volumes:
+  r1-raft:
+  r2-raft:
+  r3-raft:

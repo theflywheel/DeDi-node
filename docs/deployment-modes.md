@@ -12,6 +12,14 @@ place.
 | **2 · Witnessed** | + any other dedid node watching this one | `DEDI_WITNESS_*` on the watcher | Split views and forked history: an independent operator continuously demands consistency proofs and records verdicts in its own log. Cheating becomes *provable by a third party*. |
 | **3 · Anchored** | + a ledger the checkpoints are published to | `DEDI_ANCHOR_*` | Backdating and checkpoint suppression: roots are pinned into an external, ordered timeline the operator does not control. |
 
+**Availability is a separate axis, not a fourth mode.** Any of these can run as
+a Raft cluster of replicas (`DEDI_CLUSTER_*`, see `docs/replication.md`), which
+keeps the directory serving when a machine dies. It is crash tolerance and
+carries no trust claim whatsoever: a quorum of replicas run by one operator
+agrees with that operator. Whatever a node defends against above, it defends
+against exactly as well replicated and unreplicated — no better. Do not present
+replicas as witnesses.
+
 Modes compose: a production node typically runs 1+2, adds 3 when an external
 timeline is wanted. Nothing about a mode is load-bearing for reads — if a
 witness or anchor target is down, the node serves traffic unaffected and the
@@ -110,3 +118,7 @@ layout from on-chain metadata, so the same flags work against:
   each other).
 - Institutional / cross-network deployments that want an operator-independent
   timeline: **1+2+3**.
+
+Add replicas when the cost of the directory being *unreachable* matters — for
+Beckn, an unresolvable subscriber key is a 401 NACK on every message in flight.
+That is an availability question and is orthogonal to the mode you pick.
