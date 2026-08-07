@@ -254,8 +254,37 @@ async function probeReplica(m){
 function replState(r, roots){
   if(r.err) return 'unreachable';
   if(roots.size > 1 && r.root !== roots.majority) return 'diverged';
-  if(r.lag > 0) return 'lagging';
+  if(r.behind > 0) return 'lagging';
   return 'insync';
+}
+
+// How far a replica trails the leader, in entries.
+//
+// This is NOT the replica's own lag_entries, and the difference matters. That
+// field is commit minus applied — the gap between learning of a commit and
+// applying it, which is microseconds. A replica that has not *received* entries
+// yet has commit == applied and truthfully reports zero, so a follower sitting
+// forty entries behind the leader reports no lag at all.
+//
+// Which would have made this panel green for exactly the failure it exists to
+// show: a replica that is up, answering promptly, and serving stale data. That
+// was observed on the live cluster — one replica at index 241 while the leader
+// was at 281, both claiming lag 0.
+//
+// The browser can do better than any single replica can, because it has asked
+// all of them: the honest number is the leader's applied index minus this one's.
+// Each half is still that replica's own claim about itself; only the
+// subtraction happens here.
+function markBehind(rows){
+  const leader = rows.find(r => r.leader && !r.err);
+  const front = leader ? (leader.applied || 0) : Math.max(0, ...rows.filter(r => !r.err).map(r => r.applied || 0));
+  for(const r of rows){
+    if(r.err){ r.behind = null; continue; }
+    // Never negative: a follower can briefly report an index past the leader's
+    // if the two samples were taken a moment apart.
+    r.behind = Math.max(0, front - (r.applied || 0));
+  }
+  return rows;
 }
 
 const REPL_COLOUR = {
@@ -319,7 +348,7 @@ function clusterSVG(rows, leaderId){
     const mx = cx + ux * len * 0.52, my = cy + uy * len * 0.52 - 6;
     let label = '';
     if(p.r.err) label = 'unreachable';
-    else if(p.r.lag > 0) label = p.r.lag + ' behind';
+    else if(p.r.behind > 0) label = p.r.behind + ' behind';
     else label = 'in sync';
     out += '<text x="' + mx + '" y="' + my + '" text-anchor="middle" font-size="10" ' +
       'fill="' + (lagging ? '#a50' : '#666') + '">' + esc(label) + '</text>';
@@ -401,11 +430,11 @@ async function loadReplication(members){
   REPL_BUSY = true;
   try{
     REPL_MEMBERS = members;
-    const rows = await Promise.all(members.map(probeReplica));
+    const rows = markBehind(await Promise.all(members.map(probeReplica)));
 
     for(const r of rows){
       const hist = REPL_HIST.get(r.id) || [];
-      hist.push({latency: r.err ? null : r.latency, lag: r.err ? null : r.lag});
+      hist.push({latency: r.err ? null : r.latency, behind: r.err ? null : r.behind});
       while(hist.length > REPL_KEEP) hist.shift();
       REPL_HIST.set(r.id, hist);
     }
@@ -418,7 +447,7 @@ async function loadReplication(members){
     out += '<div id="replpin"></div>';
 
     out += '<table class="net"><tr><th>replica</th><th>role</th><th>entries</th><th>applied</th>' +
-           '<th>behind</th><th>latency</th><th>trend</th><th>signed root</th></tr>';
+           '<th>behind leader</th><th>latency</th><th>trend</th><th>signed root</th></tr>';
     for(const r of rows){
       const st = replState(r, roots);
       if(r.err){
@@ -431,7 +460,7 @@ async function loadReplication(members){
         '<td class="' + (r.leader ? 'ok' : 'mut') + '">' + (r.leader ? 'leader' : 'follower') + '</td>' +
         '<td class="num">' + esc(r.size || '?') + '</td>' +
         '<td class="num mut">' + Number(r.applied || 0).toLocaleString() + '</td>' +
-        '<td class="num ' + (r.lag > 0 ? 'no' : 'mut') + '">' + (r.lag > 0 ? r.lag : '—') + '</td>' +
+        '<td class="num ' + (r.behind > 0 ? 'no' : 'mut') + '">' + (r.behind > 0 ? r.behind : '—') + '</td>' +
         '<td class="num">' + r.latency + 'ms</td>' +
         '<td>' + sparkline(REPL_HIST.get(r.id) || [], 'latency', '#888') + '</td>' +
         '<td class="' + (st === 'diverged' ? 'no' : 'mut') + '">' + esc((r.root || '?').slice(0, 12)) + '…</td>' +
@@ -487,7 +516,9 @@ function showReplPin(rows){
     '\n\nentries in the log      ' + esc(r.size || '?') +
     '\napplied raft index     ' + Number(r.applied || 0).toLocaleString() +
     '\ncommitted raft index   ' + Number(r.commit || 0).toLocaleString() +
-    '\nbehind by              ' + (r.lag > 0 ? r.lag + ' entries' : 'nothing') +
+    '\nbehind the leader by   ' + (r.behind > 0 ? r.behind + ' entries' : 'nothing') +
+    '\nits own commit-applied ' + (r.lag > 0 ? r.lag + ' entries' : 'nothing') +
+      '  (local apply window, near always zero)' +
     '\nround trip from you    ' + r.latency + 'ms  (worst of last ' + lats.length + ': ' + worst + 'ms)' +
     '\nsigned root            ' + esc(r.root || '?') +
     '\n\ncurl ' + esc(r.url) + '/dedi/log/checkpoint</pre>';
