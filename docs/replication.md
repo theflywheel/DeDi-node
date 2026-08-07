@@ -205,7 +205,27 @@ stretched quorum.
 `/dedi/network` reports a `cluster` object: role, leader, members, commit and
 applied index, and `lag_entries`. Lag is published rather than folded into a
 green tick, because **a replica that is up but permanently behind is exactly
-what a liveness check cannot see**. An unreplicated node reports
+what a liveness check cannot see**.
+
+**`lag_entries` alone does not detect that**, and it is worth being precise
+about why. It is commit minus applied *on that replica*: the window between
+learning of a commit and applying it, which is microseconds. A replica that has
+not yet received entries has commit == applied and truthfully reports zero. On
+the live cluster one replica sat at applied index 241 while the leader was at
+281, and both reported `lag_entries: 0`.
+
+So a reader wanting "how far behind the leader is this replica" must subtract:
+leader applied index minus this replica's. The UI does exactly that, because a
+browser has asked every replica and can compare them; each half is still that
+replica's own claim about itself.
+
+**Open gap:** the Kener replication monitor reads `lag_entries` from a single
+URL and therefore shares the blind spot — it cannot compare across replicas from
+one endpoint. Closing it properly means either the node reporting its peers'
+applied indices (it already polls peers for the witness ring, so the machinery
+exists) or a check that queries several replicas. Until then, the cross-replica
+comparison lives only in the UI, and the monitor should be read as "this replica
+is applying what it receives", not "this replica is current". An unreplicated node reports
 `{"enabled": false, "size": 1}` explicitly — absent would be
 indistinguishable from a node too old to report it.
 
