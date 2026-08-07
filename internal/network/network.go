@@ -102,11 +102,46 @@ func (m *Monitor) interval() time.Duration {
 	return 30 * time.Second
 }
 
-// Run polls every peer until ctx is cancelled.
-func (m *Monitor) Run(ctx context.Context) {
-	if len(m.Peers) == 0 {
+// Add registers a peer discovered at runtime — today, a child node completing
+// enrolment.
+//
+// Peers used to be fixed at boot, and a set that only changes on restart was
+// fine while the only source was configuration. A delegation is granted while
+// the node is running, and an operator who has just enrolled a child and sees
+// nothing in the network panel reads that as the enrolment having failed.
+//
+// Adding an existing peer is a no-op rather than a duplicate: enrolment is
+// idempotent from the child's side, and a child that retries should not appear
+// twice.
+func (m *Monitor) Add(name, url string) {
+	if name == "" || url == "" {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.Peers {
+		if p.URL == url {
+			return
+		}
+	}
+	m.Peers = append(m.Peers, Peer{Name: name, URL: url})
+}
+
+// peers copies the peer set under the lock. Callers iterate the copy, because
+// polling one peer takes seconds and holding the lock for that would block
+// every enrolment and every read of the network panel behind it.
+func (m *Monitor) peers() []Peer {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]Peer(nil), m.Peers...)
+}
+
+// Run polls every peer until ctx is cancelled.
+//
+// It keeps running with no peers configured, because a node can gain one
+// without restarting: a standalone node that delegates a child acquires its
+// first peer at that moment, and a loop that had exited would never see it.
+func (m *Monitor) Run(ctx context.Context) {
 	// Probe immediately: waiting a full interval would leave the network panel
 	// blank for the first half minute after every restart, which reads as an
 	// outage rather than as a node that has not looked yet.
@@ -127,8 +162,9 @@ func (m *Monitor) pollAll(ctx context.Context) {
 	// Concurrently, so one unreachable peer sitting on the client timeout does
 	// not delay the observation of every peer behind it in the list.
 	var wg sync.WaitGroup
-	results := make([]Status, len(m.Peers))
-	for i, peer := range m.Peers {
+	peers := m.peers()
+	results := make([]Status, len(peers))
+	for i, peer := range peers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

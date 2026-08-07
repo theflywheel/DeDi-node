@@ -1,0 +1,308 @@
+package api
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"golang.org/x/mod/sumdb/note"
+
+	"github.com/theflywheel/DeDi-node/internal/checkpoint"
+	"github.com/theflywheel/DeDi-node/internal/delegation"
+	"github.com/theflywheel/DeDi-node/internal/network"
+	"github.com/theflywheel/DeDi-node/internal/publisher"
+	"github.com/theflywheel/DeDi-node/internal/store"
+)
+
+// parentServer boots a node that holds `ns` and can delegate under it. It
+// returns the Server itself as well, because the delegation hooks — the peer
+// monitor and OnDelegation — are the parts most worth asserting on.
+func parentServer(t *testing.T, ns string) (*httptest.Server, *Server, ed25519.PrivateKey) {
+	t.Helper()
+	base, s, _ := testServer(t)
+	base.Close()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := publisher.ParseKeySet("op-1:" + ns + ":" + base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skey, vkey, err := note.GenerateKey(rand.Reader, "parent.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &Server{
+		Store: s, CP: &checkpoint.Checkpointer{Store: s, SKey: skey, Origin: "parent.test/log", Interval: time.Hour},
+		TTL: 300, VerifierKey: vkey, WildcardNamespaces: []string{ns},
+		Auth:    &publisher.Authenticator{Keys: keys},
+		Network: &network.Monitor{},
+	}
+	srv := httptest.NewServer(api.Handler())
+	t.Cleanup(srv.Close)
+	return srv, api, priv
+}
+
+func mintOffer(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, ns, child string) (string, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(createChildRequest{Namespace: child, Label: "mobility", Provider: "env"})
+	resp := signedDo(t, srv, priv, http.MethodPost, "/admin/namespaces/"+ns+"/children", body, publisher.Precondition{})
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("mint: %d %s", resp.StatusCode, raw)
+	}
+	var out struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := out.Data["token"].(string)
+	if token == "" {
+		t.Fatalf("no token in response: %s", raw)
+	}
+	return token, out.Data
+}
+
+func enrol(t *testing.T, srv *httptest.Server, en delegation.Enrolment) *http.Response {
+	t.Helper()
+	body, _ := json.Marshal(en)
+	resp, err := http.Post(srv.URL+"/dedi/enrol", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// Generated, not written out: the hash inside a verifier key is derived from
+// the name and public key, so a hand-made one does not parse.
+var childKey = func() string {
+	_, vkey, err := note.GenerateKey(rand.Reader, "beckn.mobility/log")
+	if err != nil {
+		panic(err)
+	}
+	return vkey
+}()
+
+func childEnrolment(token string) delegation.Enrolment {
+	return delegation.Enrolment{
+		Namespace: "beckn.mobility", Token: token,
+		Origin: "beckn.mobility/log", URL: "https://mobility.example",
+		Key: childKey,
+	}
+}
+
+func TestCreatingAChildMintsAnOfferAndPublishesItToTheLog(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	token, data := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+
+	// The artifact must carry everything the child needs to come back.
+	art, _ := data["artifact"].(map[string]any)
+	content, _ := art["content"].(string)
+	for _, want := range []string{token, "beckn.mobility", srv.URL} {
+		if !bytes.Contains([]byte(content), []byte(want)) {
+			t.Errorf("artifact does not carry %q:\n%s", want, content)
+		}
+	}
+
+	// And the log holds the offer — with the hash, not the token.
+	rec, err := api.currentDelegation(t.Context(), "beckn", "beckn.mobility")
+	if err != nil {
+		t.Fatalf("delegation not published to the log: %v", err)
+	}
+	if rec.State != delegation.StateOffered {
+		t.Errorf("state = %q, want %q", rec.State, delegation.StateOffered)
+	}
+	if rec.TokenHash != delegation.HashToken(token) {
+		t.Error("the published hash does not match the token that was issued")
+	}
+}
+
+func TestEnrolmentRecordsTheChildAndStartsWatchingIt(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+
+	var hooked delegation.Record
+	api.OnDelegation = func(rec delegation.Record) { hooked = rec }
+
+	resp := enrol(t, srv, childEnrolment(token))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("enrol: %d %s", resp.StatusCode, raw)
+	}
+
+	rec, err := api.currentDelegation(t.Context(), "beckn", "beckn.mobility")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.State != delegation.StateActive || rec.ChildOrigin != "beckn.mobility/log" {
+		t.Fatalf("delegation not activated: %+v", rec)
+	}
+	if rec.ChildKey == "" {
+		t.Error("the child's verifier key was not recorded, so nobody can check its checkpoints")
+	}
+
+	// Watching must begin immediately. A child that only appears after a
+	// restart reads to the operator as an enrolment that failed.
+	if got := api.Network.Snapshot(); len(got) != 1 || got[0].URL != "https://mobility.example" {
+		t.Errorf("child was not added to the network view: %+v", got)
+	}
+	if hooked.ChildOrigin != "beckn.mobility/log" {
+		t.Errorf("OnDelegation not called with the enrolled child: %+v", hooked)
+	}
+}
+
+func TestASpentTokenCannotBeRedeemedTwice(t *testing.T) {
+	// The takeover case: a token that leaks after the child has enrolled must
+	// not let anyone else become the holder of that namespace.
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+
+	first := enrol(t, srv, childEnrolment(token))
+	first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first enrolment: %d", first.StatusCode)
+	}
+
+	impostor := childEnrolment(token)
+	impostor.Origin, impostor.URL = "evil/log", "https://evil.example"
+	second := enrol(t, srv, impostor)
+	defer second.Body.Close()
+	if second.StatusCode == http.StatusOK {
+		t.Fatal("a second claimant redeemed a spent token and took the namespace")
+	}
+}
+
+func TestAWrongTokenIsRejectedAndWritesNothing(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+
+	en := childEnrolment("wrong-token")
+	resp := enrol(t, srv, en)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	rec, err := api.currentDelegation(t.Context(), "beckn", "beckn.mobility")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.State != delegation.StateOffered {
+		t.Errorf("a rejected enrolment changed the record to %q", rec.State)
+	}
+}
+
+func TestEnrolmentForANamespaceThisNodeDoesNotHoldIsRefused(t *testing.T) {
+	// Same answer as a bad token, so a caller cannot enumerate which
+	// namespaces have offers outstanding.
+	srv, _, _ := parentServer(t, "beckn")
+	en := childEnrolment("anything")
+	en.Namespace = "someoneelse.mobility"
+	resp := enrol(t, srv, en)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestAnActiveDelegationCannotBeSilentlyReIssued(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+
+	body, _ := json.Marshal(createChildRequest{Namespace: "beckn.mobility", Provider: "env"})
+	resp := signedDo(t, srv, priv, http.MethodPost, "/admin/namespaces/beckn/children", body, publisher.Precondition{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("re-issuing over a live child: %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestDelegatingOutsideYourOwnNamespaceIsRefused(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	body, _ := json.Marshal(createChildRequest{Namespace: "onix.mobility", Provider: "env"})
+	resp := signedDo(t, srv, priv, http.MethodPost, "/admin/namespaces/beckn/children", body, publisher.Precondition{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestMintingAChildRequiresASignature(t *testing.T) {
+	// Granting a slice of your namespace away is at least as consequential as
+	// publishing in it, and must not be reachable unauthenticated.
+	srv, _, _ := parentServer(t, "beckn")
+	body, _ := json.Marshal(createChildRequest{Namespace: "beckn.mobility"})
+	resp := signedDo(t, srv, nil, http.MethodPost, "/admin/namespaces/beckn/children", body, publisher.Precondition{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestDelegationsAreReadablePublicly(t *testing.T) {
+	// Who holds a namespace is the question relying parties need answered, so
+	// it must not require a credential.
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+
+	resp, err := http.Get(srv.URL + "/dedi/delegations/beckn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Data struct {
+			Children []delegation.Record `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("%v: %s", err, raw)
+	}
+	if len(out.Data.Children) != 1 {
+		t.Fatalf("want 1 child, got %d: %s", len(out.Data.Children), raw)
+	}
+	child := out.Data.Children[0]
+	if child.ChildKey == "" {
+		t.Error("the child's key is not published, so its checkpoints cannot be verified independently")
+	}
+	// And the public listing must not leak an outstanding offer's hash, which
+	// would let a reader confirm a guessed token offline.
+	if bytes.Contains(raw, []byte("token_hash")) {
+		t.Errorf("the public delegation listing carries a token hash:\n%s", raw)
+	}
+}
+
+func TestTheDelegationRecordIsProvableLikeAnyOtherEntry(t *testing.T) {
+	// The reason delegation lives in the log rather than a side table: a
+	// relying party can demand proof, not the operator's word.
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+
+	e, err := api.Store.Resolve(t.Context(), "record", "beckn", delegation.Registry, "beckn.mobility", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := api.Store.TreeSize(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Store.ProveInclusion(t.Context(), size, e.Seq); err != nil {
+		t.Fatalf("the delegation is not provable: %v", err)
+	}
+	var _ store.Entry = e
+}

@@ -51,3 +51,21 @@ func internal(w http.ResponseWriter, err error) {
 	log.Printf("api: internal error: %v", err)
 	writeErr(w, http.StatusInternalServerError, "INTERNAL", "internal server error")
 }
+
+// unauthorized renders a credential failure. Kept deliberately terse: the
+// enrolment path answers the same way for a wrong token, an unknown namespace
+// and a spent offer, so a caller cannot probe which of the three it hit.
+func unauthorized(w http.ResponseWriter, msg string) {
+	writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", msg)
+}
+
+// stateConflict renders a request that is well-formed and correctly
+// conditioned but cannot apply in the resource's current state — a delegation
+// already granted, an offer already redeemed.
+//
+// Distinct from conflict (412), which means the caller's stated precondition
+// did not hold and re-reading may let them retry. There is nothing to re-read
+// here: the answer will not change until the state does.
+func stateConflict(w http.ResponseWriter, err error) {
+	writeErr(w, http.StatusConflict, "CONFLICT", err.Error())
+}

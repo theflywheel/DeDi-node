@@ -74,6 +74,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <a id="tab-new" onclick="show('new')">Onboard</a>
   <a id="tab-key" onclick="show('key')">Rotate key</a>
   <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
+  <a id="tab-children" onclick="show('children')">Child nodes</a>
 </p>
 
 <!-- ---------- participants ---------- -->
@@ -147,6 +148,47 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="out-revoke"></div>
 </div>
 
+<!-- ---------- child nodes ---------- -->
+<div id="view-children" hidden>
+  <h2>Child nodes</h2>
+  <p class="mut">A child node is a <b>separate node</b> — its own identity key, its own database,
+  its own log — holding a namespace this one delegates to it. That is a different thing from a
+  replica and from a witness, and worth keeping straight:</p>
+  <table style="margin:.6em 0 1em">
+    <tr><th></th><th>Replica</th><th>Witness</th><th>Child</th></tr>
+    <tr><td>Identity</td><td>this node's key</td><td>a stranger's key</td><td>its own key</td></tr>
+    <tr><td>Log</td><td>this log, copied</td><td>its own, unrelated</td><td>its own, delegated</td></tr>
+    <tr><td>Buys you</td><td>uptime</td><td>tamper evidence</td><td>a namespace someone else runs</td></tr>
+  </table>
+
+  <div class="banner">
+    <b>This node never holds the child's private key.</b> It issues a one-time enrolment offer; the
+    child generates its own key on first boot and enrols by presenting the <i>public</i> half. A
+    parent that had held the private key could forge the child's checkpoints forever, and the
+    child's log would then prove nothing you had not already asserted yourself.
+  </div>
+
+  <fieldset><legend>delegate a namespace</legend>
+    <div class="grid">
+      <div><label for="c-ns">child namespace</label><input id="c-ns" placeholder="beckn.mobility" spellcheck="false"></div>
+      <div><label for="c-label">label <span class="mut">(for the console only)</span></label><input id="c-label" placeholder="Mobility registry" spellcheck="false"></div>
+      <div><label for="c-provider">deploy as</label><select id="c-provider"></select></div>
+      <div><label for="c-image">image</label><input id="c-image" placeholder="ghcr.io/theflywheel/dedi-node:latest" spellcheck="false"></div>
+      <div class="full"><label for="c-url">public URL the child will have <span class="mut">(optional; the parent needs it to witness the child)</span></label>
+        <input id="c-url" placeholder="https://mobility.example.org" spellcheck="false"></div>
+      <div class="full"><label for="c-db">child database URL <span class="mut">(must be a database no other node writes to)</span></label>
+        <input id="c-db" type="password" placeholder="postgres://user:pass@host:5432/child" spellcheck="false" autocomplete="off"></div>
+    </div>
+    <p class="mut" style="margin:.4em 0 0">The namespace must sit exactly one level under
+    <code id="c-parent">this node's</code> — you can only delegate what you hold.</p>
+    <button onclick="createChild()">mint offer &amp; render config</button>
+  </fieldset>
+  <div id="out-children"></div>
+
+  <h3>Delegated so far</h3>
+  <div id="children-list"><p class="mut">loading...</p></div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -165,7 +207,7 @@ function onAction(root, action, fn){
 }
 const actionLink = (action, rec, label) =>
   '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
-const VIEWS = ['list','new','key','revoke'];
+const VIEWS = ['list','new','key','revoke','children'];
 
 // ---- request signing ----
 // Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
@@ -531,6 +573,120 @@ onAction($('detail'), 'revoke', prefillRevoke);
 
 show(location.hash.slice(1) || 'list');
 reload();
+loadChildren();
+
+// ---------- child nodes ----------
+//
+// The parent namespace is the one the loaded publisher key is scoped to, which
+// is also the one the child must sit under. It is read from the namespace field
+// rather than asked for twice.
+const parentNS = () => ns();
+
+// PROVIDERS is filled from the node so the console offers exactly what this
+// build can render — a hardcoded list would drift the moment someone links in
+// their own provider, and would fail at submit rather than at selection.
+let PROVIDERS = ['env'];
+
+function renderProviders(){
+  const sel = $('c-provider');
+  sel.innerHTML = PROVIDERS.map(n => '<option>' + esc(n) + '</option>').join('');
+}
+
+async function loadChildren(){
+  $('c-parent').textContent = parentNS();
+  renderProviders();
+  const box = $('children-list');
+  try {
+    const j = await jget('/dedi/delegations/' + p(parentNS()));
+    const kids = (j.data && j.data.children) || [];
+    if(!kids.length){
+      box.innerHTML = '<p class="mut">No namespaces delegated yet.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>namespace</th><th>state</th><th>node</th>' +
+      '<th>verifier key</th><th>enrolled</th></tr>' +
+      kids.map(k => {
+        // An offer that was never redeemed is the quiet failure this table
+        // exists to surface: nothing is wrong with the parent, and a child
+        // somewhere is serving without a delegation.
+        const state = k.state === 'active'
+          ? '<span class="ok">active</span>'
+          : '<span class="no">' + esc(k.state) + '</span>' +
+            (k.state === 'offered' ? ' <span class="mut">— never enrolled</span>' : '');
+        // Escaping is not enough for an href: esc() leaves "javascript:alert(1)"
+        // intact, and the operator clicking it runs script in the one page
+        // holding a publisher key. The scheme is checked, and anything else is
+        // shown as inert text rather than silently dropped — a child that
+        // enrolled with a strange URL is something to see, not to hide.
+        const safeURL = /^https?:\/\//i.test(k.child_url || '');
+        const label = esc(k.child_origin || k.child_url || '');
+        const url = !k.child_url ? '<span class="mut">—</span>'
+          : safeURL ? '<a href="' + esc(k.child_url) + '" target="_blank" rel="noopener">' + label + '</a>'
+          : label + ' <span class="no">(unusable URL: ' + esc(k.child_url) + ')</span>';
+        return '<tr><td>' + esc(k.namespace) + (k.label ? ' <span class="mut">' + esc(k.label) + '</span>' : '') +
+          '</td><td>' + state + '</td><td>' + url +
+          '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
+          '</td><td class="mut">' + esc(k.enrolled_at || '—') + '</td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">The verifier key is the child\'s own. A relying party checks the child\'s ' +
+      'checkpoints against it directly — this node is not in that path, which is the point of the ' +
+      'child holding its own key.</p>';
+  } catch(e){
+    box.innerHTML = '<p class="mut">No delegations readable here (' + esc(e.message) + ').</p>';
+  }
+}
+
+async function createChild(){
+  const box = $('out-children');
+  if(!SIGNER){
+    return fail('out-children', ['Load a publisher key first — delegating a namespace is a signed write.']);
+  }
+  const child = $('c-ns').value.trim();
+  if(!child){ return fail('out-children', ['A child namespace is required.']); }
+  if(child.indexOf(parentNS() + '.') !== 0){
+    // Checked here as well as on the node, so the operator is corrected while
+    // still looking at the field rather than after a round trip.
+    return fail('out-children', ['"' + child + '" must sit one level under "' + parentNS() + '".']);
+  }
+  box.innerHTML = '<p class="mut">minting...</p>';
+  const body = {
+    namespace: child,
+    label: $('c-label').value.trim(),
+    provider: $('c-provider').value,
+    image: $('c-image').value.trim(),
+    db_url: $('c-db').value,
+    public_url: $('c-url').value.trim(),
+  };
+  try {
+    const resp = await signedFetch('POST', '/admin/namespaces/' + p(parentNS()) + '/children', body);
+    const j = await resp.json();
+    if(!resp.ok){ return fail('out-children', [j.error || ('HTTP ' + resp.status)]); }
+    const d = j.data || {};
+    const art = d.artifact || {};
+    if(d.providers){ PROVIDERS = d.providers; renderProviders(); }
+    box.innerHTML =
+      '<div class="banner"><b>Offer minted for ' + esc(d.namespace) + '.</b> ' +
+      'It expires at <code>' + esc(d.expires_at) + '</code> and is shown <b>once</b> — the log ' +
+      'holds only its hash, so if you lose this you mint a new one rather than recover it.</div>' +
+      '<h3>' + esc(art.filename || 'config') + ' <span class="mut">(' + esc(art.provider) + ')</span></h3>' +
+      '<pre id="c-art">' + esc(art.content || '') + '</pre>' +
+      '<button onclick="copyArtifact()">copy</button>' +
+      (art.notes && art.notes.length
+        ? '<ul class="mut">' + art.notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>' : '') +
+      '<p class="mut">Apply this where the child will run. It boots, generates its own key, and ' +
+      'enrols against this node; the row below turns <span class="ok">active</span> when it does. ' +
+      'Until then it holds no delegation.</p>';
+    // The offer is already in the log, so it should appear immediately —
+    // including when the child never turns up.
+    loadChildren();
+  } catch(e){
+    fail('out-children', [e.message]);
+  }
+}
+
+function copyArtifact(){
+  navigator.clipboard.writeText($('c-art').textContent);
+}
 </script>
 </body>
 </html>

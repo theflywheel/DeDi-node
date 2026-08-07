@@ -6,6 +6,7 @@ import (
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/cluster"
+	"github.com/theflywheel/DeDi-node/internal/delegation"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -60,6 +61,15 @@ type Server struct {
 	// the write plane is closed; see serve().
 	WildcardNamespaces []string
 
+	// PublicURL is this node's externally reachable base URL. Behind a proxy
+	// the request's own Host is the proxy's, so a child told to enrol against
+	// it cannot reach us; this is what the child is handed instead.
+	PublicURL string
+
+	// OnDelegation is called when a child completes enrolment, so the daemon
+	// can start witnessing it without a restart. nil disables that.
+	OnDelegation func(delegation.Record)
+
 	// Auth verifies signed writes. nil, or holding no keys, leaves the write
 	// plane closed and its routes unregistered.
 	Auth *publisher.Authenticator
@@ -83,6 +93,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
 	mux.HandleFunc("GET /dedi/stats", s.stats)
 	mux.HandleFunc("GET /dedi/network", s.networkView)
+	mux.HandleFunc("GET /dedi/delegations/{namespace}", s.listDelegations)
+	// Enrolment is authenticated by its one-time token, not by a publisher
+	// signature — a child has no key yet, which is what it is asking for. It
+	// sits on the read plane's prefix for that reason, and refuses everything
+	// that does not present a live offer.
+	mux.HandleFunc("POST /dedi/enrol", s.enrolChild)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /verify", s.verify)
@@ -101,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 			mux.Handle(pattern, s.Auth.Require(h, denyWrite))
 		}
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
+		write("POST /admin/namespaces/{namespace}/children", s.createChild)
 		write("PUT /admin/namespaces/{namespace}/registries/{registry_name}", s.putRegistry)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/publish", s.publishRecord)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/revoke", s.revokeRecord)

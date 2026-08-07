@@ -26,6 +26,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/cluster"
+	"github.com/theflywheel/DeDi-node/internal/delegation"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -559,14 +560,16 @@ func serve() error {
 	if err != nil {
 		return fmt.Errorf("DEDI_PEERS: %w", err)
 	}
-	var netmon *network.Monitor
+	peerInterval, err := time.ParseDuration(envOr("DEDI_PEER_INTERVAL", "30s"))
+	if err != nil {
+		return fmt.Errorf("DEDI_PEER_INTERVAL: %w", err)
+	}
+	// Always created, even with no configured peers: delegating a child adds
+	// one while the node is running, and a nil monitor would have nowhere to
+	// put it until the next restart.
+	netmon := &network.Monitor{Peers: peers, Interval: peerInterval}
+	go netmon.Run(ctx)
 	if len(peers) > 0 {
-		peerInterval, err := time.ParseDuration(envOr("DEDI_PEER_INTERVAL", "30s"))
-		if err != nil {
-			return fmt.Errorf("DEDI_PEER_INTERVAL: %w", err)
-		}
-		netmon = &network.Monitor{Peers: peers, Interval: peerInterval}
-		go netmon.Run(ctx)
 		names := make([]string, 0, len(peers))
 		for _, p := range peers {
 			names = append(names, p.Name)
@@ -575,11 +578,36 @@ func serve() error {
 			len(peers)+1, strings.Join(names, ", "), peerInterval)
 	}
 
+	// The URL a child is told to call back on. Behind a proxy the request Host
+	// is the proxy's, so this cannot be inferred per-request.
+	publicURL := strings.TrimRight(os.Getenv("DEDI_PUBLIC_URL"), "/")
+
+	// Children this node has delegated namespaces to: witnessed continuously,
+	// and resumed across restarts.
+	childSup, err := newChildSupervisor(s, clu, netmon)
+	if err != nil {
+		return fmt.Errorf("DEDI_CHILD_WITNESS_INTERVAL: %w", err)
+	}
+	childSup.Resume(ctx, keys.Namespaces())
+
+	// If this node *is* a child, claim its offer.
+	// The writer, so the namespace it creates takes the leader path on a
+	// clustered child exactly like any other write.
+	var childWriter interface {
+		Append(context.Context, store.AppendInput) (store.Entry, error)
+	} = s
+	if clu != nil {
+		childWriter = clu
+	}
+	enrolIfChild(ctx, childWriter, s, origin, envOr("DEDI_VERIFIER_KEY", vkey))
+
 	srv := &api.Server{Store: s, CP: cp, TTL: ttl, VerifierKey: envOr("DEDI_VERIFIER_KEY", vkey),
 		NodeName: os.Getenv("DEDI_NODE_NAME"), Network: netmon,
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
-		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard}
+		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard,
+		PublicURL:    publicURL,
+		OnDelegation: func(rec delegation.Record) { childSup.Start(ctx, rec) }}
 	if clu != nil {
 		srv.Writer = clu
 		srv.Cluster = clu.State

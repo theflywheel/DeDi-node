@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -181,4 +182,19 @@ func (k Key) Authorizes(namespace string) error {
 		return fmt.Errorf("%w: key %q is scoped to %q, not %q", ErrWrongScope, k.KID, k.Namespace, namespace)
 	}
 	return nil
+}
+
+// Namespaces lists the distinct namespaces this key set can write to, sorted.
+// Used to resolve which of a node's namespaces a child sits under, where the
+// caller has a child namespace and needs its parent.
+func (ks *KeySet) Namespaces() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, k := range ks.keys {
+		if !seen[k.Namespace] {
+			seen[k.Namespace], out = true, append(out, k.Namespace)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
