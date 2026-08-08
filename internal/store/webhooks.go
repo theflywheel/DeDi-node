@@ -378,6 +378,21 @@ func scanDeadLetters(rows pgx.Rows) ([]DeadLetter, error) {
 	return out, rows.Err()
 }
 
+// Backlog counts what a subscription has not been told yet and what it never
+// will be. Both are needed to read a subscription honestly: a backlog of zero
+// alone means either "delivering fine" or "the loop is dead and nothing has
+// been published since", and a growing dead-letter count is a consumer failing
+// quietly rather than a consumer that is up to date.
+func (s *Store) Backlog(ctx context.Context, sub WebhookSubscription) (pending, dead int, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT
+		   (SELECT count(*) FROM log_entries
+		     WHERE entry_type='record' AND namespace=$1 AND registry=$2 AND seq > $3),
+		   (SELECT count(*) FROM webhook_dead_letters WHERE subscription_id=$4)`,
+		sub.Namespace, sub.Registry, sub.CursorSeq, sub.ID).Scan(&pending, &dead)
+	return pending, dead, err
+}
+
 // DeadLetters lists what a subscription was never successfully told.
 func (s *Store) DeadLetters(ctx context.Context, id string) ([]DeadLetter, error) {
 	rows, err := s.pool.Query(ctx,

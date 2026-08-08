@@ -84,6 +84,17 @@ type Server struct {
 	// plane closed and its routes unregistered.
 	Auth *publisher.Authenticator
 
+	// DeliveryHealth reports whether the webhook push loop is running, and
+	// DeliveryRetries how many consecutive failures a given subscription is
+	// showing. Functions rather than a *webhook.Deliverer for the reason
+	// WitnessHealth is one: this package must not import the subsystem.
+	//
+	// Both nil on a node with no delivery loop, which the console renders as
+	// "not running" rather than as healthy — the safer default, because a
+	// subscription with an empty queue looks identical either way.
+	DeliveryHealth  func() DeliveryState
+	DeliveryRetries func(subscriptionID string) (int, string)
+
 	// AllowPrivateWebhookTargets lets a subscription point at an address that is
 	// not publicly routable. Off by default: the node fetches these URLs itself,
 	// from inside the operator's network, so an unchecked target is a request

@@ -67,6 +67,31 @@ type subscriptionDTO struct {
 	CursorSeq int64  `json:"cursor_seq"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+
+	// Pending and DeadLettered are what the operator actually reads. Neither
+	// means anything alone: a pending count of zero is either "delivering
+	// fine" or "the loop died and nothing has been published since", which is
+	// why the delivery block travels with the list.
+	Pending      int `json:"pending"`
+	DeadLettered int `json:"dead_lettered"`
+	// Retrying counts consecutive failures against the entry at the head of
+	// this subscription's queue, and LastError says why.
+	Retrying  int    `json:"retrying,omitempty"`
+	LastError string `json:"last_error,omitempty"`
+}
+
+// DeliveryState is the push loop's own health, reported alongside the
+// subscriptions and never folded into them.
+//
+// The same distinction the witness panel makes, for the same reason. A
+// subscription's counters describe the queue; they are rewritten only when
+// something is published, so a loop that has been dead for hours leaves a
+// perfectly healthy-looking row behind it. Only the loop can say whether it is
+// still running, and a follower having delivered nothing is not a fault.
+type DeliveryState struct {
+	Running   bool      `json:"running"`
+	Leader    bool      `json:"leader"`
+	LastSweep time.Time `json:"last_sweep"`
 }
 
 func subscriptionView(sub store.WebhookSubscription) subscriptionDTO {
@@ -146,16 +171,37 @@ func (s *Server) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		internal(w, err)
 		return
 	}
+	var health DeliveryState
+	if s.DeliveryHealth != nil {
+		health = s.DeliveryHealth()
+	}
 	subs := make([]subscriptionDTO, 0, len(all))
 	for _, sub := range all {
 		if sub.Namespace != ns {
 			continue
 		}
-		subs = append(subs, subscriptionView(sub))
+		view := subscriptionView(sub)
+		pending, dead, err := s.Store.Backlog(r.Context(), sub)
+		if err != nil {
+			internal(w, err)
+			return
+		}
+		view.Pending, view.DeadLettered = pending, dead
+		view.Retrying, view.LastError = s.retryFor(sub.ID)
+		subs = append(subs, view)
 	}
 	ok(w, "Subscriptions retrieved successfully", map[string]any{
 		"namespace":     ns,
 		"subscriptions": subs,
+		// Deliberately a sibling of the list, not a field inside each row: the
+		// loop is one thing and the subscriptions are another, and merging them
+		// would let a healthy-looking queue stand in for a loop that is not
+		// running.
+		"delivery": map[string]any{
+			"running":    health.Running,
+			"leader":     health.Leader,
+			"last_sweep": fmtTime(health.LastSweep),
+		},
 	})
 }
 
@@ -187,6 +233,15 @@ func (s *Server) deleteSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok(w, "Subscription deleted successfully", map[string]any{"id": id})
+}
+
+// retryFor reports this subscription's consecutive-failure count, if the
+// delivery loop is reachable and is currently failing on it.
+func (s *Server) retryFor(id string) (int, string) {
+	if s.DeliveryRetries == nil {
+		return 0, ""
+	}
+	return s.DeliveryRetries(id)
 }
 
 func newSubscriptionID() (string, error) {

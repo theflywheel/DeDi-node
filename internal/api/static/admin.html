@@ -75,6 +75,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <a id="tab-key" onclick="show('key')">Rotate key</a>
   <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
   <a id="tab-children" onclick="show('children')">Child nodes</a>
+  <a id="tab-push" onclick="show('push')">Push</a>
 </p>
 
 <!-- ---------- participants ---------- -->
@@ -190,6 +191,31 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="children-tree"></div>
 </div>
 
+<div id="view-push" hidden>
+  <h2>Push notification</h2>
+  <p class="mut">Revocation otherwise travels only as fast as caches expire. A subscriber
+  registered here is told the moment a record changes — but the push carries only
+  <em>which</em> entry changed and its sequence number, never the payload. It is a
+  signal to re-read and verify, not something to act on. Consumers should keep
+  checking the log; this only stops them waiting.</p>
+
+  <div id="push-health"></div>
+
+  <fieldset>
+    <legend>Notify a consumer</legend>
+    <div class="grid">
+      <div><label for="w-reg">registry</label><input id="w-reg" placeholder="subscribers" spellcheck="false"></div>
+      <div class="full"><label for="w-url">target URL <span class="mut">(this node will POST here, signed with its identity key)</span></label>
+        <input id="w-url" placeholder="https://consumer.example/dedi-hook" spellcheck="false"></div>
+    </div>
+    <button onclick="createSubscription()">subscribe</button>
+  </fieldset>
+  <div id="out-push"></div>
+
+  <h3>Subscriptions</h3>
+  <div id="push-list"><p class="mut">loading...</p></div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -208,7 +234,7 @@ function onAction(root, action, fn){
 }
 const actionLink = (action, rec, label) =>
   '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
-const VIEWS = ['list','new','key','revoke','children'];
+const VIEWS = ['list','new','key','revoke','children','push'];
 
 // ---- request signing ----
 // Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
@@ -239,6 +265,7 @@ async function loadKey(){
     SIGNER = { kid, key: await importEd25519(priv) };
     $('k-priv').value = '';   // do not leave it sitting in the DOM
     $('k-state').innerHTML = '<span class="ok">key ' + esc(kid) + ' loaded — writes will publish directly</span>';
+    loadSubscriptions();   // the push list needs the key, so it could not load before now
   } catch(e){
     SIGNER = null;
     $('k-state').innerHTML = '<span class="no">' + esc(e.message) + '</span>';
@@ -579,6 +606,7 @@ onAction($('children-list'), 'chain', showDescendants);
 show(location.hash.slice(1) || 'list');
 reload();
 loadChildren();
+loadSubscriptions();
 
 // ---------- child nodes ----------
 //
@@ -860,6 +888,106 @@ async function showDescendants(child){
       'this node cannot answer for what it has delegated.</p>';
   }
 }
+
+// ---------- push notification ----------
+//
+// The loop's health and each subscription's counters are rendered as two
+// separate things, and that separation is the point. A subscription's counters
+// only move when something is published, so a delivery loop that died hours ago
+// leaves behind rows that read "0 pending" — indistinguishable from a healthy
+// queue. Only the loop can say whether it is still running.
+function deliveryHealth(d){
+  if(!d || !d.running){
+    return '<p class="no">The delivery loop is not running on this node. ' +
+      'Nothing below is being sent, however healthy the queues look.</p>';
+  }
+  if(!d.leader){
+    return '<p class="mut">This replica is not the leader, so it does not deliver. ' +
+      'That is normal — the leader holds the same subscriptions and is sending them.</p>';
+  }
+  return '<p class="ok">Delivering</p><p class="mut">last swept ' +
+    esc(d.last_sweep || 'never') + '</p>';
+}
+
+async function loadSubscriptions(){
+  const box = $('push-list');
+  // Listing needs the publisher key: who this node pushes to is the operator's
+  // own wiring, and the targets are internal addresses more often than not, so
+  // the route is behind the write plane rather than public like delegations.
+  if(!SIGNER){
+    box.innerHTML = '<p class="mut">Load your publisher key to see subscriptions.</p>';
+    $('push-health').innerHTML = '';
+    return;
+  }
+  try {
+    const r = await signedFetch('GET', '/admin/namespaces/' + p(ns()) + '/subscriptions');
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = (await r.json()).data || {};
+    $('push-health').innerHTML = deliveryHealth(d.delivery);
+    const subs = (d.subscriptions || []).filter(x => x.state === 'active');
+    if(!subs.length){
+      box.innerHTML = '<p class="mut">Nobody is subscribed. Revocations here reach ' +
+        'consumers only when their caches expire.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>registry</th><th>target</th><th>queue</th>' +
+      '<th>never delivered</th><th></th></tr>' +
+      subs.map(x => {
+        // An href is not made safe by escaping — the scheme is checked, and an
+        // unusable one is shown as inert text rather than hidden.
+        const safe = /^https?:\/\//i.test(x.target_url || '');
+        const target = safe
+          ? '<a href="' + esc(x.target_url) + '" target="_blank" rel="noopener">' + esc(x.target_url) + '</a>'
+          : esc(x.target_url) + ' <span class="no">(unusable URL)</span>';
+        const queue = x.retrying
+          ? '<span class="no">retrying (' + esc(x.retrying) + ' failed)' +
+            (x.last_error ? ': ' + esc(x.last_error) : '') + '</span>'
+          : (x.pending ? '<span class="mut">' + esc(x.pending) + ' pending</span>'
+                       : '<span class="ok">up to date</span>');
+        // Dead letters are the ones that matter most and are easiest to miss:
+        // a consumer that was never told about a revocation is still trusting
+        // a key this node has withdrawn.
+        const dead = x.dead_lettered
+          ? '<span class="no">' + esc(x.dead_lettered) + ' given up on</span>'
+          : '<span class="mut">none</span>';
+        return '<tr><td>' + esc(x.registry) + '</td><td>' + target + '</td>' +
+          '<td>' + queue + '</td><td>' + dead + '</td>' +
+          '<td><a href="#" data-action="unsub" data-rec="' + esc(x.id) + '">unsubscribe</a></td></tr>';
+      }).join('') + '</table>';
+  } catch(e){
+    box.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+    $('push-health').innerHTML = '';
+  }
+}
+
+async function createSubscription(){
+  const reg = $('w-reg').value.trim(), url = $('w-url').value.trim();
+  const el = $('out-push');
+  if(!reg || !url){ el.innerHTML = '<p class="no">registry and target URL are both required</p>'; return; }
+  el.innerHTML = '<p class="mut">subscribing...</p>';
+  try {
+    const r = await signedFetch('POST',
+      '/admin/namespaces/' + p(ns()) + '/registries/' + p(reg) + '/subscriptions',
+      { target_url: url });
+    const j = await r.json();
+    if(!r.ok){ el.innerHTML = '<p class="no">' + esc(j.error || ('HTTP ' + r.status)) + '</p>'; return; }
+    el.innerHTML = '<p class="ok">subscribed &check;</p>';
+    $('w-url').value = '';
+    loadSubscriptions();
+  } catch(e){
+    el.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+  }
+}
+
+async function unsubscribe(id){
+  if(!confirm('Stop notifying this consumer?\n\nIt keeps whatever it has already cached, and ' +
+              'will go back to noticing revocations only when those caches expire.')) return;
+  const r = await signedFetch('DELETE', '/admin/namespaces/' + p(ns()) + '/subscriptions/' + p(id));
+  if(!r.ok){ $('out-push').innerHTML = '<p class="no">HTTP ' + r.status + '</p>'; return; }
+  loadSubscriptions();
+}
+
+onAction($('push-list'), 'unsub', unsubscribe);
 
 function copyArtifact(){
   navigator.clipboard.writeText($('c-art').textContent);

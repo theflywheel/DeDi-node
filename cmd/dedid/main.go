@@ -699,6 +699,17 @@ func serve() error {
 		AllowPrivateTargets: os.Getenv("DEDI_WEBHOOK_ALLOW_PRIVATE") == "1",
 	}
 	go deliverer.Run(ctx)
+	// Adapted rather than passed through, so api stays free of a dependency on
+	// webhook. Running is asserted here because this is the code path that
+	// started the loop — the console must not infer it from an empty queue.
+	srv.DeliveryHealth = func() api.DeliveryState {
+		h := deliverer.Status()
+		return api.DeliveryState{Running: true, Leader: h.Leader, LastSweep: h.LastSweep}
+	}
+	srv.DeliveryRetries = func(id string) (int, string) {
+		h := deliverer.Status()
+		return h.Retrying[id], h.LastErrors[id]
+	}
 
 	handler := srv.Handler()
 	// Requests are counted in memory and folded into the store on this cadence,

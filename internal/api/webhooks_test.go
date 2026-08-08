@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
@@ -222,4 +223,102 @@ func mustIP(t *testing.T, s string) net.IP {
 		t.Fatalf("bad test address %q", s)
 	}
 	return ip
+}
+
+// The counters and the loop's health are two different claims. A subscription
+// says nothing about whether anything is being sent, because its counters only
+// move when something is published — so a loop that died hours ago leaves rows
+// reading "0 pending", identical to a healthy queue.
+func TestTheDeliveryLoopIsReportedSeparatelyFromTheQueues(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	api.AllowPrivateWebhookTargets = true
+	seedSubscribableRegistry(t, api, "beckn", "subscribers")
+	subscribeVia(t, srv, priv, "op-1", "beckn", "subscribers", "https://consumer.example/hook").Body.Close()
+
+	// A node with no delivery loop must report one that is not running, rather
+	// than defaulting to healthy — the safer answer, because the subscription
+	// beside it looks fine either way.
+	list := func() map[string]any {
+		t.Helper()
+		resp := signedAs(t, srv, priv, "op-1", http.MethodGet, "/admin/namespaces/beckn/subscriptions", nil)
+		defer resp.Body.Close()
+		var out struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Data
+	}
+
+	delivery, _ := list()["delivery"].(map[string]any)
+	if delivery == nil || delivery["running"] != false {
+		t.Fatalf("a node with no delivery loop reports %+v; want running=false", delivery)
+	}
+
+	swept := time.Now().UTC()
+	api.DeliveryHealth = func() DeliveryState {
+		return DeliveryState{Running: true, Leader: true, LastSweep: swept}
+	}
+	delivery, _ = list()["delivery"].(map[string]any)
+	if delivery["running"] != true || delivery["leader"] != true || delivery["last_sweep"] == "" {
+		t.Fatalf("a running loop reports %+v", delivery)
+	}
+}
+
+// What an operator actually reads: how far behind a consumer is, and what it
+// was never told at all. The second is the one that matters and the easiest to
+// miss — a dead-lettered revocation is a consumer still trusting a key this
+// node withdrew.
+func TestBacklogAndDeadLettersAreReported(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	api.AllowPrivateWebhookTargets = true
+	seedSubscribableRegistry(t, api, "beckn", "subscribers")
+	resp := subscribeVia(t, srv, priv, "op-1", "beckn", "subscribers", "https://consumer.example/hook")
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var created struct {
+		Data subscriptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	for _, name := range []string{"a", "b"} {
+		if _, err := api.Store.Append(ctx, store.AppendInput{
+			EntryType: "record", Namespace: "beckn", Registry: "subscribers", RecordName: name,
+			PayloadRaw: []byte(`{}`), CreatedBy: "test",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := api.Store.ApplyWebhook(ctx, store.WebhookCommand{
+		Op: store.WebhookDeadLetter, ID: created.Data.ID, Seq: created.Data.CursorSeq + 1,
+		Attempts: 6, LastError: "consumer answered 410", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := signedAs(t, srv, priv, "op-1", http.MethodGet, "/admin/namespaces/beckn/subscriptions", nil)
+	defer listed.Body.Close()
+	var out struct {
+		Data struct {
+			Subscriptions []subscriptionDTO `json:"subscriptions"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listed.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Data.Subscriptions) != 1 {
+		t.Fatalf("want one subscription, got %d", len(out.Data.Subscriptions))
+	}
+	got := out.Data.Subscriptions[0]
+	if got.DeadLettered != 1 {
+		t.Errorf("dead-lettered count is %d, want 1 — a consumer never told of a change "+
+			"looks identical to one that is up to date", got.DeadLettered)
+	}
+	if got.Pending != 1 {
+		t.Errorf("pending is %d, want 1 (the entry after the dead letter)", got.Pending)
+	}
 }
