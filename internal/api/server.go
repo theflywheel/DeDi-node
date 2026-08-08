@@ -84,6 +84,17 @@ type Server struct {
 	// plane closed and its routes unregistered.
 	Auth *publisher.Authenticator
 
+	// AllowPrivateWebhookTargets lets a subscription point at an address that is
+	// not publicly routable. Off by default: the node fetches these URLs itself,
+	// from inside the operator's network, so an unchecked target is a request
+	// forgery primitive — and on every major cloud platform the link-local
+	// metadata address hands out instance credentials to whatever asks.
+	//
+	// Legitimately needed when the consumer is a sibling service on a private
+	// network, which is the common case in a single-VPC deployment, so it is a
+	// switch rather than a prohibition.
+	AllowPrivateWebhookTargets bool
+
 	reqs      counters  // requests served since the last flush (see counter.go)
 	startedAt time.Time // set by Handler
 }
@@ -132,6 +143,9 @@ func (s *Server) Handler() http.Handler {
 		write("PUT /admin/namespaces/{namespace}/registries/{registry_name}", s.putRegistry)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/publish", s.publishRecord)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/revoke", s.revokeRecord)
+		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/subscriptions", s.createSubscription)
+		write("GET /admin/namespaces/{namespace}/subscriptions", s.listSubscriptions)
+		write("DELETE /admin/namespaces/{namespace}/subscriptions/{subscription}", s.deleteSubscription)
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

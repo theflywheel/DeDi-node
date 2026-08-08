@@ -632,7 +632,11 @@ func serve() error {
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard,
 		PublicURL:    publicURL,
-		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) }}
+		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) },
+		// Off unless the operator says otherwise: the node fetches webhook
+		// targets itself, from inside their network. A single-VPC deployment
+		// whose consumer is a sibling service legitimately needs this on.
+		AllowPrivateWebhookTargets: os.Getenv("DEDI_WEBHOOK_ALLOW_PRIVATE") == "1"}
 	if clu != nil {
 		srv.Writer = clu
 		srv.Cluster = clu.State
