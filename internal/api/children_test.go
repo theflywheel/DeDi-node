@@ -555,3 +555,59 @@ func TestAnActiveChildWithNoWitnessLoopIsNotReportedHealthy(t *testing.T) {
 		t.Errorf("a child with no witness loop reported as fine: %v", health)
 	}
 }
+
+func TestAnUnredeemedOfferSaysWhetherItIsStillRedeemable(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+
+	resp, err := http.Get(srv.URL + "/dedi/delegations/beckn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Data struct {
+			Children []map[string]any `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	kid := out.Data.Children[0]
+	if kid["expires_at"] == nil || kid["expired"] != false {
+		t.Errorf("a fresh offer does not report its life: %v", kid)
+	}
+	// The expiry is public; the thing it guards is not. This surface is
+	// unauthenticated, so a token hash leaking here would hand every reader a
+	// target to grind against an offer that is still live.
+	if bytes.Contains(raw, []byte("token")) {
+		t.Errorf("the delegation list leaks token material:\n%s", raw)
+	}
+}
+
+func TestReMintingOverAnUnredeemedOfferInvalidatesTheOldToken(t *testing.T) {
+	// Re-minting is refused over an *active* delegation, because that would be
+	// a takeover of the child. Over an unredeemed offer it is the supported way
+	// out of a stale one — and the old token has to die with it, or the
+	// operator has quietly doubled the number of credentials that can claim the
+	// namespace instead of replacing one.
+	srv, _, priv := parentServer(t, "beckn")
+	stale, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	fresh, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	if stale == fresh {
+		t.Fatal("re-minting returned the same token")
+	}
+
+	old := enrol(t, srv, childEnrolment(stale))
+	old.Body.Close()
+	if old.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("the superseded token still enrols: %d, want 401", old.StatusCode)
+	}
+	now := enrol(t, srv, childEnrolment(fresh))
+	defer now.Body.Close()
+	if now.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(now.Body)
+		t.Fatalf("the fresh token does not enrol: %d %s", now.StatusCode, raw)
+	}
+}

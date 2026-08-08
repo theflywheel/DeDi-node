@@ -595,6 +595,28 @@ function renderProviders(){
   sel.innerHTML = PROVIDERS.map(n => '<option>' + esc(n) + '</option>').join('');
 }
 
+// CHILD_STATE remembers each child's state from the last load, so the revoke
+// confirmation can describe what is about to happen rather than assuming the
+// worse case. Kept beside the table rather than encoded into the link, so the
+// only child-supplied value reaching the DOM stays the namespace.
+const CHILD_STATE = {};
+
+// offerLife says whether an unredeemed offer can still be used.
+//
+// "offered" on its own is two different situations wearing one label: a child
+// that has not booted yet, and an offer nobody will ever redeem. They call for
+// opposite responses — wait, or mint again — and the row could not tell them
+// apart while it showed only the state.
+function offerLife(k){
+  if(!k.expires_at) return '<span class="mut">— never enrolled</span>';
+  if(k.expired){
+    return '<span class="no">— expired, never enrolled</span> ' +
+      '<span class="mut">mint a fresh offer; this one cannot be redeemed</span>';
+  }
+  const mins = Math.max(0, Math.round((new Date(k.expires_at) - Date.now()) / 60000));
+  return '<span class="mut">— not yet enrolled, expires in ' + mins + 'm</span>';
+}
+
 // witnessCell says what this node has actually verified about a child.
 //
 // Two separate claims, and they are shown together because either one alone
@@ -648,6 +670,7 @@ async function loadChildren(){
     box.innerHTML = '<table><tr><th>namespace</th><th>state</th><th>node</th>' +
       '<th>verifier key</th><th>witnessed</th><th></th></tr>' +
       kids.map(k => {
+        CHILD_STATE[k.namespace] = k.state;
         // An offer that was never redeemed is the quiet failure this table
         // exists to surface: nothing is wrong with the parent, and a child
         // somewhere is serving without a delegation.
@@ -655,7 +678,7 @@ async function loadChildren(){
           ? '<span class="ok">active</span>' +
             (k.enrolled_at ? ' <span class="mut">since ' + esc(k.enrolled_at) + '</span>' : '')
           : '<span class="no">' + esc(k.state) + '</span>' +
-            (k.state === 'offered' ? ' <span class="mut">— never enrolled</span>' : '') +
+            (k.state === 'offered' ? ' ' + offerLife(k) : '') +
             (k.revoked_at ? ' <span class="mut">' + esc(k.revoked_at) +
               (k.reason ? ' — ' + esc(k.reason) : '') + '</span>' : '');
         // Escaping is not enough for an href: esc() leaves "javascript:alert(1)"
@@ -672,8 +695,12 @@ async function loadChildren(){
           '</td><td>' + state + '</td><td>' + url +
           '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
           '</td><td>' + witnessCell(k) + '</td><td>' +
+          // "discard" for an offer nobody claimed and "revoke" for a live
+          // child: the same call, but they are not the same act, and one word
+          // for both makes the destructive one look routine.
           (k.state === 'revoked' ? '<span class="mut">—</span>'
-            : actionLink('unchild', k.namespace, 'revoke')) + '</td></tr>';
+            : actionLink('unchild', k.namespace,
+                k.state === 'offered' ? 'discard' : 'revoke')) + '</td></tr>';
       }).join('') + '</table>' +
       '<p class="mut">The verifier key is the child\'s own. A relying party checks the child\'s ' +
       'checkpoints against it directly — this node is not in that path, which is the point of the ' +
@@ -743,12 +770,18 @@ async function revokeChild(child){
   if(!SIGNER){
     return fail('out-children', ['Load a publisher key first — revoking is a signed write.']);
   }
-  const live = 'Revoke the delegation of ' + child + '?\n\n' +
-    'This node stops vouching for it and stops witnessing it, and the log records the ' +
-    'withdrawal with a timestamp.\n\n' +
-    'The child node keeps running, keeps its key and keeps its own log — revoking here ' +
-    'cannot and does not shut it down.';
-  if(!confirm(live)) return;
+  const prompt = CHILD_STATE[child] === 'offered'
+    // Nobody redeemed this one, so there is no other operator to affect and
+    // nothing to explain about what survives.
+    ? 'Discard the unredeemed offer for ' + child + '?\n\n' +
+      'The token stops working immediately. If a child was about to boot with it, it will ' +
+      'come up healthy and unenrolled.'
+    : 'Revoke the delegation of ' + child + '?\n\n' +
+      'This node stops vouching for it and stops witnessing it, and the log records the ' +
+      'withdrawal with a timestamp.\n\n' +
+      'The child node keeps running, keeps its key and keeps its own log — revoking here ' +
+      'cannot and does not shut it down.';
+  if(!confirm(prompt)) return;
   const box = $('out-children');
   box.innerHTML = '<p class="mut">revoking...</p>';
   try {

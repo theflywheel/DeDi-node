@@ -151,6 +151,25 @@ Three things follow:
   a live delegation, so a revocation that did not free the namespace would leave
   the operator exactly as stuck as having no revocation at all.
 
+### A stale offer has two exits
+
+`offered` is two situations under one label — a child that has not booted yet,
+and an offer nobody will ever redeem — and they call for opposite responses.
+The delegation list therefore publishes `expires_at` and `expired` for
+unredeemed offers (never the token hash; the surface is unauthenticated), and
+the console renders "expires in 42m" or "expired, never enrolled".
+
+From there:
+
+- **Discard it** — revocation, which covers offers precisely because an
+  outstanding one is a bearer credential. The console labels it *discard*
+  rather than *revoke* for an offer, because they are the same call but not the
+  same act, and one word for both makes the destructive one look routine.
+- **Mint over it.** Permitted for an offer, refused for an active delegation.
+  The new offer replaces the record, so the superseded token stops working —
+  otherwise re-minting would double the number of credentials that can claim
+  the namespace rather than replacing one.
+
 The redeeming and revoking writes both carry a precondition on the version they
 read, which covers the mirror-image race: a revocation must not silently
 overwrite an enrolment that landed a moment earlier and leave a record saying
@@ -276,9 +295,6 @@ serves reads and accepts no writes.
 
 ## Known gaps
 
-- **An unredeemed offer does not say whether it is still redeemable.** The table
-  shows state but not expiry, so a stale offer and a fresh one look identical
-  and there is no supported way to discard one.
 - **Revocation does not notify anyone.** It is published, so a party that
   re-checks sees it; a party holding a cached answer does not, until the cache
   expires. Push is the open item tracked separately for record revocation.

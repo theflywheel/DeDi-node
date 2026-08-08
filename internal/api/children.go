@@ -327,6 +327,17 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 			// public read surface says so.
 			"revoked_at": rec.RevokedAt, "reason": rec.Reason,
 		}
+		// When an offer expires, but never the hash it would be checked against.
+		// Without this, a stale offer and a fresh one are the same row, and the
+		// operator cannot tell whether to wait for the child to boot or to mint
+		// again — the one question this row exists to answer while it says
+		// "offered".
+		if rec.State == delegation.StateOffered && rec.ExpiresAt != "" {
+			child["expires_at"] = rec.ExpiresAt
+			if exp, err := time.Parse(time.RFC3339, rec.ExpiresAt); err == nil {
+				child["expired"] = time.Now().UTC().After(exp)
+			}
+		}
 		// The verdict is the point of the delegation being witnessed at all, and
 		// leaving it out of this list made a child whose log had stopped being
 		// append-only read exactly like a healthy one.
