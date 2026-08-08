@@ -27,6 +27,15 @@ const (
 	// rather than being written directly by whichever process felt like it, so
 	// that the record of what has been signed is itself replicated — see fsm.go.
 	cmdSignCheckpoint commandKind = "sign_checkpoint"
+	// cmdWebhook changes the webhook subscription table — registering one,
+	// retiring one, or recording how far one has been delivered.
+	//
+	// It is replicated for a reason the log's own entries make obvious only in
+	// hindsight: a subscription is created at runtime against whichever replica
+	// is leader, and the replicas hold separate databases. Held locally, it
+	// would vanish at the next election and revocations would silently stop
+	// being pushed to a subscriber that is still relying on them.
+	cmdWebhook commandKind = "webhook"
 )
 
 // command is the replicated unit. Everything the state transition depends on
@@ -42,6 +51,9 @@ type command struct {
 	TreeSize int64  `json:"tree_size,omitempty"`
 	RootHash []byte `json:"root_hash,omitempty"`
 	NoteText string `json:"note_text,omitempty"`
+
+	// Webhook
+	Webhook *store.WebhookCommand `json:"webhook,omitempty"`
 }
 
 func encodeCommand(c command) ([]byte, error) {
@@ -65,6 +77,10 @@ func decodeCommand(b []byte) (command, error) {
 	case cmdSignCheckpoint:
 		if len(c.RootHash) == 0 || c.NoteText == "" {
 			return command{}, fmt.Errorf("sign_checkpoint command carries no signed note")
+		}
+	case cmdWebhook:
+		if c.Webhook == nil {
+			return command{}, fmt.Errorf("webhook command carries no change")
 		}
 	default:
 		// A replica running older code than the leader would land here. It must

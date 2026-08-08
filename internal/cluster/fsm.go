@@ -91,6 +91,20 @@ func (f *fsm) Apply(l *raft.Log) any {
 			return err
 		}
 		return nil
+
+	case cmdWebhook:
+		skipped, err := f.store.ApplyWebhookReplicated(ctx, l.Index, *cmd.Webhook)
+		if skipped {
+			return nil
+		}
+		if err != nil {
+			if isDeterministicRejection(err) {
+				return err
+			}
+			f.halt(fmt.Errorf("raft index %d: applying webhook change: %w", l.Index, err))
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("%w: %q", errUnknownCommand, cmd.Kind)
 }
@@ -112,6 +126,13 @@ func isDeterministicRejection(err error) bool {
 type snapshotData struct {
 	Entries     []store.Entry      `json:"entries"`
 	Checkpoints []store.Checkpoint `json:"checkpoints"`
+	// Subscriptions and their dead letters are replicated state like the rest,
+	// so they have to travel in the snapshot. A replica restored without them
+	// would come back having forgotten who asked to be notified — the same
+	// silent stop that keeping subscriptions local would have caused, just
+	// reached by a different route.
+	Subscriptions []store.WebhookSubscription `json:"subscriptions,omitempty"`
+	DeadLetters   []store.DeadLetter          `json:"dead_letters,omitempty"`
 	// AppliedIndex is how far the captured state had consumed the command
 	// stream. Without it a restored replica would replay from the beginning and
 	// apply everything the snapshot already contains a second time.
@@ -132,12 +153,21 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("snapshot checkpoints: %w", err)
 	}
+	subs, err := f.store.AllSubscriptions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot subscriptions: %w", err)
+	}
+	deads, err := f.store.AllDeadLetters(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot dead letters: %w", err)
+	}
 	applied, err := f.store.AppliedIndex(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot applied index: %w", err)
 	}
 	return &snapshot{data: snapshotData{
-		Entries: entries, Checkpoints: checkpoints, AppliedIndex: applied,
+		Entries: entries, Checkpoints: checkpoints,
+		Subscriptions: subs, DeadLetters: deads, AppliedIndex: applied,
 	}}, nil
 }
 
@@ -152,6 +182,12 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*applyTimeout)
 	defer cancel()
+	// Subscriptions first: their cursors point at seqs, and Restore replays the
+	// entries those seqs name. Either order works today, but restoring the
+	// pointers before the thing they point into keeps it that way.
+	if err := f.store.RestoreWebhooks(ctx, data.Subscriptions, data.DeadLetters); err != nil {
+		return fmt.Errorf("restore webhooks: %w", err)
+	}
 	return f.store.Restore(ctx, data.Entries, data.Checkpoints, data.AppliedIndex)
 }
 

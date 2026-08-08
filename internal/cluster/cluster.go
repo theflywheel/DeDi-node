@@ -239,6 +239,25 @@ func (n *Node) SignCheckpoint(ctx context.Context, size int64, root []byte, note
 	return nil
 }
 
+// Webhook replicates a change to the subscription table.
+//
+// The timestamp is stamped once by the proposer for the same reason Append
+// stamps one: a replica applying this later must write the row the rest of the
+// cluster wrote, not the row its own clock would suggest.
+func (n *Node) Webhook(ctx context.Context, c store.WebhookCommand) error {
+	if c.At.IsZero() {
+		c.At = time.Now()
+	}
+	res, err := n.propose(ctx, command{Kind: cmdWebhook, Webhook: &c})
+	if err != nil {
+		return err
+	}
+	if e, ok := res.(error); ok {
+		return e
+	}
+	return nil
+}
+
 func (n *Node) propose(ctx context.Context, c command) (any, error) {
 	if n.raft.State() != raft.Leader {
 		return nil, ErrNotLeader
