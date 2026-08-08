@@ -232,3 +232,12 @@ func (cs *childSupervisor) Health(origin string) (witness.Health, bool) {
 	}
 	return cw.w.Status(), true
 }
+
+// storeProposer lets an unreplicated node use the same delivery loop as a
+// clustered one, rather than the loop branching on whether this deployment
+// happens to have peers.
+type storeProposer struct{ s *store.Store }
+
+func (p storeProposer) Webhook(ctx context.Context, c store.WebhookCommand) error {
+	return p.s.ApplyWebhook(ctx, c)
+}

@@ -30,6 +30,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
+	"github.com/theflywheel/DeDi-node/internal/webhook"
 	"github.com/theflywheel/DeDi-node/internal/witness"
 )
 
@@ -141,6 +142,27 @@ func verifierKeyFor(skey string) (string, error) {
 	}
 	pub := ed25519.NewKeyFromSeed(raw[1:]).Public().(ed25519.PublicKey)
 	return note.NewEd25519VerifierKey(name, pub)
+}
+
+// signerKeyFor recovers the raw Ed25519 private key from the node's note key,
+// so webhook deliveries are signed by the same identity that signs checkpoints.
+//
+// One key, not two: a consumer that can already verify this node's log holds
+// everything it needs to verify a push from it, and a second signing credential
+// would be one more thing to distribute, rotate and get wrong.
+func signerKeyFor(skey string) (ed25519.PrivateKey, error) {
+	parts := strings.SplitN(skey, "+", 5)
+	if len(parts) != 5 || parts[0] != "PRIVATE" || parts[1] != "KEY" {
+		return nil, fmt.Errorf("not a node private key: expected PRIVATE+KEY+<name>+<hash>+<base64>")
+	}
+	raw, err := base64.StdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return nil, fmt.Errorf("node private key is not valid base64: %w", err)
+	}
+	if len(raw) != 1+ed25519.SeedSize {
+		return nil, fmt.Errorf("node private key has unexpected length %d", len(raw))
+	}
+	return ed25519.NewKeyFromSeed(raw[1:]), nil
 }
 
 // withVerifier pairs a configured private key with its public verifier key.
@@ -658,6 +680,26 @@ func serve() error {
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
 	}
+
+	// Push. Leader-only: every replica holds the same subscriptions, so three
+	// deliverers would notify each consumer three times of every change.
+	signer, err := signerKeyFor(skey)
+	if err != nil {
+		return fmt.Errorf("webhook signing key: %w", err)
+	}
+	var proposer webhook.Proposer = storeProposer{s}
+	isLeader := func() bool { return true }
+	if clu != nil {
+		proposer = clu
+		isLeader = clu.IsLeader
+	}
+	deliverer := &webhook.Deliverer{
+		Store: s, Proposer: proposer, Origin: origin, PublicURL: publicURL,
+		Signer: signer, IsLeader: isLeader,
+		AllowPrivateTargets: os.Getenv("DEDI_WEBHOOK_ALLOW_PRIVATE") == "1",
+	}
+	go deliverer.Run(ctx)
+
 	handler := srv.Handler()
 	// Requests are counted in memory and folded into the store on this cadence,
 	// so the served-request total survives restarts and sums across replicas.
