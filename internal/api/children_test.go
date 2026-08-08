@@ -729,3 +729,44 @@ func mustJSON(v any) []byte {
 	}
 	return b
 }
+
+func TestReachabilityIsReportedSeparatelyFromTheVerdict(t *testing.T) {
+	// The two must not merge. A node being up proves nothing about its log, and
+	// a node briefly down disproves nothing — letting uptime read as
+	// verification is the confusion this design spends its effort avoiding.
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	witnessVerdict(t, api.Store, "beckn.mobility/log", 3, true)
+
+	api.Network.Observe(network.Status{
+		Name: "beckn.mobility/log", URL: "https://mobility.example",
+		Reachable: false, Error: "dial tcp: connection refused",
+		CheckedAt: time.Now().UTC(),
+	})
+
+	resp, err := http.Get(srv.URL + "/dedi/delegations/beckn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Data struct {
+			Children []map[string]any `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	kid := out.Data.Children[0]
+	node, _ := kid["node"].(map[string]any)
+	if node == nil || node["reachable"] != false || node["error"] == "" {
+		t.Fatalf("the child's reachability is not reported: %v", kid)
+	}
+	// And the verdict is untouched by the node being down. The log it already
+	// verified did not become unverified because the host stopped answering.
+	wit, _ := kid["witness"].(map[string]any)
+	if wit["consistency_ok"] != true {
+		t.Errorf("an unreachable node changed what had been verified: %v", wit)
+	}
+}

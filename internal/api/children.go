@@ -338,6 +338,32 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 				child["expired"] = time.Now().UTC().After(exp)
 			}
 		}
+		// Whether the node answers at all, which the console otherwise had to
+		// leave to open the explorer page for. Kept as its own field rather
+		// than folded into the witness block: reachable is a fact about the
+		// network this second, and the verdict is evidence about a log. A node
+		// that is up proves nothing, and a node that is briefly down disproves
+		// nothing — merging them would let uptime read as verification, which
+		// is the one confusion this whole design spends its effort avoiding.
+		if rec.State == delegation.StateActive && s.Network != nil && rec.ChildURL != "" {
+			for _, st := range s.Network.Snapshot() {
+				if st.URL != rec.ChildURL {
+					continue
+				}
+				node := map[string]any{"reachable": st.Reachable}
+				if !st.CheckedAt.IsZero() {
+					node["checked_at"] = st.CheckedAt.UTC().Format(time.RFC3339)
+				}
+				if st.Error != "" {
+					node["error"] = st.Error
+				}
+				if st.LatencyMS > 0 {
+					node["latency_ms"] = st.LatencyMS
+				}
+				child["node"] = node
+				break
+			}
+		}
 		// The verdict is the point of the delegation being witnessed at all, and
 		// leaving it out of this list made a child whose log had stopped being
 		// append-only read exactly like a healthy one.

@@ -216,6 +216,14 @@ from a check that ran a second ago and found nothing new. Verdict age cannot
 substitute for the health signal either: on a quiet child the newest verdict is
 legitimately old.
 
+Reachability sits beside them as a third, separate thing — the console shows
+`up` or `unreachable` per child so an operator no longer has to open the
+explorer page to learn whether the node answers at all. It is kept visibly apart
+from the verdict: a node being up proves nothing about its log, and a node
+briefly down disproves nothing about what was already verified. Rendering them
+alike would let uptime read as verification, which is the confusion the whole
+design exists to avoid.
+
 A child the log lists as active with no loop running at all is reported as
 stale rather than silently omitted — most often a child enrolled before a
 restart that `Resume` did not pick up, which otherwise shows only as a verdict

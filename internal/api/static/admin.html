@@ -696,8 +696,17 @@ async function loadChildren(){
         const url = !k.child_url ? '<span class="mut">—</span>'
           : safeURL ? '<a href="' + esc(k.child_url) + '" target="_blank" rel="noopener">' + label + '</a>'
           : label + ' <span class="no">(unusable URL: ' + esc(k.child_url) + ')</span>';
+        // Reachability, kept visibly apart from the verdict beside it. Being up
+        // proves nothing about a log and being briefly down disproves nothing;
+        // the value of showing it here is only that an operator checking on a
+        // child no longer has to open another page to learn it answers at all.
+        const n = k.node;
+        const reach = !n ? ''
+          : n.reachable
+            ? ' <span class="pill">up</span>'
+            : ' <span class="no">unreachable' + (n.error ? ': ' + esc(n.error) : '') + '</span>';
         return '<tr><td>' + esc(k.namespace) + (k.label ? ' <span class="mut">' + esc(k.label) + '</span>' : '') +
-          '</td><td>' + state + '</td><td>' + url +
+          '</td><td>' + state + '</td><td>' + url + reach +
           '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
           '</td><td>' + witnessCell(k) + '</td><td>' +
           // "discard" for an offer nobody claimed and "revoke" for a live

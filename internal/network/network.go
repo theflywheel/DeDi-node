@@ -127,9 +127,6 @@ func (m *Monitor) Add(name, url string) {
 	m.Peers = append(m.Peers, Peer{Name: name, URL: url})
 }
 
-// peers copies the peer set under the lock. Callers iterate the copy, because
-// polling one peer takes seconds and holding the lock for that would block
-// every enrolment and every read of the network panel behind it.
 // Remove drops a peer and forgets its last status.
 //
 // Forgetting matters: a revoked child left in the status map would keep
@@ -152,6 +149,9 @@ func (m *Monitor) Remove(url string) {
 	delete(m.latest, url)
 }
 
+// peers copies the peer set under the lock. Callers iterate the copy, because
+// polling one peer takes seconds and holding the lock for that would block
+// every enrolment and every read of the network panel behind it.
 func (m *Monitor) peers() []Peer {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -195,6 +195,14 @@ func (m *Monitor) pollAll(ctx context.Context) {
 	}
 	wg.Wait()
 
+	m.Observe(results...)
+}
+
+// Observe records probe results as the latest observation of their peers.
+//
+// Separated from pollAll so the store of observations has one writer rather
+// than being reached into from wherever a probe happens to be produced.
+func (m *Monitor) Observe(results ...Status) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.latest == nil {
