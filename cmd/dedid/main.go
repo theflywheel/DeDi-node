@@ -698,7 +698,15 @@ func serve() error {
 		Signer: signer, IsLeader: isLeader,
 		AllowPrivateTargets: os.Getenv("DEDI_WEBHOOK_ALLOW_PRIVATE") == "1",
 	}
-	go deliverer.Run(ctx)
+	go deliverer.Start(ctx)
+	// Writes go through the deliverer so a revocation does not wait out the
+	// poll interval. Wrapped here rather than in the store because only the
+	// leader delivers, and only its writes come through this path.
+	var base api.Appender = s
+	if clu != nil {
+		base = clu
+	}
+	srv.Writer = notifyingAppender{inner: base, notify: deliverer.Notify}
 	// Adapted rather than passed through, so api stays free of a dependency on
 	// webhook. Running is asserted here because this is the code path that
 	// started the loop — the console must not infer it from an empty queue.

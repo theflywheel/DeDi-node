@@ -91,9 +91,36 @@ type Deliverer struct {
 	MaxAttempts int           // before a seq is dead-lettered; default 6
 	Client      *http.Client
 
+	// wake is poked when something is appended, so a revocation does not wait
+	// out the poll interval. Buffered and non-blocking: a burst of publishes
+	// coalesces into one extra sweep, which is what a sweep already does.
+	wake chan struct{}
+
 	mu        sync.Mutex
 	retry     map[string]retryState // by subscription id
 	lastSweep time.Time
+}
+
+// Notify tells the loop something was appended.
+//
+// Polling alone leaves the exposure window bounded rather than closed: with a
+// five second sweep, a measured revocation reached its consumer in 0.6 to 4.7
+// seconds — better than the fifteen the TTL gave, and the same shape of answer.
+// The ticket's claim is that push *removes* the window, and only waking on the
+// write does that. The ticker stays as the backstop for anything that reaches
+// the log without coming through here — a follower's applied entries after a
+// promotion, most of all.
+func (d *Deliverer) Notify() {
+	d.mu.Lock()
+	ch := d.wake
+	d.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default: // a sweep is already coming; one is enough
+	}
 }
 
 // retryState is deliberately not replicated. It is a fact about the world right
@@ -106,6 +133,16 @@ type retryState struct {
 	notUntil time.Time
 	seq      int64 // which seq the attempts are against
 	lastErr  string
+}
+
+// Start prepares the wake channel and runs the loop. Use it rather than Run
+// directly: Notify on a Deliverer whose channel was never made is a silent
+// no-op, and the loop would quietly fall back to poll-interval latency.
+func (d *Deliverer) Start(ctx context.Context) {
+	d.mu.Lock()
+	d.wake = make(chan struct{}, 1)
+	d.mu.Unlock()
+	d.Run(ctx)
 }
 
 func (d *Deliverer) interval() time.Duration {
@@ -143,11 +180,18 @@ func (d *Deliverer) markSwept() {
 func (d *Deliverer) Run(ctx context.Context) {
 	ticker := time.NewTicker(d.interval())
 	defer ticker.Stop()
+	// Read once: the select below runs for the life of the process, and
+	// re-reading a field the mutex guards on every loop is a data race.
+	d.mu.Lock()
+	wake := d.wake
+	d.mu.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			d.Sweep(ctx)
+		case <-wake:
 			d.Sweep(ctx)
 		}
 	}

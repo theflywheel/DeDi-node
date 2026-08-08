@@ -333,3 +333,54 @@ func TestStatusReportsTheLoopSeparatelyFromTheSubscriptions(t *testing.T) {
 		t.Fatalf("after a sweep the loop still reports %+v", h)
 	}
 }
+
+// Polling alone bounds the exposure window rather than closing it. Measured on
+// a real node with the default five second sweep, a revocation reached its
+// consumer in 0.6 to 4.7 seconds — better than the fifteen the TTL gave, and
+// the same shape of answer. Waking on the write took it to 32–45ms.
+//
+// So this is a regression test on the claim, not on plumbing: without the wake,
+// latency silently reverts to "some fraction of the poll interval", which no
+// test that drives Sweep directly would ever notice.
+func TestAWriteWakesTheLoopRatherThanWaitingOutThePollInterval(t *testing.T) {
+	c := &capture{}
+	srv := c.server(t)
+	s, d, _ := fixture(t, srv.URL+"/hook")
+	// Far longer than the test will wait: if the delivery arrives, it arrived
+	// because Notify woke the loop and not because the ticker came round.
+	d.Interval = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Start(ctx)
+	// Start makes the wake channel; Notify before it exists is a no-op, which
+	// is exactly the silent failure being guarded against.
+	waitFor(t, func() bool { return d.wakeReady() })
+
+	publish(t, s, "key-1", "revoked")
+	d.Notify()
+
+	waitFor(t, func() bool { return c.hits.Load() > 0 })
+	got := c.seen()
+	if len(got) == 0 || got[0].State != "revoked" {
+		t.Fatalf("the revocation did not arrive on the wake path: %+v", got)
+	}
+}
+
+func (d *Deliverer) wakeReady() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.wake != nil
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting; the loop is not waking on a write")
+}

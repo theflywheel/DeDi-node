@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/delegation"
 	"github.com/theflywheel/DeDi-node/internal/network"
@@ -240,4 +241,41 @@ type storeProposer struct{ s *store.Store }
 
 func (p storeProposer) Webhook(ctx context.Context, c store.WebhookCommand) error {
 	return p.s.ApplyWebhook(ctx, c)
+}
+
+// notifyingAppender wakes the webhook loop after a successful append.
+//
+// Polling alone bounds the exposure window rather than closing it: measured on
+// a real node with a five second sweep, a revocation reached its consumer in
+// 0.6 to 4.7 seconds. Better than the fifteen the TTL gave, and the same shape
+// of answer — which is not what the ticket claims push does. Waking on the
+// write is what actually closes it.
+//
+// It wraps the writer rather than living inside the store because only the
+// leader delivers, and only the leader's writes come through here. A follower
+// applying replicated entries must not fire deliveries.
+type notifyingAppender struct {
+	inner  api.Appender
+	notify func()
+}
+
+func (n notifyingAppender) Append(ctx context.Context, in store.AppendInput) (store.Entry, error) {
+	e, err := n.inner.Append(ctx, in)
+	if err == nil {
+		n.notify()
+	}
+	return e, err
+}
+
+// Webhook forwards subscription changes when the wrapped writer replicates
+// them. Without this the wrapper would silently hide the cluster's proposer
+// from the API, and every subscription would be written to the leader's own
+// database only — the exact failure replicating them was meant to fix.
+func (n notifyingAppender) Webhook(ctx context.Context, c store.WebhookCommand) error {
+	if w, ok := n.inner.(interface {
+		Webhook(context.Context, store.WebhookCommand) error
+	}); ok {
+		return w.Webhook(ctx, c)
+	}
+	return nil
 }
