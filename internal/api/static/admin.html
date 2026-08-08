@@ -595,6 +595,45 @@ function renderProviders(){
   sel.innerHTML = PROVIDERS.map(n => '<option>' + esc(n) + '</option>').join('');
 }
 
+// witnessCell says what this node has actually verified about a child.
+//
+// Two separate claims, and they are shown together because either one alone
+// misleads. The verdict — size, root, consistency_ok — is evidence, backed by a
+// proof a reader can check against the child's own key. Whether the loop is
+// still running is not evidence at all; it is this node's report about itself.
+//
+// Showing the verdict without it was the bug: a verdict is only rewritten when
+// the child's tree changes, so a loop that has been failing for hours keeps
+// displaying its last consistency_ok, indistinguishable from a check that ran a
+// second ago. Age cannot stand in either — on a quiet child the newest verdict
+// is legitimately old.
+function witnessCell(k){
+  if(k.state !== 'active') return '<span class="mut">—</span>';
+  const wv = k.witness;
+  if(!wv) return '<span class="mut">not yet checked</span>';
+  const h = wv.health || {};
+  let head;
+  if(wv.consistency_ok === false){
+    // The alarm case, and the only one this table exists to catch: the child's
+    // log is no longer append-only.
+    head = '<span class="no"><b>append-only FAILED</b></span>';
+  } else if(wv.consistency_ok === true){
+    head = '<span class="ok">append-only ✓</span> <span class="mut">size ' + esc(wv.size) + '</span>';
+  } else {
+    head = '<span class="mut">no verdict yet</span>';
+  }
+  let note = '';
+  if(h.standby){
+    note = '<span class="mut">standby — the leader checks this one</span>';
+  } else if(h.stale){
+    note = '<span class="no">not being refreshed' +
+      (h.last_error ? ': ' + esc(h.last_error) : '') + '</span>';
+  } else if(h.seconds_since_success !== undefined){
+    note = '<span class="mut">checked ' + esc(h.seconds_since_success) + 's ago</span>';
+  }
+  return head + (note ? '<br>' + note : '');
+}
+
 async function loadChildren(){
   $('c-parent').textContent = parentNS();
   renderProviders();
@@ -607,13 +646,14 @@ async function loadChildren(){
       return;
     }
     box.innerHTML = '<table><tr><th>namespace</th><th>state</th><th>node</th>' +
-      '<th>verifier key</th><th>enrolled</th><th></th></tr>' +
+      '<th>verifier key</th><th>witnessed</th><th></th></tr>' +
       kids.map(k => {
         // An offer that was never redeemed is the quiet failure this table
         // exists to surface: nothing is wrong with the parent, and a child
         // somewhere is serving without a delegation.
         const state = k.state === 'active'
-          ? '<span class="ok">active</span>'
+          ? '<span class="ok">active</span>' +
+            (k.enrolled_at ? ' <span class="mut">since ' + esc(k.enrolled_at) + '</span>' : '')
           : '<span class="no">' + esc(k.state) + '</span>' +
             (k.state === 'offered' ? ' <span class="mut">— never enrolled</span>' : '') +
             (k.revoked_at ? ' <span class="mut">' + esc(k.revoked_at) +
@@ -631,7 +671,7 @@ async function loadChildren(){
         return '<tr><td>' + esc(k.namespace) + (k.label ? ' <span class="mut">' + esc(k.label) + '</span>' : '') +
           '</td><td>' + state + '</td><td>' + url +
           '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
-          '</td><td class="mut">' + esc(k.enrolled_at || '—') + '</td><td>' +
+          '</td><td>' + witnessCell(k) + '</td><td>' +
           (k.state === 'revoked' ? '<span class="mut">—</span>'
             : actionLink('unchild', k.namespace, 'revoke')) + '</td></tr>';
       }).join('') + '</table>' +

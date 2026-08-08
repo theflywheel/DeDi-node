@@ -70,6 +70,16 @@ type Server struct {
 	// can start witnessing it without a restart. nil disables that.
 	OnDelegation func(delegation.Record)
 
+	// ChildWitnessHealth reports the liveness of the witness loop watching one
+	// child, by child origin. Separate from WitnessHealth, which covers the
+	// single ring peer this node witnesses: there is one of those and one loop
+	// per child, and collapsing them would make a stalled child-witness
+	// invisible behind a healthy ring one.
+	//
+	// Same shape as WitnessHealth and for the same reason — a function, so this
+	// package does not import witness and create a cycle.
+	ChildWitnessHealth func(childOrigin string) (WitnessState, bool)
+
 	// Auth verifies signed writes. nil, or holding no keys, leaves the write
 	// plane closed and its routes unregistered.
 	Auth *publisher.Authenticator

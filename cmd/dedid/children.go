@@ -38,7 +38,18 @@ type childSupervisor struct {
 	iv      time.Duration
 
 	mu      sync.Mutex
-	running map[string]context.CancelFunc
+	running map[string]*childWitness
+}
+
+// childWitness is one running loop, kept so its liveness can be reported.
+//
+// The witness itself is retained rather than only its cancel func because a
+// verdict without the health of the loop that wrote it is misleading: verdicts
+// are rewritten only when the child's tree changes, so a loop failing on every
+// run keeps showing its last consistency_ok indefinitely.
+type childWitness struct {
+	w      *witness.Witness
+	cancel context.CancelFunc
 }
 
 func newChildSupervisor(s *store.Store, clu *cluster.Node, mon *network.Monitor) (*childSupervisor, error) {
@@ -47,7 +58,7 @@ func newChildSupervisor(s *store.Store, clu *cluster.Node, mon *network.Monitor)
 		return nil, err
 	}
 	return &childSupervisor{store: s, cluster: clu, monitor: mon, iv: iv,
-		running: map[string]context.CancelFunc{}}, nil
+		running: map[string]*childWitness{}}, nil
 }
 
 // Apply reconciles the witness loops with a delegation record, in whichever
@@ -73,11 +84,11 @@ func (cs *childSupervisor) Stop(origin string) {
 		return
 	}
 	cs.mu.Lock()
-	cancel, running := cs.running[origin]
+	cw, running := cs.running[origin]
 	delete(cs.running, origin)
 	cs.mu.Unlock()
 	if running {
-		cancel()
+		cw.cancel()
 		log.Printf("delegation: stopped witnessing %s — its delegation is no longer active", origin)
 	}
 }
@@ -101,7 +112,6 @@ func (cs *childSupervisor) Start(ctx context.Context, rec delegation.Record) {
 	}
 
 	child, cancel := context.WithCancel(ctx)
-	cs.running[rec.ChildOrigin] = cancel
 
 	w := &witness.Witness{
 		Store: cs.store,
@@ -118,6 +128,7 @@ func (cs *childSupervisor) Start(ctx context.Context, rec delegation.Record) {
 		w.Writer = cs.cluster
 		w.IsWriter = cs.cluster.IsLeader
 	}
+	cs.running[rec.ChildOrigin] = &childWitness{w: w, cancel: cancel}
 	go w.Run(child)
 	log.Printf("delegation: witnessing child %s at %s every %s", rec.ChildOrigin, rec.ChildURL, cs.iv)
 }
@@ -200,4 +211,24 @@ func enrolIfChild(ctx context.Context, w interface {
 		return err
 	}
 	go c.Run(ctx)
+}
+
+// Health reports the liveness of the loop watching one child, and whether there
+// is a loop at all.
+//
+// The second return matters as much as the first: a child the log lists as
+// active with no loop running is the failure this is here to make visible —
+// usually a child enrolled before a restart that Resume did not pick up, which
+// otherwise shows only as a verdict frozen at whatever it last said.
+func (cs *childSupervisor) Health(origin string) (witness.Health, bool) {
+	if cs == nil {
+		return witness.Health{}, false
+	}
+	cs.mu.Lock()
+	cw, running := cs.running[origin]
+	cs.mu.Unlock()
+	if !running {
+		return witness.Health{}, false
+	}
+	return cw.w.Status(), true
 }

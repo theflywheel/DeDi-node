@@ -64,6 +64,11 @@ const hostile = {
   child_url: 'javascript:alert(3)',
   child_key: '<svg onload=alert(4)>',
   enrolled_at: '<b>now</b>',
+  // The witness block is written by this node, not the child — but the child
+  // chooses what its log contains, so the values that flow from it are still
+  // its input.
+  witness: { size: '<i>42</i>', consistency_ok: true, root: '<u>r</u>',
+             health: { checking: true, stale: true, last_error: '<img src=x onerror=alert(6)>' } },
 };
 globalThis.fetch = () => Promise.resolve({
   ok: true, json: () => Promise.resolve({ data: { children: [hostile] } }),
@@ -96,6 +101,8 @@ if (/onmouseover="/i.test(html)) {
 // this passes vacuously.
 if (!html.includes('beckn.evil')) { console.log('NO ROW RENDERED\n' + html); process.exit(1); }
 if (!html.includes('data-action="unchild"')) { console.log('NO REVOKE CONTROL\n' + html); process.exit(1); }
+// The stall has to be stated, not merely implied by a missing timestamp.
+if (!html.includes('not being refreshed')) { console.log('STALL NOT SHOWN\n' + html); process.exit(1); }
 console.log('OK');
 })();
 `

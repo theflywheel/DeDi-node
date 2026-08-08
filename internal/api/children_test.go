@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -412,5 +413,145 @@ func TestADelegationCannotBeRevokedTwiceOverTheAPI(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+// witnessVerdict writes a verdict for a child the way internal/witness does, so
+// the join being tested runs against the real record shape rather than a
+// fixture only this test agrees with.
+func witnessVerdict(t *testing.T, s *store.Store, origin string, size int64, consistencyOK bool) {
+	t.Helper()
+	ctx := t.Context()
+	for _, in := range []store.AppendInput{
+		{EntryType: "namespace", Namespace: witnessNamespace, PayloadRaw: []byte(`{"description":"witness"}`)},
+		{EntryType: "registry", Namespace: witnessNamespace, Registry: origin, PayloadRaw: []byte(`{"description":"verdicts"}`)},
+	} {
+		if _, err := s.Resolve(ctx, in.EntryType, in.Namespace, in.Registry, "", nil, nil); errors.Is(err, store.ErrNotFound) {
+			in.CreatedBy = "test"
+			if _, err := s.Append(ctx, in); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"target": "https://mobility.example/dedi", "size": size,
+		"root": "cm9vdA", "consistency_ok": consistencyOK,
+	})
+	state := "live"
+	if !consistencyOK {
+		state = "revoked"
+	}
+	if _, err := s.Append(ctx, store.AppendInput{
+		EntryType: "record", Namespace: witnessNamespace, Registry: origin,
+		RecordName: "checkpoint", PayloadRaw: payload, State: state, CreatedBy: "witness",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func childWitnessFrom(t *testing.T, srv *httptest.Server) map[string]any {
+	t.Helper()
+	resp, err := http.Get(srv.URL + "/dedi/delegations/beckn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Data struct {
+			Children []map[string]any `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Data.Children) != 1 {
+		t.Fatalf("children = %v", out.Data.Children)
+	}
+	wit, _ := out.Data.Children[0]["witness"].(map[string]any)
+	if wit == nil {
+		t.Fatalf("no witness block on an active child: %v", out.Data.Children[0])
+	}
+	return wit
+}
+
+func TestTheDelegationListCarriesWhatWasActuallyVerified(t *testing.T) {
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	witnessVerdict(t, api.Store, "beckn.mobility/log", 42, true)
+
+	api.ChildWitnessHealth = func(string) (WitnessState, bool) {
+		return WitnessState{
+			LastAttemptAt: time.Now(), LastSuccessAt: time.Now(),
+			Attempts: 5, Interval: time.Minute,
+		}, true
+	}
+	wit := childWitnessFrom(t, srv)
+	if wit["size"] != float64(42) || wit["consistency_ok"] != true {
+		t.Errorf("verdict not carried: %v", wit)
+	}
+	health, _ := wit["health"].(map[string]any)
+	if health["stale"] != false || health["checking"] != true {
+		t.Errorf("a live witness reported as not checking: %v", health)
+	}
+}
+
+func TestAFailedConsistencyCheckIsVisibleOnTheChild(t *testing.T) {
+	// The alarm this whole table exists to raise: the child's log stopped being
+	// append-only.
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	witnessVerdict(t, api.Store, "beckn.mobility/log", 7, false)
+
+	if wit := childWitnessFrom(t, srv); wit["consistency_ok"] != false {
+		t.Errorf("a failed consistency check did not surface: %v", wit)
+	}
+}
+
+func TestAStalledChildWitnessDoesNotReadAsAPassingCheck(t *testing.T) {
+	// The failure this join exists to make visible. A verdict is rewritten only
+	// when the child's tree changes, so a loop that has been failing for hours
+	// still shows its last consistency_ok. Without the health block beside it,
+	// that is indistinguishable from a check that ran a second ago.
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	witnessVerdict(t, api.Store, "beckn.mobility/log", 42, true)
+
+	api.ChildWitnessHealth = func(string) (WitnessState, bool) {
+		return WitnessState{
+			LastAttemptAt: time.Now(),
+			LastSuccessAt: time.Now().Add(-time.Hour), // last worked an hour ago
+			LastError:     "dial tcp: connection refused",
+			Attempts:      60, Failures: 59, Interval: time.Minute,
+		}, true
+	}
+	wit := childWitnessFrom(t, srv)
+	if wit["consistency_ok"] != true {
+		t.Fatal("precondition: the frozen verdict should still read ok")
+	}
+	health, _ := wit["health"].(map[string]any)
+	if health["stale"] != true {
+		t.Errorf("a witness failing for an hour is not reported stale: %v", health)
+	}
+	if health["last_error"] == "" {
+		t.Errorf("no reason given for the stall: %v", health)
+	}
+}
+
+func TestAnActiveChildWithNoWitnessLoopIsNotReportedHealthy(t *testing.T) {
+	// A child enrolled before a restart that Resume did not pick up. Nothing is
+	// wrong with the verdict; it has simply stopped being refreshed, and the
+	// only place that shows is here.
+	srv, api, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	witnessVerdict(t, api.Store, "beckn.mobility/log", 42, true)
+
+	api.ChildWitnessHealth = func(string) (WitnessState, bool) { return WitnessState{}, false }
+	health, _ := childWitnessFrom(t, srv)["health"].(map[string]any)
+	if health["stale"] != true || health["checking"] != false {
+		t.Errorf("a child with no witness loop reported as fine: %v", health)
 	}
 }

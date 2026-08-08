@@ -616,14 +616,15 @@ func serve() error {
 		// Adapted rather than passed through, so the api package stays free of a
 		// dependency on witness: witness's own tests import api, and the cycle
 		// would not build.
-		srv.WitnessHealth = func() api.WitnessState {
-			h := wit.Status()
-			return api.WitnessState{
-				LastAttemptAt: h.LastAttemptAt, LastSuccessAt: h.LastSuccessAt,
-				LastError: h.LastError, Attempts: h.Attempts, Failures: h.Failures,
-				Interval: h.Interval, Standby: h.Standby,
-			}
-		}
+		srv.WitnessHealth = func() api.WitnessState { return witnessState(wit.Status()) }
+	}
+	// The same adaptation per child, so the Children tab can say whether the
+	// verdict it is showing is still being refreshed. Without it a stalled
+	// child-witness is invisible: the verdict stays put and keeps reading
+	// consistency_ok.
+	srv.ChildWitnessHealth = func(origin string) (api.WitnessState, bool) {
+		h, running := childSup.Health(origin)
+		return witnessState(h), running
 	}
 	if keys.Len() > 0 {
 		srv.Auth = &publisher.Authenticator{Keys: keys}
@@ -721,4 +722,15 @@ func seed(args []string) error {
 		}
 	}
 	return nil
+}
+
+// witnessState adapts a witness health snapshot for the api package, which
+// cannot import witness — witness's own tests import api, and the cycle would
+// not build.
+func witnessState(h witness.Health) api.WitnessState {
+	return api.WitnessState{
+		LastAttemptAt: h.LastAttemptAt, LastSuccessAt: h.LastSuccessAt,
+		LastError: h.LastError, Attempts: h.Attempts, Failures: h.Failures,
+		Interval: h.Interval, Standby: h.Standby,
+	}
 }

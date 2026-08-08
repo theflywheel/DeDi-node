@@ -314,7 +314,7 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		children = append(children, map[string]any{
+		child := map[string]any{
 			"namespace": rec.Namespace, "label": rec.Label, "state": rec.State,
 			"child_origin": rec.ChildOrigin, "child_url": rec.ChildURL,
 			// Published so a browser can verify the child's checkpoints against
@@ -326,7 +326,16 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 			// behind it was withdrawn, and when — which is only useful if the
 			// public read surface says so.
 			"revoked_at": rec.RevokedAt, "reason": rec.Reason,
-		})
+		}
+		// The verdict is the point of the delegation being witnessed at all, and
+		// leaving it out of this list made a child whose log had stopped being
+		// append-only read exactly like a healthy one.
+		if rec.State == delegation.StateActive {
+			if wit := s.childWitness(r.Context(), rec.ChildOrigin); wit != nil {
+				child["witness"] = wit
+			}
+		}
+		children = append(children, child)
 	}
 	ok(w, "Delegations retrieved successfully", map[string]any{
 		"children": children, "total": len(children),
@@ -334,6 +343,65 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- helpers ---
+
+// witnessNamespace is where witness verdicts live, mirroring the reserved
+// namespace internal/witness writes to. Duplicated as a constant rather than
+// imported because witness's own tests import this package, and the import
+// would be a cycle.
+const witnessNamespace = "_witness"
+
+// childWitness renders what this node has verified about one child.
+//
+// Two different things, deliberately reported side by side:
+//
+//   - The *verdict* — size, root, consistency_ok — which is evidence. It is
+//     backed by a consistency proof a reader can check against the child's own
+//     key, without this node in the path.
+//   - The *health* of the loop that produces it, which is not evidence at all;
+//     it is this node's report about itself.
+//
+// They have to appear together because the verdict alone lies by omission. A
+// verdict is only rewritten when the child's tree changes, so a witness loop
+// that has been failing for hours still shows its last verdict reading
+// consistency_ok — indistinguishable from a check that ran a second ago and
+// found nothing new. Age cannot substitute either: on a quiet child the newest
+// verdict is legitimately old.
+func (s *Server) childWitness(ctx context.Context, origin string) map[string]any {
+	if origin == "" {
+		return nil
+	}
+	out := map[string]any{}
+	e, err := s.Store.Resolve(ctx, "record", witnessNamespace, origin, "checkpoint", nil, nil)
+	if err == nil {
+		var v struct {
+			Size          int64  `json:"size"`
+			Root          string `json:"root"`
+			ConsistencyOK bool   `json:"consistency_ok"`
+		}
+		if json.Unmarshal(e.PayloadRaw, &v) == nil {
+			out["size"] = v.Size
+			out["root"] = v.Root
+			out["consistency_ok"] = v.ConsistencyOK
+			out["verdict_at"] = e.CreatedAt.UTC().Format(time.RFC3339)
+		}
+	}
+	if s.ChildWitnessHealth != nil {
+		if state, running := s.ChildWitnessHealth(origin); running {
+			out["health"] = witnessHealth(state)
+		} else {
+			// No loop for a child this node lists as active. Not a proof
+			// failure and not a healthy state either — most often a child
+			// enrolled before a restart that Resume did not pick up, which
+			// otherwise shows as a verdict quietly frozen at its last value.
+			out["health"] = map[string]any{"checking": false, "stale": true,
+				"last_error": "no witness loop is running for this child"}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // currentDelegation reads the latest delegation record for a child.
 func (s *Server) currentDelegation(ctx context.Context, parentNS, childNS string) (delegation.Record, error) {

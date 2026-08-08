@@ -180,6 +180,31 @@ interested party, and it should be read as exactly that.
 Witnessing resumes across restarts for every child already delegated, so a
 redeploy does not silently stop checking them.
 
+### The verdict and the health of the loop are different claims
+
+`GET /dedi/delegations/{ns}` carries both per active child, and the console
+shows them together, because either one alone misleads:
+
+| | what it is | who vouches for it |
+|---|---|---|
+| **Verdict** — size, root, `consistency_ok` | evidence | nobody: it is backed by a consistency proof checkable against the child's own key |
+| **Health** — checking, stale, last error | operational signal | this node, about itself — not evidence of anything |
+
+The reason they cannot be separated is that a verdict is only rewritten when the
+child's tree changes. A witness loop failing on every run for hours keeps
+displaying its last verdict, still reading `consistency_ok`, indistinguishable
+from a check that ran a second ago and found nothing new. Verdict age cannot
+substitute for the health signal either: on a quiet child the newest verdict is
+legitimately old.
+
+A child the log lists as active with no loop running at all is reported as
+stale rather than silently omitted — most often a child enrolled before a
+restart that `Resume` did not pick up, which otherwise shows only as a verdict
+frozen at whatever it last said.
+
+→ `internal/api/children.go` (`childWitness`), `cmd/dedid/children.go`
+(`childSupervisor.Health`)
+
 ---
 
 ## Provisioning: rendered, not executed
@@ -251,11 +276,6 @@ serves reads and accepts no writes.
 
 ## Known gaps
 
-- **No witness verdict in the console.** The parent verifies every active child
-  and the Children tab shows none of it, so a child whose log stopped being
-  append-only reads exactly like a healthy one. The verdicts are already in the
-  log; they are simply not joined into the delegation list. Largest remaining
-  gap.
 - **An unredeemed offer does not say whether it is still redeemable.** The table
   shows state but not expiry, so a stale offer and a fresh one look identical
   and there is no supported way to discard one.
