@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/theflywheel/DeDi-node/internal/store"
+	"github.com/theflywheel/DeDi-node/internal/testdb"
 )
 
 // These tests run a real three-replica cluster in process: real Raft, real TCP
@@ -29,10 +29,7 @@ import (
 
 func replicaDBs(t *testing.T, n int) []string {
 	t.Helper()
-	base := os.Getenv("TEST_DATABASE_URL")
-	if base == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	base := testdb.URL(t)
 	u, err := url.Parse(base)
 	if err != nil {
 		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
@@ -219,6 +216,22 @@ func TestClusterReplicatesTheSameTreeToEveryReplica(t *testing.T) {
 	}
 }
 
+// waitForKnownLeader polls one replica until it can name the leader it should
+// redirect writes to, or gives up. The bound is generous relative to how long
+// propagation actually takes, so a failure here means the follower never
+// learned rather than that the test was impatient.
+func waitForKnownLeader(t *testing.T, r *replica) (id, httpURL string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if id, httpURL = r.node.Leader(); id != "" && httpURL != "" {
+			return id, httpURL
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return id, httpURL
+}
+
 func TestFollowersRefuseWritesRatherThanForkTheLog(t *testing.T) {
 	rs := startCluster(t, 3)
 	leader := waitForLeader(t, rs)
@@ -239,7 +252,14 @@ func TestFollowersRefuseWritesRatherThanForkTheLog(t *testing.T) {
 			t.Fatalf("follower %s: want ErrNotLeader, got %v", r.id, err)
 		}
 		// And it must be able to point the caller at the leader.
-		id, httpURL := r.node.Leader()
+		//
+		// Polled, not asserted outright: waitForLeader returns the moment ONE
+		// replica reports leadership, and Raft propagates that to the others
+		// asynchronously, so a follower can legitimately not know the leader's
+		// identity yet. Asserting instantly made this test fail intermittently
+		// with `names leader ""` — a race in the test, not in the cluster.
+		// What matters is that a follower converges on the answer, and quickly.
+		id, httpURL := waitForKnownLeader(t, r)
 		if id != leader.id {
 			t.Errorf("follower %s names leader %q, want %q", r.id, id, leader.id)
 		}

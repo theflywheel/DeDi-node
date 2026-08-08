@@ -70,6 +70,9 @@ type recordSummaryDTO struct {
 
 func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("namespace")
+	if internalNamespaceGuard(w, r, ns, "namespace") {
+		return
+	}
 	f, err := parseQueryFilters(r)
 	if err != nil {
 		badRequest(w, err.Error())
@@ -134,6 +137,9 @@ func (s *Server) queryNamespace(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 	ns, reg := r.PathValue("namespace"), r.PathValue("registry_name")
+	if internalNamespaceGuard(w, r, ns, "registry") {
+		return
+	}
 
 	// The discovery extension (design.md §120). Opt-in by the presence of the
 	// parameter, so /dedi/query without it behaves exactly as it always has and

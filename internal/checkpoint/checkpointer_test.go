@@ -3,7 +3,6 @@ package checkpoint
 import (
 	"context"
 	"crypto/rand"
-	"os"
 	"testing"
 	"time"
 
@@ -11,14 +10,13 @@ import (
 
 	"github.com/theflywheel/DeDi-node/internal/merkle"
 	"github.com/theflywheel/DeDi-node/internal/store"
+
+	"github.com/theflywheel/DeDi-node/internal/testdb"
 )
 
 func testCheckpointer(t *testing.T) (*Checkpointer, *store.Store, string) {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	url := testdb.URL(t)
 	ctx := context.Background()
 	s, err := store.Open(ctx, url)
 	if err != nil {

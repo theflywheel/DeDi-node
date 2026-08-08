@@ -126,11 +126,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/stats", s.stats)
 	mux.HandleFunc("GET /dedi/network", s.networkView)
 	mux.HandleFunc("GET /dedi/delegations/{namespace}", s.listDelegations)
+	// File-publication model (docs/spec/lfdt/docs/publishing-dedi-files.md):
+	// this node as a publisher, alongside the API surface above. The
+	// well-known path is normative (RFC 8615); /dedi-files/ is where its
+	// manifest points, chosen instead of the spec's RECOMMENDED /dedi/
+	// directory because /dedi/ is already this node's API prefix.
+	mux.HandleFunc("GET /.well-known/dedi.index.json", s.wellKnownIndex)
+	mux.HandleFunc("GET /dedi-files/{namespace}/{file}", s.dedifileByNamespace)
 	// Enrolment is authenticated by its one-time token, not by a publisher
-	// signature — a child has no key yet, which is what it is asking for. It
-	// sits on the read plane's prefix for that reason, and refuses everything
-	// that does not present a live offer.
-	mux.HandleFunc("POST /dedi/enrol", s.enrolChild)
+	// signature — a child has no key yet, which is what it is asking for.
+	//
+	// It is registered off the /dedi/ prefix: that prefix belongs to the DeDi
+	// standard (docs/spec/lfdt/api/openapi.yaml), which reserves it for
+	// lookup/query/versions, not for this node's own delegation mechanism.
+	mux.HandleFunc("POST /enrol", s.enrolChild)
+	// Deprecated alias for the old, spec-prefix-squatting path. Kept only
+	// until every deployed ring node has upgraded to call POST /enrol
+	// instead; remove once that rollout is complete.
+	mux.HandleFunc("POST /dedi/enrol", s.deprecatedEnrolChild)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /verify", s.verify)

@@ -104,7 +104,7 @@ func (c *Client) Once(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ParentURL+"/dedi/enrol", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ParentURL+"/enrol", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

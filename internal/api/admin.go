@@ -12,6 +12,7 @@ import (
 
 	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
+	"github.com/theflywheel/DeDi-node/internal/refschemas"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
@@ -285,6 +286,53 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request) {
 	s.appendAs(w, r, key, in, "Namespace published successfully")
 }
 
+// builtinSchemaPrefix marks a registry payload's `schema` field as a
+// reference to one of the five reference registry schemas the DeDi standard
+// ships (internal/refschemas), rather than a hand-pasted schema object. e.g.
+// `"schema": "builtin:public_key"`.
+//
+// Operators pasting schemas by hand is how two nodes both claiming a
+// "public_key" registry end up enforcing different shapes for it. Resolving
+// the reference here, before the payload is stored, means the registry
+// record on disk always carries the full schema — readers and the schema
+// validator (store.ValidateAgainstSchema) never need to know built-in refs
+// exist at all.
+const builtinSchemaPrefix = "builtin:"
+
+// resolveBuiltinSchema rewrites a registry payload's `schema` field in place
+// when it names a built-in ("builtin:<name>"), replacing it with the
+// resolved schema object. A payload whose `schema` is absent, already an
+// object, or not a recognized built-in name is returned unchanged (the
+// latter case is left for the normal schema/validation path to reject).
+func resolveBuiltinSchema(payload json.RawMessage) (json.RawMessage, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return payload, nil
+	}
+	rawSchema, ok := obj["schema"]
+	if !ok {
+		return payload, nil
+	}
+	var ref string
+	if err := json.Unmarshal(rawSchema, &ref); err != nil {
+		return payload, nil // not a string, so not a built-in reference
+	}
+	name, isBuiltin := strings.CutPrefix(ref, builtinSchemaPrefix)
+	if !isBuiltin {
+		return payload, nil
+	}
+	resolved, found := refschemas.Lookup(name)
+	if !found {
+		return nil, fmt.Errorf("unknown built-in schema %q; available: %s", name, strings.Join(refschemas.Names(), ", "))
+	}
+	obj["schema"] = resolved
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *Server) putRegistry(w http.ResponseWriter, r *http.Request) {
 	key, ok := scoped(w, r)
 	if !ok {
@@ -292,6 +340,11 @@ func (s *Server) putRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, ok := decodePayload(w, r)
 	if !ok {
+		return
+	}
+	payload, err := resolveBuiltinSchema(payload)
+	if err != nil {
+		badRequest(w, err.Error())
 		return
 	}
 	in, ok := preconditionOf(w, r)

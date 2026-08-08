@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,14 +16,13 @@ import (
 
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
+
+	"github.com/theflywheel/DeDi-node/internal/testdb"
 )
 
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	url := testdb.URL(t)
 	ctx := context.Background()
 	s, err := store.Open(ctx, url)
 	if err != nil {

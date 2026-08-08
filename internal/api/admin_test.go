@@ -325,6 +325,65 @@ func TestPublishEnforcesRegistrySchema(t *testing.T) {
 	resp.Body.Close()
 }
 
+// A registry created with `"schema": "builtin:public_key"` must store the
+// resolved schema object, not the reference string — so a reader of the
+// registry (or a different node reasoning about what shape it enforces)
+// never needs to know built-in refs exist.
+func TestPutRegistryResolvesBuiltinSchema(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns", []byte(`{"payload":{}}`)).Body.Close()
+
+	resp := signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns/registries/keys",
+		[]byte(`{"payload":{"schema":"builtin:public_key"}}`))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT registry with builtin schema ref: status %d, body %v", resp.StatusCode, bodyOf(t, resp))
+	}
+	resp.Body.Close()
+
+	m := getJSON(t, srv.URL+"/dedi/lookup/ns/keys", http.StatusOK)
+	schema, ok := m["data"].(map[string]any)["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("stored registry has no resolved schema object: %v", m)
+	}
+	if schema["type"] != "object" {
+		t.Fatalf("resolved schema type = %v, want object", schema["type"])
+	}
+	req, ok := schema["required"].([]any)
+	if !ok || len(req) == 0 {
+		t.Fatalf("resolved schema missing required[]: %v", schema)
+	}
+
+	// The schema now stored is exactly the built-in's, so writes into the
+	// registry are enforced by it.
+	const path = "/admin/namespaces/ns/registries/keys/records/entity-1/publish"
+	bad := signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"publicKey":"pk"}}`))
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("record missing required public_key_id: status %d, want 400", bad.StatusCode)
+	}
+	bad.Body.Close()
+
+	good := signedDo(t, srv, priv, "POST", path,
+		[]byte(`{"payload":{"public_key_id":"e1","publicKey":"pk","keyType":"ed25519"}}`))
+	if good.StatusCode != http.StatusOK {
+		t.Fatalf("complete record: status %d, body %v", good.StatusCode, bodyOf(t, good))
+	}
+	good.Body.Close()
+}
+
+// An unrecognized builtin: reference is rejected up front rather than being
+// stored as an unresolvable string.
+func TestPutRegistryRejectsUnknownBuiltinSchema(t *testing.T) {
+	srv, _, priv := writeServer(t, "ns")
+	signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns", []byte(`{"payload":{}}`)).Body.Close()
+
+	resp := signedDo(t, srv, priv, "PUT", "/admin/namespaces/ns/registries/keys",
+		[]byte(`{"payload":{"schema":"builtin:not-a-real-schema"}}`))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
 // setupRegistry publishes a namespace and registry, returning the record path.
 func setupRegistry(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, ns, reg, rec string) string {
 	t.Helper()

@@ -196,8 +196,31 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	rootB64 := base64.StdEncoding.EncodeToString(root[:])
 	last, lastRoot, have := w.lastWitnessed(ctx)
 
+	// An unchanged tree is only unchanged if its root still agrees. Returning
+	// early on size alone accepted the one attack that needs no growth at all:
+	// swap a leaf, re-sign at the same height, and a witness comparing sizes
+	// sees nothing to check. "Append-only" is a claim about content, and the
+	// root is the only thing that measures content — so a matching size with a
+	// different root is not a quiet period, it is equivocation, and it is
+	// recorded as an alarm rather than skipped.
 	if have && size == last {
-		return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
+		if root == lastRoot {
+			return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
+		}
+		if err := w.ensureParents(ctx); err != nil {
+			return Result{}, err
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": false,
+			"detail": "root changed while tree size stayed at " + fmt.Sprint(size) +
+				": history was rewritten in place",
+		})
+		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS,
+			Registry: w.Origin, RecordName: "checkpoint", PayloadRaw: payload, State: "revoked",
+			CreatedBy: "witness"}); err != nil {
+			return Result{}, err
+		}
+		return Result{Size: size, Root: rootB64, ConsistencyOK: false, Fresh: true}, nil
 	}
 
 	consistencyOK := true

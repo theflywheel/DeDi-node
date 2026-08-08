@@ -87,7 +87,7 @@ func mintOffer(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, ns, 
 func enrol(t *testing.T, srv *httptest.Server, en delegation.Enrolment) *http.Response {
 	t.Helper()
 	body, _ := json.Marshal(en)
-	resp, err := http.Post(srv.URL+"/dedi/enrol", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(srv.URL+"/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -19,14 +18,13 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/merkle"
 	"github.com/theflywheel/DeDi-node/internal/store"
+
+	"github.com/theflywheel/DeDi-node/internal/testdb"
 )
 
 func setup(t *testing.T) (*store.Store, *checkpoint.Checkpointer, *httptest.Server, string, string) {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	url := testdb.URL(t)
 	ctx := context.Background()
 	s, err := store.Open(ctx, url)
 	if err != nil {
@@ -298,5 +296,58 @@ func TestHealthReportsAWitnessThatIsWorking(t *testing.T) {
 	h := w.Status()
 	if h.LastSuccessAt.IsZero() || h.Failures != 0 || h.LastError != "" {
 		t.Fatalf("a healthy witness: %+v", h)
+	}
+}
+
+// A target that rewrites history *without changing its tree size* must still be
+// caught. This is the equivocation case: same size, different root — the
+// operator swapped a leaf rather than appending, so the tree never grew.
+//
+// It is a distinct code path from TestWitnessDetectsForkedHistory, which only
+// ever exercises a target whose size advanced past the last verdict. Nothing
+// about "append-only" is demonstrated by a size comparison alone: a log that
+// stands still while its contents change is exactly the silent rewrite
+// witnessing exists to expose.
+func TestWitnessDetectsARewriteThatKeepsTheSameSize(t *testing.T) {
+	s, cp, srv, vkey, skey := setup(t)
+	ctx := context.Background()
+	seed(t, s, "a", "b", "c")
+	cp.PublishNow(ctx)
+
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey, Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+	first, err := w.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Forge a checkpoint at exactly the size just witnessed, but over a
+	// different root. The signature is genuine — this is the target's own key,
+	// as it would be for a compromised or dishonest operator.
+	var bogus tlog.Hash
+	h := sha256.Sum256([]byte("rewritten history, same height"))
+	copy(bogus[:], h[:])
+	forged, err := merkle.SignCheckpoint(skey, "target.test/log", first.Size, bogus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /dedi/log/checkpoint", func(wr http.ResponseWriter, r *http.Request) {
+		wr.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		wr.Write([]byte(forged))
+	})
+	mal := httptest.NewServer(mux)
+	defer mal.Close()
+
+	w2 := &Witness{Store: s, TargetURL: mal.URL + "/dedi", TargetKey: vkey, Origin: "target.test", Interval: time.Hour, Client: mal.Client()}
+	r, err := w2.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatalf("same-size rewrite returned a transport error, want a recorded alarm: %v", err)
+	}
+	if r.ConsistencyOK {
+		t.Fatal("witness accepted a rewritten history because the tree size had not changed")
+	}
+	e, _ := s.Resolve(ctx, "record", "_witness", "target.test", "checkpoint", nil, nil)
+	if e.State != "revoked" {
+		t.Fatalf("same-size rewrite verdict state %q, want revoked", e.State)
 	}
 }

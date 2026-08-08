@@ -580,7 +580,7 @@ async function verifyWitness(){
   try {
     // 1. The verdict is in this node's own signed log.
     const reg = encodeURIComponent(WITNESS.witnessing);
-    const j = await jget('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion');
+    const j = await jget('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion&internal=1');
     // The proof rides beside the envelope's data, not inside it.
     const rec = j.data, p = j.proof;
     if(!p) throw new Error('this node returned no inclusion proof for its verdict');

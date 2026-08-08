@@ -100,8 +100,13 @@ func TestLookupErrors(t *testing.T) {
 	if m["code"] != "INVALID_REQUEST" {
 		t.Fatalf("code: %v", m["code"])
 	}
-	m = getJSON(t, srv.URL+"/dedi/lookup/flywheel/participants/bap.example.com?version_id=notanumber", http.StatusBadRequest)
-	if m["code"] != "INVALID_REQUEST" {
+	// version_id is deliberately treated differently from as_on. The spec types
+	// as_on with `format: date-time`, so "garbage" violates the published
+	// contract and 400 is right. version_id is an unconstrained string with no
+	// format or pattern, so a non-numeric value is a well-formed request that
+	// simply names no version we hold — 404, not 400 (task #54).
+	m = getJSON(t, srv.URL+"/dedi/lookup/flywheel/participants/bap.example.com?version_id=notanumber", http.StatusNotFound)
+	if m["code"] != "NOT_FOUND" {
 		t.Fatalf("code: %v", m["code"])
 	}
 }

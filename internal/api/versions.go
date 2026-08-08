@@ -46,6 +46,9 @@ func buildVersionsDTO(versions []store.Entry, ttl int) versionsDTO {
 
 func (s *Server) versionsNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("namespace")
+	if internalNamespaceGuard(w, r, ns, "namespace") {
+		return
+	}
 	versions, okRes := s.versionsFor(w, r, "namespace", ns, "", "", "namespace")
 	if !okRes {
 		return
@@ -69,6 +72,9 @@ func (s *Server) registrySchema(r *http.Request, ns, reg string) (map[string]any
 
 func (s *Server) versionsRegistry(w http.ResponseWriter, r *http.Request) {
 	ns, reg := r.PathValue("namespace"), r.PathValue("registry_name")
+	if internalNamespaceGuard(w, r, ns, "registry") {
+		return
+	}
 	versions, okRes := s.versionsFor(w, r, "registry", ns, reg, "", "registry")
 	if !okRes {
 		return
@@ -86,6 +92,9 @@ func (s *Server) versionsRegistry(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) versionsRecord(w http.ResponseWriter, r *http.Request) {
 	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
+	if internalNamespaceGuard(w, r, ns, "record") {
+		return
+	}
 	versions, okRes := s.versionsFor(w, r, "record", ns, reg, rec, "record")
 	if !okRes {
 		return

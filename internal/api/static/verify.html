@@ -326,7 +326,7 @@ async function run(){
 
   // ---- 2. the verdict and its place in the log ----
   const reg = encodeURIComponent(net.witnessing);
-  const rj = await trace('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion', 'json');
+  const rj = await trace('/dedi/lookup/_witness/' + reg + '/checkpoint?proof=inclusion&internal=1', 'json');
   const rec = rj.data, p = rj.proof;
   if(!p) throw new Error('this node returned no inclusion proof for its own verdict');
   const w = rec.details || {};

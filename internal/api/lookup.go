@@ -10,6 +10,18 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
+// errNoSuchVersion marks a version_id that cannot name any version of
+// anything, as distinct from one that names a version we do not have.
+//
+// The spec types version_id as an unconstrained string (openapi.yaml) — no
+// format, no pattern — so "abc" is a well-formed request under the published
+// contract even though our version ids are log sequence numbers. Answering 400
+// told a conformant client its request was malformed when it was not. Both
+// values are simply versions that do not exist here, and both now resolve to
+// 404. Found by conformance/, which reads the parameter's declared type rather
+// than assuming it.
+var errNoSuchVersion = errors.New("no such version")
+
 func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 	q := r.URL.Query()
 	var versionID *int64
@@ -17,7 +29,7 @@ func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 	if v := q.Get("version_id"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			return nil, nil, errors.New("version_id must be an integer version id")
+			return nil, nil, errNoSuchVersion
 		}
 		versionID = &n
 	}
@@ -35,6 +47,10 @@ func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 // list of a resource; used by every lookup handler.
 func (s *Server) resolveWithVersions(w http.ResponseWriter, r *http.Request, entryType, ns, reg, rec, what string) (store.Entry, []store.Entry, bool) {
 	vid, asOn, err := parseLookupParams(r)
+	if errors.Is(err, errNoSuchVersion) {
+		notFound(w, what)
+		return store.Entry{}, nil, false
+	}
 	if err != nil {
 		badRequest(w, err.Error())
 		return store.Entry{}, nil, false
@@ -58,6 +74,9 @@ func (s *Server) resolveWithVersions(w http.ResponseWriter, r *http.Request, ent
 
 func (s *Server) lookupNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("namespace")
+	if internalNamespaceGuard(w, r, ns, "namespace") {
+		return
+	}
 	e, versions, okRes := s.resolveWithVersions(w, r, "namespace", ns, "", "", "namespace")
 	if !okRes {
 		return
@@ -67,6 +86,9 @@ func (s *Server) lookupNamespace(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) lookupRegistry(w http.ResponseWriter, r *http.Request) {
 	ns, reg := r.PathValue("namespace"), r.PathValue("registry_name")
+	if internalNamespaceGuard(w, r, ns, "registry") {
+		return
+	}
 	e, versions, okRes := s.resolveWithVersions(w, r, "registry", ns, reg, "", "registry")
 	if !okRes {
 		return
@@ -80,7 +102,14 @@ const becknWildcardRegistry = "subscribers.beckn.one"
 
 func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
+	if internalNamespaceGuard(w, r, ns, "record") {
+		return
+	}
 	vid, asOn, err := parseLookupParams(r)
+	if errors.Is(err, errNoSuchVersion) {
+		notFound(w, "record")
+		return
+	}
 	if err != nil {
 		badRequest(w, err.Error())
 		return

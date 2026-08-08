@@ -214,6 +214,15 @@ func (s *Server) enrolChild(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// deprecatedEnrolChild is the alias for POST /dedi/enrol, kept only until
+// deployed ring nodes upgrade to call POST /enrol directly. It answers
+// exactly like enrolChild but marks itself deprecated so callers can detect
+// and migrate off it.
+func (s *Server) deprecatedEnrolChild(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Deprecation", "true")
+	s.enrolChild(w, r)
+}
+
 type revokeChildRequest struct {
 	Reason string `json:"reason"`
 }
