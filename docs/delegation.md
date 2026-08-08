@@ -293,6 +293,39 @@ serves reads and accepts no writes.
 
 ---
 
+## Chains
+
+Nothing stops `beckn.mobility` delegating `beckn.mobility.metro`: the one-level
+rule is enforced relative to whoever is granting, so a chain grows one link at a
+time, each link granted by the holder of the link above. `beckn` cannot mint
+`beckn.mobility.metro` even holding a key for both namespaces — the route's
+namespace is `beckn`, and that is two levels down.
+
+The console walks a chain a level at a time, and **each hop is read from that
+node directly, not through this one.** A hierarchy assembled here from what a
+parent says about its grandchildren would be the parent's word about a log it
+does not hold; read from the node itself it is that node's own answer under its
+own key. The child's read plane is public and CORS-open precisely so a browser
+can do this without anyone's cooperation. One level per click rather than a
+recursive crawl, so a stalled node deep in a chain does not hold up the view of
+everything above it.
+
+### Revocation is not transitive
+
+When `beckn` revokes `beckn.mobility`, the record `beckn.mobility` holds for
+`beckn.mobility.metro` is untouched and still reads `active`. That is correct —
+a node can only speak about grants it made, and rewriting someone else's log is
+not available to it — but it means **a relying party must walk the whole chain**.
+A grandchild whose parent has lost its delegation still looks live if you ask
+only the grandchild.
+
+Verified end to end with three real nodes: `beckn` → `beckn.mobility` →
+`beckn.mobility.metro`, each enrolled with its own key and witnessed by the
+level above; revoking the middle link stopped the root's witness loop, kept the
+child's identity in the root's log, and left the bottom link untouched.
+
+---
+
 ## Known gaps
 
 - **Revocation does not notify anyone.** It is published, so a party that
@@ -302,9 +335,7 @@ serves reads and accepts no writes.
   the child's config and currently unused; a child could and should witness that
   its parent's log is append-only, notwithstanding the independence caveat above
   — it is a weak check, but a cheap one.
-- **Grandchildren are untested.** Nothing forbids `beckn.mobility` delegating
-  `beckn.mobility.metro` — the one-level rule is enforced relative to whoever is
-  granting — but no test covers a two-deep chain, and nothing walks a chain to
-  check every link is live.
-- **No bulk view across a tree.** The parent lists its own children. Reading a
-  whole hierarchy means walking it by hand.
+- **Nothing validates a chain end to end.** The console walks it a level at a
+  time and an operator can see every link, but no code answers "is every link
+  above this node still live?" — see the non-transitivity note above. That check
+  belongs to the relying party, and there is nothing here to help it yet.

@@ -187,6 +187,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 
   <h3>Delegated so far</h3>
   <div id="children-list"><p class="mut">loading...</p></div>
+  <div id="children-tree"></div>
 </div>
 
 <script>
@@ -573,6 +574,7 @@ onAction($('detail'), 'revoke', prefillRevoke);
 // Bound to the container, not to the row: the children table is replaced
 // wholesale on every reload, and a listener on a row would go with it.
 onAction($('children-list'), 'unchild', revokeChild);
+onAction($('children-list'), 'chain', showDescendants);
 
 show(location.hash.slice(1) || 'list');
 reload();
@@ -600,6 +602,8 @@ function renderProviders(){
 // worse case. Kept beside the table rather than encoded into the link, so the
 // only child-supplied value reaching the DOM stays the namespace.
 const CHILD_STATE = {};
+// Where each child is reachable, for walking the chain below it.
+const CHILD_URL = {};
 
 // offerLife says whether an unredeemed offer can still be used.
 //
@@ -671,6 +675,7 @@ async function loadChildren(){
       '<th>verifier key</th><th>witnessed</th><th></th></tr>' +
       kids.map(k => {
         CHILD_STATE[k.namespace] = k.state;
+        if(/^https?:\/\//i.test(k.child_url || '')) CHILD_URL[k.namespace] = k.child_url;
         // An offer that was never redeemed is the quiet failure this table
         // exists to surface: nothing is wrong with the parent, and a child
         // somewhere is serving without a delegation.
@@ -700,7 +705,10 @@ async function loadChildren(){
           // for both makes the destructive one look routine.
           (k.state === 'revoked' ? '<span class="mut">—</span>'
             : actionLink('unchild', k.namespace,
-                k.state === 'offered' ? 'discard' : 'revoke')) + '</td></tr>';
+                k.state === 'offered' ? 'discard' : 'revoke')) +
+          (k.state === 'active' && CHILD_URL[k.namespace]
+            ? ' ' + actionLink('chain', k.namespace, 'descendants') : '') +
+          '</td></tr>';
       }).join('') + '</table>' +
       '<p class="mut">The verifier key is the child\'s own. A relying party checks the child\'s ' +
       'checkpoints against it directly — this node is not in that path, which is the point of the ' +
@@ -796,6 +804,51 @@ async function revokeChild(child){
     loadChildren();
   } catch(e){
     fail('out-children', [e.message]);
+  }
+}
+
+// showDescendants walks one level further down the chain.
+//
+// The fetch goes to the child directly, not through this node. That is the
+// whole point: a hierarchy assembled here from what the parent says about its
+// grandchildren would be the parent's word about a log it does not hold. Read
+// from the child, it is the child's own answer, signed by the child's own key —
+// and the child's read plane is public and CORS-open precisely so a browser can
+// do this without anyone's cooperation.
+//
+// One level per click rather than a recursive crawl. A chain can be long and
+// each hop is a separate node that may be slow or down; expanding on demand
+// keeps a stalled grandchild from holding up the view of everything above it.
+async function showDescendants(child){
+  const box = $('children-tree');
+  const url = CHILD_URL[child];
+  if(!url){ box.innerHTML = '<p class="mut">No reachable URL for ' + esc(child) + '.</p>'; return; }
+  box.innerHTML = '<p class="mut">asking ' + esc(child) + ' directly...</p>';
+  try {
+    const resp = await fetch(url.replace(/\/$/, '') + '/dedi/delegations/' + p(child));
+    const j = await resp.json();
+    const kids = (j.data && j.data.children) || [];
+    const head = '<h3>Below ' + esc(child) + '</h3>' +
+      '<p class="mut">Read from ' + esc(url) + ' directly — this is that node\'s own answer, ' +
+      'not this one\'s account of it.</p>';
+    if(!kids.length){
+      box.innerHTML = head + '<p class="mut">It has delegated nothing.</p>';
+      return;
+    }
+    box.innerHTML = head + '<table><tr><th>namespace</th><th>state</th><th>node</th></tr>' +
+      kids.map(g =>
+        '<tr><td>' + esc(g.namespace) + '</td><td>' +
+        (g.state === 'active' ? '<span class="ok">active</span>'
+                              : '<span class="no">' + esc(g.state) + '</span>') +
+        '</td><td class="mut">' + esc(g.child_origin || '—') + '</td></tr>').join('') +
+      '</table>';
+  } catch(e){
+    // Worth distinguishing from "nothing delegated": a grandchild that cannot
+    // be reached is not the same as one that does not exist, and the operator
+    // is the only one who can tell which.
+    box.innerHTML = '<p class="no">Could not reach ' + esc(child) + ' (' + esc(e.message) + ').</p>' +
+      '<p class="mut">It may be down, or it may not be serving this URL any more. Either way ' +
+      'this node cannot answer for what it has delegated.</p>';
   }
 }
 

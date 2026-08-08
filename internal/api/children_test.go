@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +27,7 @@ import (
 // parentServer boots a node that holds `ns` and can delegate under it. It
 // returns the Server itself as well, because the delegation hooks — the peer
 // monitor and OnDelegation — are the parts most worth asserting on.
-func parentServer(t *testing.T, ns string) (*httptest.Server, *Server, ed25519.PrivateKey) {
+func parentServer(t *testing.T, namespaces ...string) (*httptest.Server, *Server, ed25519.PrivateKey) {
 	t.Helper()
 	base, s, _ := testServer(t)
 	base.Close()
@@ -34,7 +36,14 @@ func parentServer(t *testing.T, ns string) (*httptest.Server, *Server, ed25519.P
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys, err := publisher.ParseKeySet("op-1:" + ns + ":" + base64.StdEncoding.EncodeToString(pub))
+	// One key id per namespace, because Key.Authorizes is an exact match: a key
+	// scoped to beckn cannot write under beckn.mobility, which is exactly why a
+	// grandchild has to be minted by the child node rather than by this one.
+	entries := make([]string, 0, len(namespaces))
+	for i, ns := range namespaces {
+		entries = append(entries, fmt.Sprintf("op-%d:%s:%s", i+1, ns, base64.StdEncoding.EncodeToString(pub)))
+	}
+	keys, err := publisher.ParseKeySet(strings.Join(entries, ","))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +53,7 @@ func parentServer(t *testing.T, ns string) (*httptest.Server, *Server, ed25519.P
 	}
 	api := &Server{
 		Store: s, CP: &checkpoint.Checkpointer{Store: s, SKey: skey, Origin: "parent.test/log", Interval: time.Hour},
-		TTL: 300, VerifierKey: vkey, WildcardNamespaces: []string{ns},
+		TTL: 300, VerifierKey: vkey, WildcardNamespaces: namespaces,
 		Auth:    &publisher.Authenticator{Keys: keys},
 		Network: &network.Monitor{},
 	}
@@ -610,4 +619,113 @@ func TestReMintingOverAnUnredeemedOfferInvalidatesTheOldToken(t *testing.T) {
 		raw, _ := io.ReadAll(now.Body)
 		t.Fatalf("the fresh token does not enrol: %d %s", now.StatusCode, raw)
 	}
+}
+
+// signedAs is signedDo with a chosen key id, needed once a node holds more than
+// one publisher key — which is what a node running a delegated namespace does.
+func signedAs(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, kid, method, path string, body []byte) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	req.Header.Set(publisher.HeaderKeyID, kid)
+	req.Header.Set(publisher.HeaderTimestamp, now.Format(time.RFC3339))
+	req.Header.Set(publisher.HeaderSignature,
+		publisher.Sign(priv, method, path, body, publisher.Precondition{}, now))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestAChildCanDelegateAGrandchildButItsParentCannot(t *testing.T) {
+	// The one-level rule is enforced relative to whoever is granting, so a
+	// chain is allowed to grow — but only one link at a time, and only by the
+	// holder of the link above. Nothing tested this, and "nothing forbids it"
+	// is not the same as "it works".
+	srv, _, priv := parentServer(t, "beckn", "beckn.mobility")
+
+	// beckn may not reach past its own child, even holding both keys: the
+	// route's namespace is beckn, and beckn.mobility.metro is two levels below.
+	skip := signedAs(t, srv, priv, "op-1", http.MethodPost, "/admin/namespaces/beckn/children",
+		mustJSON(createChildRequest{Namespace: "beckn.mobility.metro", Provider: "env"}))
+	skip.Body.Close()
+	if skip.StatusCode != http.StatusBadRequest {
+		t.Fatalf("beckn delegated a grandchild directly: %d, want 400", skip.StatusCode)
+	}
+
+	// The holder of beckn.mobility may, because for it that is one level down.
+	resp := signedAs(t, srv, priv, "op-2", http.MethodPost, "/admin/namespaces/beckn.mobility/children",
+		mustJSON(createChildRequest{Namespace: "beckn.mobility.metro", Provider: "env"}))
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a child could not delegate a grandchild: %d %s", resp.StatusCode, raw)
+	}
+	var out struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := out.Data["token"].(string)
+	if token == "" {
+		t.Fatalf("no token minted: %s", raw)
+	}
+
+	// And the grandchild enrols against the level above it, not against the
+	// root — parentNamespaceOf has to pick beckn.mobility out of a node that
+	// also holds beckn.
+	_, gvkey, err := note.GenerateKey(rand.Reader, "beckn.mobility.metro/log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en := enrol(t, srv, delegation.Enrolment{
+		Namespace: "beckn.mobility.metro", Token: token,
+		Origin: "beckn.mobility.metro/log", URL: "https://metro.example", Key: gvkey,
+	})
+	defer en.Body.Close()
+	if en.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(en.Body)
+		t.Fatalf("grandchild enrolment: %d %s", en.StatusCode, raw)
+	}
+
+	// The chain is readable a link at a time: each level lists only its own
+	// children, which is what a tree walk has to follow.
+	for _, tc := range []struct{ ns, want string }{
+		{"beckn", ""}, // beckn delegated nothing in this test
+		{"beckn.mobility", "beckn.mobility.metro"},
+	} {
+		resp, err := http.Get(srv.URL + "/dedi/delegations/" + tc.ns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Data struct {
+				Children []map[string]any `json:"children"`
+			} `json:"data"`
+		}
+		json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		if tc.want == "" {
+			if len(got.Data.Children) != 0 {
+				t.Errorf("%s lists children it did not grant: %v", tc.ns, got.Data.Children)
+			}
+			continue
+		}
+		if len(got.Data.Children) != 1 || got.Data.Children[0]["namespace"] != tc.want {
+			t.Errorf("%s children = %v, want %s", tc.ns, got.Data.Children, tc.want)
+		}
+	}
+}
+
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

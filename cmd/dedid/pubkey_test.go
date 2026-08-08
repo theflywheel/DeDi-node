@@ -45,3 +45,36 @@ func TestVerifierKeyForRejectsThingsThatAreNotNodeKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestAConfiguredNodeKeyStillYieldsItsVerifierKey(t *testing.T) {
+	// nodeKey returned an empty verifier key for a key supplied via DEDI_KEY or
+	// DEDI_KEY_FILE, and only the self-provisioning path filled it in. The
+	// consequences were nowhere near the size of the omission: a node deployed
+	// from a key file could not enrol as a child at all — it presented an empty
+	// key, the parent refused it as malformed, and it retried every fifteen
+	// seconds forever while every health surface on it read fine — and it
+	// published no verifier key of its own, so nobody could check its
+	// checkpoints without asking it for the key out of band.
+	skey, vkey, err := note.GenerateKey(rand.Reader, "beckn.mobility")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, gotV, err := withVerifier(skey)
+	if err != nil {
+		t.Fatalf("withVerifier: %v", err)
+	}
+	if got != skey {
+		t.Errorf("private key altered: %q", got)
+	}
+	if gotV != vkey {
+		t.Errorf("verifier key = %q, want %q", gotV, vkey)
+	}
+}
+
+func TestAnUnusableConfiguredKeyFailsLoudly(t *testing.T) {
+	// The other half: deriving must not paper over a corrupt key by returning
+	// an empty verifier key, which is what made the bug above invisible.
+	if _, _, err := withVerifier("PRIVATE+KEY+name+hash+not-base64"); err == nil {
+		t.Fatal("a corrupt node key was accepted")
+	}
+}

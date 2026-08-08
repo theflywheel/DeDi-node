@@ -143,6 +143,31 @@ func verifierKeyFor(skey string) (string, error) {
 	return note.NewEd25519VerifierKey(name, pub)
 }
 
+// withVerifier pairs a configured private key with its public verifier key.
+//
+// Both key paths have to yield a verifier key, not just the self-provisioning
+// one. It is derivable from the private key — `dedid pubkey` has done exactly
+// this for a while — and leaving it empty for a configured key had consequences
+// well beyond the cosmetic:
+//
+//   - a node deployed from a key file could not enrol as a child at all. It
+//     presented an empty key, the parent refused it as malformed, and the child
+//     retried every fifteen seconds forever while every health surface on it
+//     read fine.
+//   - it published no verifier key of its own, so children it delegated were
+//     handed a blank DEDI_PARENT_KEY and nobody could check its checkpoints
+//     without asking it for the key out of band.
+//
+// Found by running a real chain of nodes rather than by reading this function,
+// which looks entirely reasonable.
+func withVerifier(skey string) (string, string, error) {
+	vkey, err := verifierKeyFor(skey)
+	if err != nil {
+		return "", "", fmt.Errorf("derive verifier key from the configured node key: %w", err)
+	}
+	return skey, vkey, nil
+}
+
 // pubkeygen mints a publisher credential for the write plane. The private key
 // stays with the operator; the printed entry is what the node is configured
 // with, and it carries no secret.
@@ -305,7 +330,7 @@ func openStore(ctx context.Context) (*store.Store, error) {
 // have the verifier key that keygen printed alongside it.
 func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey string, err error) {
 	if k := strings.TrimSpace(os.Getenv("DEDI_KEY")); k != "" {
-		return k, "", nil
+		return withVerifier(k)
 	}
 	// An explicitly configured file that cannot be read is a misconfiguration,
 	// not an invitation to mint a new identity: silently signing under a
@@ -318,7 +343,7 @@ func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey str
 	b, readErr := os.ReadFile(keyFile)
 	switch {
 	case readErr == nil:
-		return strings.TrimSpace(string(b)), "", nil
+		return withVerifier(strings.TrimSpace(string(b)))
 	case explicit != "":
 		return "", "", fmt.Errorf("read node key from DEDI_KEY_FILE: %w", readErr)
 	case !errors.Is(readErr, fs.ErrNotExist):
