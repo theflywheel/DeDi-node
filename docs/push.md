@@ -156,3 +156,64 @@ consumer can, but the consumers in this repo's tests only check the signature.
 A reference consumer that fetches the entry and checks its proof would make the
 "hint, not a fact" contract something you can run rather than something the
 docs assert.
+
+---
+
+# Discovery
+
+`GET /dedi/query/{namespace}/{registry}?domain=retail`
+
+DeDi was a **trust** plane: it could answer "what key does this known
+`subscriber_id` use" and nothing else a router could act on. `FindBecknSubscriber`
+takes a subscriber_id you already have and returns one record; it exists for
+signature validation. So the `url` field in every participant record was in the
+log and decorative — nothing ever read it.
+
+**A filter, not a new endpoint.** `design.md` §120 already places this: attribute
+filtering over payload fields (role, domain, city/coverage, status) is "a
+namespaced extension backed by the JSONB GIN index", required for gateway
+discovery. A separate endpoint would have invented a second shape for a question
+the spec puts here. It is opt-in by the presence of `?domain=`, so `/dedi/query`
+without it behaves exactly as before and still never reaches into the payload.
+
+## What this changes about revocation
+
+Revocation gains a second meaning. It already stopped a participant being
+**verifiable**; now it also stops them being **returned as a destination**.
+
+Those are different protections. The first stops a forged message being
+accepted. The second stops a real one being sent somewhere it should not go —
+and it is the one that matters on this surface, which is why the answer carries
+the node's short TTL rather than anything longer. A long `max-age` here would
+reintroduce exactly the staleness window push exists to close, on the read that
+decides where traffic goes.
+
+## The allowlist matters more here
+
+The eligible-namespace constraint (`design.md:256`) applies, and for a sharper
+reason than it does for lookup.
+
+A wildcard lookup is at least anchored to a `subscriber_id` the caller already
+believed in. A discovery caller has no such anchor — it is asking to be told who
+exists. Without the allowlist, anyone able to publish a record on this node
+could insert themselves as a destination for any domain and receive traffic
+meant for someone else.
+
+## The list is a starting point
+
+The response carries a `lookup_url` per participant, and the console renders it
+as a *verify* link on every row rather than a summary the operator reads and
+believes. This node assembled the list; only each record and its inclusion proof
+say what was actually published. Same contract as a push: a pointer to what can
+be checked, not a claim to be trusted.
+
+## Still open
+
+**Making ONIX route through it**, which GH #14 puts explicitly out of scope. The
+`dediregistry` plugin implements only `RegistryLookup` and hard-requires both
+`subscriber_id` and `key_id`; there is no discovery method to call, and
+`router.go:258` reads `bppUri` straight out of the message context, so the
+router never consults the registry at all. That needs a Beckn **gateway** plus
+upstream plugin changes. If the broadcast story is wanted as a demo, a small
+standalone gateway in the demo stack that queries dedid and fans out is the
+cheap route.

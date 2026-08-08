@@ -186,3 +186,75 @@ console.log('OK');
 		t.Fatalf("push panel does not report a stopped delivery loop:\n%s\n%v", out, err)
 	}
 }
+
+// The domain panel renders a URL each participant chose for itself. It is the
+// same trap as the child table's child_url: a valid URL that esc() leaves
+// completely intact and that runs on click, in the one page holding a
+// publisher key.
+func TestDomainPanelDoesNotTrustAParticipantSuppliedURL(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	page, err := os.ReadFile(filepath.Join("static", "admin.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(page)
+	script = script[strings.Index(script, "<script>")+len("<script>"):]
+	script = script[:strings.Index(script, "</script>")]
+	for _, boot := range []string{
+		"show(location.hash.slice(1) || 'list');", "reload();", "loadChildren();",
+		"loadSubscriptions();",
+	} {
+		script = strings.Replace(script, boot, "", 1)
+	}
+	if !strings.Contains(script, "async function findByDomain") {
+		t.Fatal("findByDomain is not in the shipped page; the panel or this harness has moved")
+	}
+
+	harness := `
+const els = new Map();
+const fakeEl = id => ({ id, innerHTML: '', textContent: '',
+  value: id === 'ns' ? 'beckn' : (id === 'd-reg' ? 'subscribers' : 'retail'),
+  hidden: false, className: '', addEventListener(){}, querySelectorAll(){ return []; } });
+globalThis.document = {
+  getElementById: id => { if(!els.has(id)) els.set(id, fakeEl(id)); return els.get(id); },
+  querySelector: () => null, querySelectorAll: () => [],
+};
+globalThis.location = { hash: '', origin: 'http://node.example' };
+globalThis.addEventListener = () => {};
+globalThis.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {
+  participants: [{
+    subscriber_id: '<img src=x onerror=alert(1)>',
+    type: '<svg onload=alert(2)>',
+    url: 'javascript:alert(3)',
+    lookup_url: '/dedi/lookup/beckn/subscribers/x',
+    record_name: 'x',
+  }],
+} }) });
+
+SCRIPT_HERE
+
+await (async () => {
+await findByDomain();
+const html = document.getElementById('domain-list').innerHTML;
+if (/href="javascript:/i.test(html)) { console.log('LEAKED javascript: href\n' + html); process.exit(1); }
+const leaks = ['<img', '<svg', '<script'].filter(t => html.includes(t));
+if (leaks.length) { console.log('LEAKED ' + JSON.stringify(leaks) + '\n' + html); process.exit(1); }
+// It must have rendered, and it must point at the record rather than asking
+// the operator to believe the list this node assembled.
+if (!html.includes('>verify<')) { console.log('NO VERIFY LINK\n' + html); process.exit(1); }
+console.log('OK');
+})();
+`
+	prog := strings.Replace(harness, "SCRIPT_HERE", script, 1)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "domain_panel.mjs")
+	if err := os.WriteFile(path, []byte(prog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", path).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "OK") {
+		t.Fatalf("domain panel trusts a participant-supplied URL:\n%s\n%v", out, err)
+	}
+}

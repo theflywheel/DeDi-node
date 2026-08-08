@@ -76,6 +76,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
   <a id="tab-children" onclick="show('children')">Child nodes</a>
   <a id="tab-push" onclick="show('push')">Push</a>
+  <a id="tab-domain" onclick="show('domain')">Who serves</a>
 </p>
 
 <!-- ---------- participants ---------- -->
@@ -216,6 +217,23 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="push-list"><p class="mut">loading...</p></div>
 </div>
 
+<div id="view-domain" hidden>
+  <h2>Who serves a domain</h2>
+  <p class="mut">The directory can now answer discovery, not only trust: not just
+  <em>what key does this subscriber use</em>, but <em>who serves retail</em>. Revocation
+  therefore has a second meaning here — a revoked participant stops being returned as
+  somewhere to send business, not merely as somewhere whose signature verifies.</p>
+  <fieldset>
+    <legend>Search</legend>
+    <div class="grid">
+      <div><label for="d-reg">registry</label><input id="d-reg" placeholder="subscribers" spellcheck="false"></div>
+      <div><label for="d-domain">domain</label><input id="d-domain" placeholder="retail" spellcheck="false"></div>
+    </div>
+    <button onclick="findByDomain()">search</button>
+  </fieldset>
+  <div id="domain-list"></div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -234,7 +252,7 @@ function onAction(root, action, fn){
 }
 const actionLink = (action, rec, label) =>
   '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
-const VIEWS = ['list','new','key','revoke','children','push'];
+const VIEWS = ['list','new','key','revoke','children','push','domain'];
 
 // ---- request signing ----
 // Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
@@ -988,6 +1006,45 @@ async function unsubscribe(id){
 }
 
 onAction($('push-list'), 'unsub', unsubscribe);
+
+// ---------- who serves a domain ----------
+//
+// A public read, so no key is needed. What comes back is a starting point and
+// not an answer to be trusted: this node assembled the list, and only each
+// record and its inclusion proof say what was actually published — hence the
+// verify link on every row rather than a summary the operator reads and
+// believes.
+async function findByDomain(){
+  const reg = $('d-reg').value.trim(), domain = $('d-domain').value.trim();
+  const box = $('domain-list');
+  if(!reg || !domain){ box.innerHTML = '<p class="no">registry and domain are both required</p>'; return; }
+  box.innerHTML = '<p class="mut">searching...</p>';
+  try {
+    const j = await jget('/dedi/query/' + p(ns()) + '/' + p(reg) + '?domain=' + encodeURIComponent(domain));
+    const list = (j.data && j.data.participants) || [];
+    if(!list.length){
+      box.innerHTML = '<p class="mut">Nobody live serves ' + esc(domain) + ' in ' +
+        esc(ns()) + '/' + esc(reg) + '.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>subscriber</th><th>type</th><th>url</th><th>record</th></tr>' +
+      list.map(x => {
+        // Escaping does not make an href safe: a participant chooses its own
+        // url, and javascript: survives esc() intact.
+        const safe = /^https?:\/\//i.test(x.url || '');
+        const url = !x.url ? '<span class="mut">—</span>'
+          : safe ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.url) + '</a>'
+          : esc(x.url) + ' <span class="no">(unusable URL)</span>';
+        return '<tr><td>' + esc(x.subscriber_id || '—') + '</td>' +
+          '<td class="mut">' + esc(x.type || '—') + '</td><td>' + url + '</td>' +
+          '<td><a href="' + esc(x.lookup_url) + '" target="_blank" rel="noopener">verify</a></td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">' + esc(list.length) + ' live. This node assembled the list — ' +
+      'follow a record to check what it actually published.</p>';
+  } catch(e){
+    box.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+  }
+}
 
 function copyArtifact(){
   navigator.clipboard.writeText($('c-art').textContent);
