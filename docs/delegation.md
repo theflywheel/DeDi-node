@@ -115,6 +115,50 @@ An active delegation also cannot be re-minted over. Re-issuing would hand the
 namespace to whoever redeemed the new token, which is a takeover of the child
 wearing a convenience's clothing; it must be revoked explicitly first.
 
+---
+
+## Revocation
+
+`POST /admin/namespaces/{ns}/children/{child}/revoke`, signed and scoped
+exactly like minting — the authority to grant a slice of a namespace and the
+authority to take it back are the same authority, exercised in two directions.
+
+It applies to an unredeemed offer as well as to an enrolled child, because
+those are one problem in two costumes: an outstanding offer is a bearer
+credential for the namespace, and *"I minted that by mistake"* needs a better
+answer than waiting out `TokenTTL` and hoping nobody found the token first.
+
+**What revocation does not do is reach into the child.** The child keeps its
+key, its database and its log, and goes on serving; this node has no authority
+over another operator's process, and an API that implied otherwise would be
+lying about what the mechanism is. What changes is that this node's log now
+records, with a timestamp and under the same signature as everything else, that
+the authority it granted is withdrawn — and relying parties check the grant.
+The admin console says this in the confirmation prompt, because the intuitive
+reading of a Revoke button is that it turns the child off.
+
+Three things follow:
+
+- **The witness loop stops.** A parent still publishing verdicts about a child
+  it has stopped vouching for reads downstream as the parent standing behind it
+  after all, and the child is dropped from the network view rather than left as
+  a green row nobody checks.
+- **The child's identity is kept, not erased.** Who held the namespace and until
+  when is exactly what an audit of an older signature from that child depends
+  on. Deleting it on revocation would destroy the evidence at the moment it
+  starts to matter.
+- **The namespace becomes re-delegatable.** Revocation is the only path out of
+  a live delegation, so a revocation that did not free the namespace would leave
+  the operator exactly as stuck as having no revocation at all.
+
+The redeeming and revoking writes both carry a precondition on the version they
+read, which covers the mirror-image race: a revocation must not silently
+overwrite an enrolment that landed a moment earlier and leave a record saying
+"revoked" about a child the parent is meanwhile happily witnessing.
+
+→ `internal/delegation/delegation.go` (`Revoke`), `internal/api/children.go`
+(`revokeChild`)
+
 → `internal/delegation/delegation_test.go`, `internal/api/children_test.go`
 
 ---
@@ -207,11 +251,17 @@ serves reads and accepts no writes.
 
 ## Known gaps
 
-- **Revocation is not implemented.** `StateRevoked` exists in the model and the
-  state machine refuses to redeem against it, but there is no route that moves a
-  delegation into it. Until there is, withdrawing a namespace means editing
-  nothing — there is no supported path, and re-minting is explicitly refused.
-  This is the largest gap and should be next.
+- **No witness verdict in the console.** The parent verifies every active child
+  and the Children tab shows none of it, so a child whose log stopped being
+  append-only reads exactly like a healthy one. The verdicts are already in the
+  log; they are simply not joined into the delegation list. Largest remaining
+  gap.
+- **An unredeemed offer does not say whether it is still redeemable.** The table
+  shows state but not expiry, so a stale offer and a fresh one look identical
+  and there is no supported way to discard one.
+- **Revocation does not notify anyone.** It is published, so a party that
+  re-checks sees it; a party holding a cached answer does not, until the cache
+  expires. Push is the open item tracked separately for record revocation.
 - **The child does not verify the parent.** `DEDI_PARENT_KEY` is rendered into
   the child's config and currently unused; a child could and should witness that
   its parent's log is append-only, notwithstanding the independence caveat above

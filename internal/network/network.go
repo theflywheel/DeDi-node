@@ -130,6 +130,28 @@ func (m *Monitor) Add(name, url string) {
 // peers copies the peer set under the lock. Callers iterate the copy, because
 // polling one peer takes seconds and holding the lock for that would block
 // every enrolment and every read of the network panel behind it.
+// Remove drops a peer and forgets its last status.
+//
+// Forgetting matters: a revoked child left in the status map would keep
+// reporting whatever it was last seen doing, and a node this one has stopped
+// vouching for should disappear from the view rather than linger as a healthy
+// green row nobody is checking any more.
+func (m *Monitor) Remove(url string) {
+	if url == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.Peers[:0]
+	for _, p := range m.Peers {
+		if p.URL != url {
+			kept = append(kept, p)
+		}
+	}
+	m.Peers = kept
+	delete(m.latest, url)
+}
+
 func (m *Monitor) peers() []Peer {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

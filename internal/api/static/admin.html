@@ -570,6 +570,9 @@ function copy(id, btn){
 onAction($('participants'), 'detail', detail);
 onAction($('detail'), 'rotate', prefill);
 onAction($('detail'), 'revoke', prefillRevoke);
+// Bound to the container, not to the row: the children table is replaced
+// wholesale on every reload, and a listener on a row would go with it.
+onAction($('children-list'), 'unchild', revokeChild);
 
 show(location.hash.slice(1) || 'list');
 reload();
@@ -604,7 +607,7 @@ async function loadChildren(){
       return;
     }
     box.innerHTML = '<table><tr><th>namespace</th><th>state</th><th>node</th>' +
-      '<th>verifier key</th><th>enrolled</th></tr>' +
+      '<th>verifier key</th><th>enrolled</th><th></th></tr>' +
       kids.map(k => {
         // An offer that was never redeemed is the quiet failure this table
         // exists to surface: nothing is wrong with the parent, and a child
@@ -612,7 +615,9 @@ async function loadChildren(){
         const state = k.state === 'active'
           ? '<span class="ok">active</span>'
           : '<span class="no">' + esc(k.state) + '</span>' +
-            (k.state === 'offered' ? ' <span class="mut">— never enrolled</span>' : '');
+            (k.state === 'offered' ? ' <span class="mut">— never enrolled</span>' : '') +
+            (k.revoked_at ? ' <span class="mut">' + esc(k.revoked_at) +
+              (k.reason ? ' — ' + esc(k.reason) : '') + '</span>' : '');
         // Escaping is not enough for an href: esc() leaves "javascript:alert(1)"
         // intact, and the operator clicking it runs script in the one page
         // holding a publisher key. The scheme is checked, and anything else is
@@ -626,7 +631,9 @@ async function loadChildren(){
         return '<tr><td>' + esc(k.namespace) + (k.label ? ' <span class="mut">' + esc(k.label) + '</span>' : '') +
           '</td><td>' + state + '</td><td>' + url +
           '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
-          '</td><td class="mut">' + esc(k.enrolled_at || '—') + '</td></tr>';
+          '</td><td class="mut">' + esc(k.enrolled_at || '—') + '</td><td>' +
+          (k.state === 'revoked' ? '<span class="mut">—</span>'
+            : actionLink('unchild', k.namespace, 'revoke')) + '</td></tr>';
       }).join('') + '</table>' +
       '<p class="mut">The verifier key is the child\'s own. A relying party checks the child\'s ' +
       'checkpoints against it directly — this node is not in that path, which is the point of the ' +
@@ -678,6 +685,41 @@ async function createChild(){
       'Until then it holds no delegation.</p>';
     // The offer is already in the log, so it should appear immediately —
     // including when the child never turns up.
+    loadChildren();
+  } catch(e){
+    fail('out-children', [e.message]);
+  }
+}
+
+// revokeChild withdraws a delegation.
+//
+// Confirmed first, and the confirmation says what revocation does *not* do.
+// The intuitive reading of this button is that it turns the child off; it does
+// not, and cannot — the child is someone else's process with its own key and
+// its own log. What it changes is that this node's log stops vouching for it.
+// An operator who clicks expecting a shutdown and gets a still-serving node has
+// been misled by the UI, not by the mechanism.
+async function revokeChild(child){
+  if(!SIGNER){
+    return fail('out-children', ['Load a publisher key first — revoking is a signed write.']);
+  }
+  const live = 'Revoke the delegation of ' + child + '?\n\n' +
+    'This node stops vouching for it and stops witnessing it, and the log records the ' +
+    'withdrawal with a timestamp.\n\n' +
+    'The child node keeps running, keeps its key and keeps its own log — revoking here ' +
+    'cannot and does not shut it down.';
+  if(!confirm(live)) return;
+  const box = $('out-children');
+  box.innerHTML = '<p class="mut">revoking...</p>';
+  try {
+    const resp = await signedFetch('POST',
+      '/admin/namespaces/' + p(parentNS()) + '/children/' + p(child) + '/revoke',
+      { reason: 'revoked from the admin console' });
+    const j = await resp.json();
+    if(!resp.ok){ return fail('out-children', [j.error || ('HTTP ' + resp.status)]); }
+    box.innerHTML = '<p class="ok">' + esc(child) + ' revoked &check;</p>' +
+      '<p class="mut">' + esc((j.data && j.data.note) || '') + '</p>' +
+      '<p class="mut">The namespace can be delegated again from the form above.</p>';
     loadChildren();
   } catch(e){
     fail('out-children', [e.message]);

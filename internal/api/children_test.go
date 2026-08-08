@@ -306,3 +306,111 @@ func TestTheDelegationRecordIsProvableLikeAnyOtherEntry(t *testing.T) {
 	}
 	var _ store.Entry = e
 }
+
+func revokeDelegation(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, ns, child, reason string) *http.Response {
+	t.Helper()
+	body, _ := json.Marshal(revokeChildRequest{Reason: reason})
+	return signedDo(t, srv, priv, http.MethodPost,
+		"/admin/namespaces/"+ns+"/children/"+child+"/revoke", body, publisher.Precondition{})
+}
+
+func TestRevokingADelegationPublishesTheWithdrawalAndFreesTheNamespace(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+
+	resp := revokeDelegation(t, srv, priv, "beckn", "beckn.mobility", "operator error")
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke: %d %s", resp.StatusCode, raw)
+	}
+
+	// The withdrawal has to be visible on the public read surface. Someone
+	// holding a signature from this child needs to see that the grant behind it
+	// is gone, and a revocation only the operator can see does not do that.
+	pub, err := http.Get(srv.URL + "/dedi/delegations/beckn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Body.Close()
+	var out struct {
+		Data struct {
+			Children []map[string]any `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(pub.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Data.Children) != 1 {
+		t.Fatalf("children = %v", out.Data.Children)
+	}
+	kid := out.Data.Children[0]
+	if kid["state"] != delegation.StateRevoked {
+		t.Errorf("state = %v, want revoked", kid["state"])
+	}
+	if kid["revoked_at"] == "" || kid["reason"] != "operator error" {
+		t.Errorf("withdrawal not described: %v", kid)
+	}
+	// And the identity of who held it stays readable, because that is what an
+	// audit of a past signature from the child depends on.
+	if kid["child_key"] == "" {
+		t.Error("the child's key was erased by revocation")
+	}
+
+	// Re-minting is refused over a live delegation and permitted over a
+	// revoked one — otherwise revocation frees nothing and the operator is
+	// still stuck.
+	if _, d := mintOffer(t, srv, priv, "beckn", "beckn.mobility"); d["token"] == "" {
+		t.Error("could not re-delegate a revoked namespace")
+	}
+}
+
+func TestARevokedOfferCannotBeEnrolledAgainstEvenWithTheRightToken(t *testing.T) {
+	// The offer case, not the enrolled-child case: whoever holds the token
+	// still holds a valid secret, and only the state stands between them and
+	// the namespace.
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	revokeDelegation(t, srv, priv, "beckn", "beckn.mobility", "minted by mistake").Body.Close()
+
+	resp := enrol(t, srv, childEnrolment(token))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("enrolling against a revoked offer: %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestRevokingRequiresASignature(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+
+	resp := revokeDelegation(t, srv, nil, "beckn", "beckn.mobility", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — an unsigned caller must not be able to strip a child of its namespace", resp.StatusCode)
+	}
+}
+
+func TestRevokingSomethingThatWasNeverDelegatedIs404(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	resp := revokeDelegation(t, srv, priv, "beckn", "beckn.mobility", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestADelegationCannotBeRevokedTwiceOverTheAPI(t *testing.T) {
+	srv, _, priv := parentServer(t, "beckn")
+	token, _ := mintOffer(t, srv, priv, "beckn", "beckn.mobility")
+	enrol(t, srv, childEnrolment(token)).Body.Close()
+	revokeDelegation(t, srv, priv, "beckn", "beckn.mobility", "").Body.Close()
+
+	resp := revokeDelegation(t, srv, priv, "beckn", "beckn.mobility", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+}

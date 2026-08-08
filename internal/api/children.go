@@ -214,6 +214,85 @@ func (s *Server) enrolChild(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type revokeChildRequest struct {
+	Reason string `json:"reason"`
+}
+
+// revokeChild withdraws a delegation.
+//
+// Signed and scoped exactly like minting, because it is the same authority
+// exercised in the other direction: whoever can grant a slice of a namespace is
+// whoever can take it back, and nobody else.
+//
+// This is the transition that was missing when the rest of delegation shipped.
+// Without it an operator who delegated the wrong namespace, or to the wrong
+// party, had no supported move at all — re-minting is refused over a live
+// delegation precisely because it would hand the namespace to whoever redeemed
+// the new token, so the absence of revocation made the refusal a dead end
+// rather than a safety rail.
+func (s *Server) revokeChild(w http.ResponseWriter, r *http.Request) {
+	if _, ok := scoped(w, r); !ok {
+		return
+	}
+	parentNS, childNS := r.PathValue("namespace"), r.PathValue("child")
+
+	var req revokeChildRequest
+	// A body is optional here: revoking without stating a reason is worse
+	// record-keeping, not an invalid request, and refusing the call over it
+	// would push operators toward leaving a bad delegation in place.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	cur, err := s.currentDelegation(r.Context(), parentNS, childNS)
+	if errors.Is(err, store.ErrNotFound) {
+		notFound(w, fmt.Sprintf("%s is not delegated by %s", childNS, parentNS))
+		return
+	} else if err != nil {
+		internal(w, err)
+		return
+	}
+
+	next, err := delegation.Revoke(cur, req.Reason, time.Now().UTC())
+	if errors.Is(err, delegation.ErrRevoked) {
+		stateConflict(w, err)
+		return
+	} else if err != nil {
+		internal(w, err)
+		return
+	}
+
+	payload, _ := json.Marshal(next)
+	if _, err := s.writerAppend(r, "revocation:"+childNS, store.AppendInput{
+		EntryType: "record", Namespace: parentNS, Registry: delegation.Registry,
+		RecordName: childNS, PayloadRaw: payload,
+		// Same precondition as enrolment, for the mirror-image race: a
+		// revocation racing an enrolment must not silently overwrite the
+		// enrolment and leave a record that says "revoked" about a child the
+		// parent is meanwhile happily witnessing.
+		ExpectedPrevDigest: mustDigest(r.Context(), s, parentNS, childNS),
+		ExpectedPrevState:  "live",
+	}); err != nil {
+		s.writeFailure(w, r, err)
+		return
+	}
+
+	// Stop witnessing before answering. A witness loop still running against a
+	// revoked child would keep appending verdicts about a node this log has
+	// just said it no longer vouches for, which reads to anyone downstream as
+	// the parent standing behind it after all.
+	if s.OnDelegation != nil {
+		s.OnDelegation(next)
+	}
+	if s.Network != nil && cur.ChildURL != "" {
+		s.Network.Remove(cur.ChildURL)
+	}
+
+	ok(w, "Delegation revoked", map[string]any{
+		"namespace": next.Namespace, "state": next.State, "revoked_at": next.RevokedAt,
+		"note": "The child node keeps running and keeps its own log. What changed is that " +
+			"this node's log now records, verifiably, that the authority is withdrawn.",
+	})
+}
+
 // listDelegations answers who holds authority under this node's namespaces.
 func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 	rows, _, err := s.Store.QueryRecords(r.Context(), r.PathValue("namespace"), delegation.Registry, store.QueryFilters{})
@@ -242,6 +321,11 @@ func (s *Server) listDelegations(w http.ResponseWriter, r *http.Request) {
 			// the child's own key, exactly as it already can for a witness
 			// target — the parent stays out of the trust path.
 			"child_key": rec.ChildKey, "enrolled_at": rec.EnrolledAt,
+			// A revocation is published, not merely recorded. Someone holding a
+			// signature from this child needs to be able to see that the grant
+			// behind it was withdrawn, and when — which is only useful if the
+			// public read surface says so.
+			"revoked_at": rec.RevokedAt, "reason": rec.Reason,
 		})
 	}
 	ok(w, "Delegations retrieved successfully", map[string]any{

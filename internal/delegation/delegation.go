@@ -75,6 +75,7 @@ var (
 	ErrTokenStale  = errors.New("enrolment offer has expired")
 	ErrBadRequest  = errors.New("invalid delegation request")
 	ErrNotDelegate = errors.New("no delegation offer for that namespace")
+	ErrRevoked     = errors.New("delegation is already revoked")
 )
 
 // States a delegation record moves through. It only ever moves forward, and
@@ -239,6 +240,41 @@ func Redeem(rec Record, en Enrolment, now time.Time) (Record, error) {
 	// hash comparison that would otherwise still succeed.
 	out.TokenHash = ""
 	out.ExpiresAt = ""
+	return out, nil
+}
+
+// Revoke withdraws a delegation, and is the only way out of both live states.
+//
+// It applies to an unredeemed offer as well as an enrolled child, because those
+// are the same problem wearing different clothes: an outstanding offer is a
+// bearer credential for the namespace, and "I minted that by mistake" needs an
+// answer that does not consist of waiting an hour for TokenTTL and hoping
+// nobody found the token in the meantime.
+//
+// What it does *not* do is reach into the child. The child keeps its key, its
+// database and its log, and goes on serving — this node has no authority over
+// another operator's process and pretending otherwise in the API would be a
+// lie about what revocation means. What changes is that this node's log now
+// says, verifiably and with a timestamp, that the authority it once granted is
+// withdrawn. Relying parties check the grant; that is the whole mechanism.
+func Revoke(rec Record, reason string, now time.Time) (Record, error) {
+	if rec.State == StateRevoked {
+		return Record{}, ErrRevoked
+	}
+	out := rec
+	out.State = StateRevoked
+	out.RevokedAt = now.UTC().Format(time.RFC3339)
+	out.Reason = strings.TrimSpace(reason)
+	// An unredeemed offer must stop being redeemable now rather than at its
+	// expiry. Redeem would already refuse on the state check; clearing the hash
+	// as well means the record cannot be replayed into a redemption even if
+	// some later code path forgets to look at the state.
+	out.TokenHash = ""
+	out.ExpiresAt = ""
+	// ChildOrigin, ChildKey and ChildURL are deliberately kept. Who held this
+	// namespace, and until when, is precisely what someone auditing a past
+	// signature from that child needs — erasing it on revocation would destroy
+	// the evidence at the moment it starts to matter.
 	return out, nil
 }
 

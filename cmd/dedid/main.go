@@ -607,7 +607,7 @@ func serve() error {
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard,
 		PublicURL:    publicURL,
-		OnDelegation: func(rec delegation.Record) { childSup.Start(ctx, rec) }}
+		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) }}
 	if clu != nil {
 		srv.Writer = clu
 		srv.Cluster = clu.State

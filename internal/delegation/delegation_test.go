@@ -210,3 +210,55 @@ func TestParentOfStripsExactlyOneLevel(t *testing.T) {
 		t.Errorf("parentOf of a root = %q, want it unchanged", got)
 	}
 }
+
+func TestRevokingAnActiveDelegationKeepsTheEvidenceButEndsTheAuthority(t *testing.T) {
+	o := offerFor(t, "beckn", "beckn.mobility")
+	active, err := Redeem(o.Payload(), enrolment(o), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := Revoke(active, "operator error", now)
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if rec.State != StateRevoked || rec.RevokedAt == "" {
+		t.Errorf("not recorded as revoked: %+v", rec)
+	}
+	// Whoever held the namespace, and until when, is exactly what someone
+	// auditing an old signature from that child needs. Dropping it on
+	// revocation would destroy the evidence at the moment it starts to matter.
+	if rec.ChildKey != active.ChildKey || rec.ChildOrigin != active.ChildOrigin {
+		t.Errorf("the child's identity was erased by revocation: %+v", rec)
+	}
+	if rec.Reason != "operator error" {
+		t.Errorf("reason = %q", rec.Reason)
+	}
+}
+
+func TestRevokingAnUnredeemedOfferMakesItUnredeemable(t *testing.T) {
+	// The reason revocation covers offers as well as enrolled children: an
+	// outstanding offer is a bearer credential for the namespace, and "I minted
+	// that by mistake" must have an answer better than waiting out TokenTTL.
+	o := offerFor(t, "beckn", "beckn.mobility")
+	rec, err := Revoke(o.Payload(), "minted by mistake", now)
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if rec.TokenHash != "" {
+		t.Error("the token hash survived revocation, so the offer is still matchable")
+	}
+	if _, err := Redeem(rec, enrolment(o), now); !errors.Is(err, ErrNotDelegate) {
+		t.Fatalf("redeeming a revoked offer: %v, want ErrNotDelegate", err)
+	}
+}
+
+func TestADelegationCannotBeRevokedTwice(t *testing.T) {
+	o := offerFor(t, "beckn", "beckn.mobility")
+	rec, err := Revoke(o.Payload(), "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Revoke(rec, "", now); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("second revocation: %v, want ErrRevoked", err)
+	}
+}

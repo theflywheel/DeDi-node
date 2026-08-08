@@ -118,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
 		write("POST /admin/namespaces/{namespace}/children", s.createChild)
+		write("POST /admin/namespaces/{namespace}/children/{child}/revoke", s.revokeChild)
 		write("PUT /admin/namespaces/{namespace}/registries/{registry_name}", s.putRegistry)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/publish", s.publishRecord)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/revoke", s.revokeRecord)

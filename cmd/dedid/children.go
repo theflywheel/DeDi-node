@@ -50,6 +50,38 @@ func newChildSupervisor(s *store.Store, clu *cluster.Node, mon *network.Monitor)
 		running: map[string]context.CancelFunc{}}, nil
 }
 
+// Apply reconciles the witness loops with a delegation record, in whichever
+// direction the record has just moved.
+//
+// One entry point rather than two, because start and stop are the same decision
+// read off the same field: a caller that had to remember which one to invoke
+// would eventually forget on the revocation path, and the failure there is a
+// parent still publishing verdicts about a child it has stopped vouching for.
+func (cs *childSupervisor) Apply(ctx context.Context, rec delegation.Record) {
+	if rec.State == delegation.StateActive {
+		cs.Start(ctx, rec)
+		return
+	}
+	cs.Stop(rec.ChildOrigin)
+}
+
+// Stop ends the witness loop for one child. Safe to call for a child that was
+// never running, which is the common case on a revoked but never-enrolled
+// offer.
+func (cs *childSupervisor) Stop(origin string) {
+	if cs == nil || origin == "" {
+		return
+	}
+	cs.mu.Lock()
+	cancel, running := cs.running[origin]
+	delete(cs.running, origin)
+	cs.mu.Unlock()
+	if running {
+		cancel()
+		log.Printf("delegation: stopped witnessing %s — its delegation is no longer active", origin)
+	}
+}
+
 // Start begins witnessing one child and adds it to the network view.
 //
 // Idempotent by child origin: enrolment can be retried, and a child that

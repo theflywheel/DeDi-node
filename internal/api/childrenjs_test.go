@@ -55,7 +55,9 @@ globalThis.addEventListener = () => {};
 
 // A child that enrolled with markup in every field it controls.
 const hostile = {
-  namespace: 'beckn.evil',
+  // The namespace is carried into a data- attribute by the revoke link, so the
+  // quote that would close the attribute has to be neutralised as well.
+  namespace: 'beckn.evil" onmouseover="alert(5)',
   label: '<img src=x onerror=alert(1)>',
   state: 'active',
   child_origin: '"><script>alert(2)</` + `script>',
@@ -83,8 +85,17 @@ if (leaks.length) {
   console.log('LEAKED ' + JSON.stringify(leaks) + '\n' + html);
   process.exit(1);
 }
-// And it must actually have rendered the row, or this passes vacuously.
+// A raw quote, not an escaped one: data-rec="…&quot; onmouseover=&quot;…" is
+// a literal quote inside the value and is harmless. Only an unescaped " closes
+// the attribute and turns the rest into markup.
+if (/onmouseover="/i.test(html)) {
+  console.log('LEAKED attribute break out of a data- attribute\n' + html);
+  process.exit(1);
+}
+// And it must actually have rendered the row — with its revoke control — or
+// this passes vacuously.
 if (!html.includes('beckn.evil')) { console.log('NO ROW RENDERED\n' + html); process.exit(1); }
+if (!html.includes('data-action="unchild"')) { console.log('NO REVOKE CONTROL\n' + html); process.exit(1); }
 console.log('OK');
 })();
 `
