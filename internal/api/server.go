@@ -8,6 +8,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/dedifile"
 	"github.com/theflywheel/DeDi-node/internal/delegation"
+	"github.com/theflywheel/DeDi-node/internal/domainproof"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -107,6 +108,11 @@ type Server struct {
 	// switch rather than a prohibition.
 	AllowPrivateWebhookTargets bool
 
+	// DNSResolver resolves the TXT challenge that binds a namespace to its
+	// declared domain (internal/domainproof, task #56). nil uses the system
+	// resolver; tests supply their own zone rather than depending on public DNS.
+	DNSResolver domainproof.Resolver
+
 	reqs      counters  // requests served since the last flush (see counter.go)
 	startedAt time.Time // set by Handler
 
@@ -170,6 +176,13 @@ func (s *Server) Handler() http.Handler {
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
 		write("POST /admin/namespaces/{namespace}/children", s.createChild)
 		write("POST /admin/namespaces/{namespace}/children/{child}/revoke", s.revokeChild)
+		// Namespace-to-domain binding (task #56, docs/spec-gaps.md G8). On the
+		// write plane rather than the read plane on purpose: the verdict is
+		// this node's own bookkeeping, and the standard's lookup response
+		// schema declares no field to carry it.
+		write("GET /admin/namespaces/{namespace}/domain", s.showDomain)
+		write("POST /admin/namespaces/{namespace}/domain/verify", s.verifyDomain)
+		write("DELETE /admin/namespaces/{namespace}/domain", s.unverifyDomain)
 		write("PUT /admin/namespaces/{namespace}/registries/{registry_name}", s.putRegistry)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/publish", s.publishRecord)
 		write("POST /admin/namespaces/{namespace}/registries/{registry_name}/records/{record_name}/revoke", s.revokeRecord)

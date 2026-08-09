@@ -10,7 +10,7 @@ test that demonstrates them.
 
 Ordered by severity, which is also the order they should be fixed.
 
-**Status.** G1, G2, G4, G5 and G6 are fixed — see each entry. G3, G7 and G8
+**Status.** G1, G2, G4, G5, G6 and G8 are fixed — see each entry. G3 and G7
 remain open, and the first of those is a pull request rather than code. Every
 fix was re-verified by running it, and the full suite passes twice in a row
 under `make test`.
@@ -209,7 +209,29 @@ sooner if conformance as a *server* becomes a goal.
 
 ---
 
-## G8 — Namespace authority is asserted, not proven
+## G8 — Namespace authority is asserted, not proven — **fixed** (task #56)
+
+> `internal/domainproof` derives a per-(namespace, domain, node) TXT challenge
+> and checks it live; `internal/api/domain.go` records the verdict as a log
+> entry in the `_domains` bookkeeping namespace, so it replicates through Raft,
+> lands in the Merkle tree, and can be withdrawn by appending rather than by
+> rewriting. Namespace and domain stay separate identifiers — only the edge
+> between them became checkable.
+>
+> Two design points worth keeping: the token is **derived, not issued**, so
+> there is no pending-challenge table to expire or lose in a failover; and it is
+> **non-transferable**, so a TXT record proving one namespace proves nothing for
+> another namespace, another domain, or another node. Both are asserted by
+> tests, the second in two places.
+>
+> The verdict is deliberately **not** on `/dedi/lookup`. The standard's response
+> schema declares no field to carry it, and adding one would trade a closed gap
+> for a new out-of-spec extension; it lives on the write plane instead, and
+> `TestDomainBookkeepingStaysOffTheSpecSurface` fails if that changes.
+
+The original finding:
+
+
 
 Our `publisher.domain` is the node's origin while `namespace` is an independent
 identifier — deliberately, since a namespace may name a sector or community
