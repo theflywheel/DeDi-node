@@ -26,6 +26,7 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/api"
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/cluster"
+	"github.com/theflywheel/DeDi-node/internal/crawl"
 	"github.com/theflywheel/DeDi-node/internal/delegation"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
@@ -578,6 +579,44 @@ func serve() error {
 		}
 		go (&anchor.Anchorer{Store: s, Ledger: ledger, Interval: aiv}).Run(ctx)
 		log.Printf("anchoring checkpoints to %s every %s", backend, aiv)
+	}
+
+	// Optional: act as a DeDi *server* as well as a publisher — crawl other
+	// operators' published files and serve their records at the spec's
+	// {namespace}/{registry}/{record} triple (docs/spec-gaps.md G7, task #57).
+	//
+	// Off unless DEDI_CRAWL_DOMAINS names someone. Crawling is a "make this
+	// server fetch a URL" capability, so it stays something the operator turns
+	// on deliberately rather than a default every node inherits.
+	var crawler *crawl.Loop
+	if raw := os.Getenv("DEDI_CRAWL_DOMAINS"); strings.TrimSpace(raw) != "" {
+		civ, err := time.ParseDuration(envOr("DEDI_CRAWL_INTERVAL", "1h"))
+		if err != nil {
+			return fmt.Errorf("DEDI_CRAWL_INTERVAL: %w", err)
+		}
+		var domains []string
+		for _, d := range strings.Split(raw, ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				domains = append(domains, d)
+			}
+		}
+		crawler = &crawl.Loop{
+			Store: s, Writer: s, Domains: domains, Interval: civ,
+			Fetcher: &crawl.Fetcher{
+				// Same switch and same reasoning as webhook delivery: the node
+				// makes this request from inside the operator's network.
+				AllowPrivateTargets: os.Getenv("DEDI_ALLOW_PRIVATE_WEBHOOK_TARGETS") == "true",
+			},
+		}
+		if clu != nil {
+			// Crawled data is log data, so it goes through the leader like any
+			// other write; followers receive it by replication rather than each
+			// fetching the same directory to learn the same fact.
+			crawler.Writer = clu
+			crawler.IsWriter = clu.IsLeader
+		}
+		go crawler.Run(ctx)
+		log.Printf("crawling %d domain(s) every %s: %s", len(domains), civ, strings.Join(domains, ", "))
 	}
 
 	keys, wildcard, err := writePlaneConfig(os.Getenv("DEDI_PUBLISHER_KEYS"), os.Getenv("DEDI_WILDCARD_NAMESPACES"))

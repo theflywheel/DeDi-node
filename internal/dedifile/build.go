@@ -266,6 +266,14 @@ func Build(ctx context.Context, st *store.Store, cfg Config) (Manifest, []File, 
 		if strings.HasPrefix(k.ns, "_") {
 			continue // internal bookkeeping namespace; hidden from spec surfaces too
 		}
+		if isMirror(latest[entryKey{"namespace", k.ns, "", ""}].PayloadRaw) {
+			// Crawled from another publisher (internal/crawl), so it is theirs
+			// to publish and ours only to serve. Re-signing it under our key
+			// would present someone else's records as though this node
+			// authored them, and a crawler downstream would then attribute
+			// them to us — laundering, one hop at a time.
+			continue
+		}
 		// The namespace itself must still exist (any state); a registry entry
 		// cannot outlive its parent in this log, but guard against a
 		// concurrent read of a half-applied restore anyway.
@@ -418,4 +426,20 @@ func Build(ctx context.Context, st *store.Store, cfg Config) (Manifest, []File, 
 		return Manifest{}, nil, fmt.Errorf("sign manifest: %w", err)
 	}
 	return signedManifest, files, nil
+}
+
+// MirrorField marks a namespace in this node's log as data crawled from another
+// publisher (internal/crawl) rather than something this node speaks for.
+//
+// It lives here, not in internal/crawl, because this is where it is enforced:
+// crawl imports dedifile to verify signatures, so the constant has to sit on
+// the side of that dependency that does the skipping.
+const MirrorField = "mirror_of"
+
+// isMirror reports whether a namespace payload carries a non-empty MirrorField.
+func isMirror(payload []byte) bool {
+	var obj struct {
+		MirrorOf string `json:"mirror_of"`
+	}
+	return json.Unmarshal(payload, &obj) == nil && obj.MirrorOf != ""
 }

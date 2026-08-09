@@ -10,10 +10,9 @@ test that demonstrates them.
 
 Ordered by severity, which is also the order they should be fixed.
 
-**Status.** G1, G2, G4, G5, G6 and G8 are fixed — see each entry. G3 and G7
-remain open, and the first of those is a pull request rather than code. Every
-fix was re-verified by running it, and the full suite passes twice in a row
-under `make test`.
+**Status.** Every gap except G3 is fixed — see each entry. G3 is a pull request
+to the LFDT protocol repository rather than code. Every fix was re-verified by
+running it, and the full suite passes under `make test`.
 
 ---
 
@@ -190,22 +189,59 @@ upstream. Loosening is the safer default against a spec we do not control.
 
 ---
 
-## G7 — No crawler: we are a publisher, not yet a server
+## G7 — No crawler: we are a publisher, not yet a server — **fixed** (task #57)
 
-§13's **DeDi server** clause has four conditions. We meet one:
+> `internal/crawl` closes all four conditions. `Fetch` does the network and the
+> whole of §7.3 — manifest signature, digest over the bytes as served, each
+> file's own JWS, freshness, same-origin file URLs — and returns a value without
+> touching the log; `Ingest` takes that value and writes it. Keeping them apart
+> is what lets the verification be tested without a database and the storage
+> without a network.
+>
+> Three properties are worth more than the feature itself:
+>
+> - **Key pinning.** A manifest is self-signed, so its signature proves internal
+>   consistency, not authority. The first successful crawl pins the key; after
+>   that a silent key change stops the crawl with `ErrKeyChanged` and marks the
+>   source revoked, rather than ingesting whatever the new key vouches for. This
+>   is the monitor §14 lists as an open question.
+> - **No laundering.** `dedifile.Build` skips namespaces carrying `mirror_of`,
+>   so crawled records are served but never re-signed under our key. Without it,
+>   a crawler downstream would attribute another publisher's records to us, one
+>   hop at a time.
+> - **No overwriting.** A crawl may not write into a namespace this node
+>   publishes, or one mirrored from a different domain — otherwise any domain we
+>   crawl could take over our own directory by claiming the same namespace name.
+>
+> Ingestion is idempotent (an unchanged re-crawl appends nothing, so an hourly
+> loop does not grow the log at the crawl rate), records that leave a file are
+> withdrawn as revocations rather than deleted, and in a cluster only the leader
+> crawls. Off unless `DEDI_CRAWL_DOMAINS` names someone.
 
 | Condition | Us |
 |---|---|
-| verifies every ingested file end-to-end, rejects unauthenticated data | ✗ — ingests nothing |
-| serves publishers' records and signatures unaltered | ✗ |
-| exposes every ingested record at `{namespace}/{registry}/{record}` | ✗ |
+| verifies every ingested file end-to-end, rejects unauthenticated data | ✓ |
+| serves publishers' records and signatures unaltered | ✓ |
+| exposes every ingested record at `{namespace}/{registry}/{record}` | ✓ |
 | honors freshness and registry state | ✓ |
+
+The original finding:
+
 
 §1.3 makes "DeDi server" a distinct, optional role rather than a level of
 publisher conformance, so this is a deliberate scope decision, not an accident.
 It also has no present utility: nobody else publishes DeDi files yet, so a
 crawler would crawl an empty world. Worth building when the ecosystem exists, or
 sooner if conformance as a *server* becomes a goal.
+
+(The "empty world" argument is why this sat open. It was built anyway because
+our own nodes publish DeDi files, so the ecosystem it needs is one we already
+run — verified live between two independent nodes, each on its own logical
+database: a crawled record answering at its triple with `created_by:
+crawler:<origin>`, an unchanged re-crawl leaving the tree size at 7, an upstream
+revocation turning into a downstream 404 with history intact, and a rotated
+publisher key stopping the crawl with the pin unmoved and the new key's data
+never ingested.)
 
 ---
 
