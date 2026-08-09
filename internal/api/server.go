@@ -6,6 +6,7 @@ import (
 
 	"github.com/theflywheel/DeDi-node/internal/checkpoint"
 	"github.com/theflywheel/DeDi-node/internal/cluster"
+	"github.com/theflywheel/DeDi-node/internal/dedifile"
 	"github.com/theflywheel/DeDi-node/internal/delegation"
 	"github.com/theflywheel/DeDi-node/internal/network"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
@@ -108,6 +109,11 @@ type Server struct {
 
 	reqs      counters  // requests served since the last flush (see counter.go)
 	startedAt time.Time // set by Handler
+
+	// dedifileCache memoizes the signed file-publication build across requests
+	// that would produce identical bytes (task #60). Zero value is a usable,
+	// empty cache, so a Server built by hand in a test gets it too.
+	dedifileCache dedifile.Cache
 }
 
 func (s *Server) Handler() http.Handler {

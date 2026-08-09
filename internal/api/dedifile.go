@@ -124,7 +124,7 @@ func (s *Server) wellKnownIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.BaseURL, cfg.Domain = s.dedifileOrigin(r)
 	cfg.Freshness = dedifileFreshness
-	manifest, _, err := dedifile.Build(r.Context(), s.Store, cfg)
+	manifest, _, err := s.dedifileCache.Get(r.Context(), s.Store, cfg)
 	if err != nil {
 		internal(w, err)
 		return
@@ -161,18 +161,16 @@ func (s *Server) dedifileByNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.BaseURL, cfg.Domain = s.dedifileOrigin(r)
 	cfg.Freshness = dedifileFreshness
-	_, files, err := dedifile.Build(r.Context(), s.Store, cfg)
+	f, found, err := s.dedifileCache.File(r.Context(), s.Store, cfg, ns, registry)
 	if err != nil {
 		internal(w, err)
 		return
 	}
-	for _, f := range files {
-		if f.Namespace == ns && f.Registry.Name == registry {
-			writeJSONWithETag(w, r, f, f.NextUpdate)
-			return
-		}
+	if !found {
+		notFound(w, "dedi file")
+		return
 	}
-	notFound(w, "dedi file")
+	writeJSONWithETag(w, r, f, f.NextUpdate)
 }
 
 // registryFromFilename extracts "foo" from the RECOMMENDED "dedi.foo.json"
