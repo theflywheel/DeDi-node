@@ -1,0 +1,13 @@
+# The Prometheus that scrapes the DeDi nodes, provisioned rather than clicked.
+#
+# Reached over the project's private network, so no public hop and nothing to
+# reconfigure if the Prometheus service's public domain changes.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus.railway.internal:9090
+    isDefault: true
+    editable: false

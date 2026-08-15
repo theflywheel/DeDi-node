@@ -1,0 +1,15 @@
+# Load dashboards from the image rather than from the volume.
+#
+# The dashboard that mattered on the old Grafana lived only on a disk that
+# cannot move between Railway projects, and was lost with it. Provisioning from
+# a file in this repository means the next move costs nothing.
+apiVersion: 1
+
+providers:
+  - name: dedi
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
