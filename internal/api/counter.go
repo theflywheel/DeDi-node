@@ -96,6 +96,7 @@ func selfTraffic(path string) bool {
 		path == "/admin" || path == "/admin/" ||
 		path == "/verify" || path == "/verify/" ||
 		path == "/dedi/stats" || path == "/dedi/network" || path == "/healthz" ||
+		path == "/metrics" ||
 		strings.HasPrefix(path, "/static/")
 }
 

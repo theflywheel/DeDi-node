@@ -328,6 +328,19 @@ type State struct {
 	// committed. Persistently non-zero is the signal that a replica is falling
 	// behind, which a bare "is it up" check would miss entirely.
 	LagEntries uint64 `json:"lag_entries"`
+	// LastContactSeconds is how long since the leader last reached this
+	// follower, and it is the measure LagEntries cannot give.
+	//
+	// A partitioned follower has a frozen commit index as well as a frozen
+	// applied one, so it reports lag_entries 0 — perfectly caught up with a
+	// leader it stopped hearing from an hour ago — while serving reads that are
+	// arbitrarily stale. The two together separate "behind on applying what it
+	// has" from "no longer being told anything".
+	//
+	// Zero on the leader, which is in contact with itself by definition, and
+	// -1 on a follower that has never heard from a leader at all, so "never" is
+	// distinguishable from "just now".
+	LastContactSeconds float64 `json:"last_contact_seconds"`
 }
 
 func (n *Node) State() State {
@@ -344,6 +357,14 @@ func (n *Node) State() State {
 	}
 	if st.CommitIndex > st.AppliedIndex {
 		st.LagEntries = st.CommitIndex - st.AppliedIndex
+	}
+	switch last := n.raft.LastContact(); {
+	case st.Role == "leader":
+		st.LastContactSeconds = 0
+	case last.IsZero():
+		st.LastContactSeconds = -1
+	default:
+		st.LastContactSeconds = time.Since(last).Seconds()
 	}
 	if cfg := n.raft.GetConfiguration(); cfg.Error() == nil {
 		for _, srv := range cfg.Configuration().Servers {

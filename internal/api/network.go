@@ -94,6 +94,10 @@ func (s *Server) clusterView() map[string]any {
 		"commit_index":  st.CommitIndex,
 		"applied_index": st.AppliedIndex,
 		"lag_entries":   st.LagEntries,
+		// Lag alone cannot see a partitioned follower: its commit index freezes
+		// along with its applied one, so it reads as perfectly caught up with a
+		// leader it stopped hearing from long ago.
+		"last_contact_seconds": st.LastContactSeconds,
 	}
 }
 

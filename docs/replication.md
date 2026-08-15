@@ -219,13 +219,38 @@ leader applied index minus this replica's. The UI does exactly that, because a
 browser has asked every replica and can compare them; each half is still that
 replica's own claim about itself.
 
-**Open gap:** the Kener replication monitor reads `lag_entries` from a single
-URL and therefore shares the blind spot — it cannot compare across replicas from
-one endpoint. Closing it properly means either the node reporting its peers'
-applied indices (it already polls peers for the witness ring, so the machinery
-exists) or a check that queries several replicas. Until then, the cross-replica
-comparison lives only in the UI, and the monitor should be read as "this replica
-is applying what it receives", not "this replica is current". An unreplicated node reports
+**Closed as of task #30**, in the two halves the gap actually had.
+
+*Scrape every replica, not one URL.* `GET /metrics` serves the same numbers in
+Prometheus text exposition format, labelled by `node_id`. A monitor scraping all
+three replicas can then do the subtraction the UI does, as an alert expression
+rather than as a page someone has to have open:
+
+```promql
+max(dedi_cluster_applied_index) - dedi_cluster_applied_index > 100
+```
+
+That is the cross-replica comparison; it needs several scrape targets, which is
+the normal shape of a monitor, not several endpoints on one node.
+
+*And a signal that works from one URL.* `dedi_cluster_last_contact_seconds` is
+how long since the leader last reached this follower. It is the measure
+`lag_entries` cannot give: a partitioned replica freezes its commit index
+alongside its applied one, so it reports zero lag while its view goes
+arbitrarily stale — the failure above, where a replica sat 40 entries behind and
+called itself caught up. Time since last contact keeps climbing regardless of
+what the replica believes about its own progress. It is `0` on the leader, which
+is in contact with itself, and `-1` on a replica that has never heard from a
+leader at all, so "never" cannot be misread as "just now".
+
+`/healthz` carries `role`, `has_leader`, `lag_entries` and
+`last_contact_seconds` too, for probes that already scrape it. Neither endpoint
+*fails* on lag: a follower that is behind still answers reads correctly, just
+from an older view, and failing its health check would pull a working replica out
+of the load balancer and push its traffic onto the replicas already struggling.
+Reporting is the node's job; deciding what is too far behind is the alert rule's.
+
+An unreplicated node reports
 `{"enabled": false, "size": 1}` explicitly — absent would be
 indistinguishable from a node too old to report it.
 

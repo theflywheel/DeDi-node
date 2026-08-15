@@ -157,6 +157,11 @@ func (s *Server) Handler() http.Handler {
 	// instead; remove once that rollout is complete.
 	mux.HandleFunc("POST /dedi/enrol", s.deprecatedEnrolChild)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	// Operational, not part of the read plane: replica lag and peer
+	// reachability in the format a scraper already speaks, so a replica falling
+	// behind pages someone instead of waiting to be noticed on a dashboard
+	// (task #30).
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /{$}", s.explorer)
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)

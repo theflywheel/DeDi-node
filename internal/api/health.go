@@ -53,5 +53,22 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		body["checkpoint_age_seconds"] = int64(time.Since(at).Seconds())
 	}
 
+	// Replication state is reported here too, and for the same reason it is
+	// reported rather than gated on. A follower that is behind still answers
+	// reads correctly — just from an older view — so failing its health check
+	// would pull a working replica out of the load balancer and send its
+	// traffic to the ones already struggling to keep up. What an operator needs
+	// is for the numbers to be somewhere a probe can see them; /metrics carries
+	// the same two, in the format an alert rule is written against.
+	if s.Cluster != nil {
+		st := s.Cluster()
+		body["cluster"] = map[string]any{
+			"role":                 st.Role,
+			"has_leader":           st.LeaderID != "",
+			"lag_entries":          st.LagEntries,
+			"last_contact_seconds": st.LastContactSeconds,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, body)
 }

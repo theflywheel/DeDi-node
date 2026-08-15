@@ -416,4 +416,29 @@ func TestClusterStateDescribesMembershipAndLag(t *testing.T) {
 	if st.AppliedIndex == 0 {
 		t.Error("applied index is 0 after appends")
 	}
+	// The leader is in contact with itself by definition, so its own
+	// last-contact is zero rather than the "never heard from a leader" sentinel.
+	if st.LastContactSeconds != 0 {
+		t.Errorf("leader reports last_contact_seconds %v, want 0", st.LastContactSeconds)
+	}
+
+	// A follower's last contact is the signal lag_entries cannot give. A
+	// replica cut off from its leader freezes its commit index alongside its
+	// applied one, so it reports zero lag while serving an ever-staler view;
+	// only the time since it last heard anything distinguishes that from
+	// genuinely being caught up.
+	for _, r := range rs {
+		st := r.node.State()
+		if st.Role == "leader" {
+			continue
+		}
+		if st.LastContactSeconds < 0 {
+			t.Errorf("follower %s reports last_contact_seconds %v, but it is in a live cluster",
+				st.NodeID, st.LastContactSeconds)
+		}
+		if st.LastContactSeconds > 10 {
+			t.Errorf("follower %s last heard from the leader %vs ago in a healthy cluster",
+				st.NodeID, st.LastContactSeconds)
+		}
+	}
 }
