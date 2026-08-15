@@ -10,9 +10,10 @@ test that demonstrates them.
 
 Ordered by severity, which is also the order they should be fixed.
 
-**Status.** Every gap except G3 is fixed — see each entry. G3 is a pull request
-to the LFDT protocol repository rather than code. Every fix was re-verified by
-running it, and the full suite passes under `make test`.
+**Status.** Every gap that is ours to fix is fixed — see each entry. G3 is
+deferred by decision: it is a pull request against the LFDT protocol repository
+rather than code, and the list it adds us to confers no authority. Every fix was
+re-verified by running it, and the full suite passes under `make test`.
 
 ---
 
@@ -104,7 +105,16 @@ under parallel `./...`; give each its own schema so the suite is honest at
 
 ---
 
-## G3 — Not discoverable: absent from any `domains.txt`
+## G3 — Not discoverable: absent from any `domains.txt` — **deferred by decision**
+
+> Open on purpose, not by oversight. The list is explicitly not a trust anchor —
+> "any party may add any domain, and doing so confers no authority" — so being
+> absent costs us reachability and nothing else. It is also the one gap we
+> cannot close in this repository: it is a pull request against the LFDT
+> protocol repo, and it needs a decision about which of our domains is the
+> network's front door before it can be written.
+
+
 
 §13's publisher clause requires being "discoverable via the list and/or crawl."
 We satisfy every other publisher condition and fail this one: our domain appears
