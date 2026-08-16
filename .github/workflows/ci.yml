@@ -56,11 +56,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://dedi:dedi@localhost:5432/dedi?sslmode=disable
 
-      # Named separately so a conformance regression is legible in the checks
-      # list rather than buried in the full run. It has already passed above;
-      # this re-runs only that test and prints its report.
+      # conformance/ is a module of its own, so ./... above does not reach it.
+      # That separation is what keeps the conformance suite out of the root
+      # module's dependency graph, and therefore out of the released image.
       - name: conformance against the published suite
-        run: go test ./conformance/ -run TestAgainstTheStandardSuite -v
+        working-directory: conformance
+        run: go test ./... -v
         env:
           TEST_DATABASE_URL: postgres://dedi:dedi@localhost:5432/dedi?sslmode=disable
 
@@ -68,7 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Deliberately no submodules: nothing outside tests reads the spec, so
-      # the image must build without them. If that ever stops being true this
-      # job is what catches it.
+      # Deliberately no submodules. Nothing outside tests reads the spec, and
+      # the conformance suite lives in its own nested module, so the root
+      # go.mod has no path-replaced dependency for `go mod download` to fail
+      # on. This job is what catches it if either stops being true — it did
+      # exactly that once already.
       - run: docker build -t dedid:ci .

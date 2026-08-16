@@ -47,10 +47,13 @@ globalThis.document = {
 };
 globalThis.location = { hash: '', origin: 'http://node.example' };
 globalThis.addEventListener = () => {};
-globalThis.crypto = { subtle: {
+// defineProperty, not assignment: Node 20+ exposes crypto as a getter-only
+// global, where assigning throws. The stub still has to win, because the real
+// WebCrypto would want a real key.
+Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: {
   digest: async () => new Uint8Array(32),
   sign: async () => new Uint8Array(64),
-} };
+} } });
 
 const hostile = {
   // The id is carried into a data- attribute by the unsubscribe link, so the
@@ -146,7 +149,7 @@ globalThis.document = {
 };
 globalThis.location = { hash: '', origin: 'http://node.example' };
 globalThis.addEventListener = () => {};
-globalThis.crypto = { subtle: { digest: async () => new Uint8Array(32), sign: async () => new Uint8Array(64) } };
+Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: { digest: async () => new Uint8Array(32), sign: async () => new Uint8Array(64) } } });
 globalThis.fetch = () => Promise.resolve({
   ok: true, json: () => Promise.resolve({ data: {
     // A queue that looks perfectly healthy behind a loop that is not running.
