@@ -1,5 +1,7 @@
 // Package conformance measures a running DeDi read-plane handler against the
-// vendored DeDi standard at docs/spec/lfdt/api/openapi.yaml.
+// DeDi standard at docs/spec/lfdt/api/openapi.yaml, which is a pinned git
+// submodule of the upstream standard repository — so these tests need
+// `git submodule update --init` and will not build a spec of their own.
 //
 // The spec file is the source of truth: this package parses it at test time
 // (no code generation, no hand-copied route list) and, for every path it

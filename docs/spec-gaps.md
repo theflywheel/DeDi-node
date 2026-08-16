@@ -3,7 +3,7 @@
 Companion to [`conformance.md`](conformance.md), which records what we *do*
 implement. This file records what we do not, and what we implement wrongly.
 
-Measured against the vendored spec at [`spec/lfdt/`](spec/lfdt/), commit
+Measured against the spec submodule at [`spec/lfdt/`](spec/lfdt/), commit
 `52e120d`. Every claim here was checked by running code or reading the spec
 text, never inferred from our own docs — the entries marked **proven** carry the
 test that demonstrates them.

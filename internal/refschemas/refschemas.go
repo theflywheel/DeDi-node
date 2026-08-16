@@ -10,11 +10,11 @@
 // text ships with the binary rather than being retyped per deployment.
 //
 // The schema files under ./schemas are a copy of docs/spec/lfdt/schemas, not
-// a symlink or vendored reference to it: go:embed cannot reach outside its
-// package directory, so `go generate` (see generate.go) copies the five
-// registry schemas in on demand. docs/spec/lfdt/schemas is otherwise the
-// authoritative, read-only vendored copy of the LFDT spec — do not edit it,
-// and do not edit ./schemas by hand either; regenerate instead.
+// a symlink or reference to it: go:embed cannot reach outside its package
+// directory, so `go generate` (see generate.go) copies the five registry
+// schemas in on demand. docs/spec/lfdt is a git submodule holding the LFDT
+// spec itself, pinned to a commit and read-only — do not edit it, and do not
+// edit ./schemas by hand either; regenerate instead.
 package refschemas
 
 import (

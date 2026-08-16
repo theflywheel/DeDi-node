@@ -3,9 +3,11 @@
 **Standard of record:** `LF-Decentralized-Trust-labs/decentralized-directory-protocol`,
 Apache-2.0; `api/openapi.yaml` is DeDi API v2.0.0, MIT.
 
-Vendored at commit `52e120d` under [`spec/lfdt/`](spec/lfdt/) — every claim below
-is measured against that pinned copy, not against a moving `main`. See
-[`spec/README.md`](spec/README.md) for provenance and how to refresh.
+Tracked as a git submodule at [`spec/lfdt/`](spec/lfdt/), pinned to commit
+`52e120d` — every claim below is measured against that pin, not against a
+moving `main`. See [`spec/README.md`](spec/README.md) for provenance and how to
+move the pin. A fresh checkout needs `git submodule update --init --recursive`
+before any of this can be re-verified.
 
 Not to be confused with `nfh-trust-labs/docs/openAPI.yaml` (73 paths, vendored
 at [`spec/dedi-global/`](spec/dedi-global/)), which is the **dedi.global hosted

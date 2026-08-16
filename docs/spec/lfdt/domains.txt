@@ -1,3 +1,0 @@
-# DeDi discovery list — root. Maintained in this repository.
-# An entry is a publisher domain, or the URL of another domains.txt to include.
-# head: 2026-07-21T00:00:00Z
