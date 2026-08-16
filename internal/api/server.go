@@ -63,6 +63,12 @@ type Server struct {
 	// the write plane is closed; see serve().
 	WildcardNamespaces []string
 
+	// AdminAuth gates the admin surface at the deployment level: the operator
+	// of this node, as opposed to the publishers whose keys sign the writes.
+	// nil leaves the surface reachable to anyone, with the signature still the
+	// only thing that can actually change the log.
+	AdminAuth *AdminAuth
+
 	// PublicURL is this node's externally reachable base URL. Behind a proxy
 	// the request's own Host is the proxy's, so a child told to enrol against
 	// it cannot reach us; this is what the child is handed instead.
@@ -168,15 +174,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
-	mux.HandleFunc("GET /admin", s.admin)
-	mux.HandleFunc("GET /admin/{$}", s.admin)
+	// The console is only served where there is something for it to drive. On a
+	// read-only node it is a form soliciting a private key for a write plane
+	// that does not exist — attack surface with no counterpart.
+	if s.writeEnabled() {
+		mux.Handle("GET /admin", s.AdminAuth.gate(http.HandlerFunc(s.admin)))
+		mux.Handle("GET /admin/{$}", s.AdminAuth.gate(http.HandlerFunc(s.admin)))
+	}
 
 	// Publisher plane. Registered only when the node holds publisher keys, so a
 	// read-only node has no write surface to probe at all (governance.md:
 	// "enforcement today is structural").
 	if s.writeEnabled() {
+		// Two gates, and they answer different questions. AdminAuth asks
+		// whether you may reach this node's admin surface at all; the
+		// signature asks who is writing and whether that key may write here,
+		// and it is what puts publisher:<kid> on the resulting version. A
+		// shared password cannot attribute a write, so it never replaces the
+		// signature — it only fronts it.
 		write := func(pattern string, h http.HandlerFunc) {
-			mux.Handle(pattern, s.Auth.Require(h, denyWrite))
+			mux.Handle(pattern, s.AdminAuth.gate(s.Auth.Require(h, denyWrite)))
 		}
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
 		write("POST /admin/namespaces/{namespace}/children", s.createChild)
