@@ -11,7 +11,6 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	golang.org/x/crypto v0.7.0
 	golang.org/x/mod v0.38.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -40,7 +39,6 @@ require (
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mimoo/StrobeGo v0.0.0-20220103164710-9a04d6ca976b // indirect
 	github.com/pierrec/xxHash v0.1.5 // indirect
-	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/rs/cors v1.8.2 // indirect
 	github.com/vedhavyas/go-subkey/v2 v2.0.0 // indirect
 	go.etcd.io/bbolt v1.3.5 // indirect

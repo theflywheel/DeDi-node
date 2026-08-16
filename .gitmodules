@@ -2,3 +2,6 @@
 	path = docs/spec/lfdt
 	url = https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol.git
 	branch = main
+[submodule "third_party/dedi-conformance"]
+	path = third_party/dedi-conformance
+	url = https://github.com/theflywheel/dedi-conformance.git

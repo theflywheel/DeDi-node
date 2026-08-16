@@ -2,7 +2,9 @@
 // verify.js is loaded as-is, so this tests the file both pages actually execute.
 import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
-globalThis.crypto = webcrypto;
+// Node 18 has no global crypto, so it needs filling in; Node 20+ has one and
+// defines it as a getter, where assigning throws. Only fill the gap.
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 const src = readFileSync(process.argv[3] || 'internal/api/static/verify.js', 'utf8');
 const mod = await import('data:text/javascript,' + encodeURIComponent(
