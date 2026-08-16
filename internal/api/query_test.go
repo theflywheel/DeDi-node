@@ -91,6 +91,34 @@ func TestQueryFiltersAndPagination(t *testing.T) {
 	getJSON(t, srv.URL+"/dedi/query/nope", http.StatusNotFound)
 }
 
+func TestQueryStatusStateFilterValidation(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedQuery(t, s)
+
+	cases := []struct {
+		name       string
+		path       string
+		wantStatus int
+	}{
+		// namespace query: `status` param, spec enum [active, inactive]
+		{"namespace status spec value", "/dedi/query/flywheel?status=active", http.StatusOK},
+		{"namespace status stored value", "/dedi/query/flywheel?status=revoked", http.StatusOK},
+		{"namespace status garbage", "/dedi/query/flywheel?status=bogus", http.StatusBadRequest},
+		// registry query: `state` param, spec enum [live]
+		{"registry state spec value", "/dedi/query/flywheel/participants?state=live", http.StatusOK},
+		{"registry state stored value", "/dedi/query/flywheel/participants?state=draft", http.StatusOK},
+		{"registry state garbage", "/dedi/query/flywheel/participants?state=bogus", http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := getJSON(t, srv.URL+tc.path, tc.wantStatus)
+			if tc.wantStatus == http.StatusBadRequest && m["code"] != "INVALID_REQUEST" {
+				t.Fatalf("invalid filter code: %v", m["code"])
+			}
+		})
+	}
+}
+
 func TestQueryPageSizeCapEchoedCorrectly(t *testing.T) {
 	srv, s, _ := testServer(t)
 	seedQuery(t, s)

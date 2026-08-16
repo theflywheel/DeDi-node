@@ -1,0 +1,49 @@
+{
+  "dedi_version": "0.1",
+  "type": "dedi-file",
+  "source_url": "https://example.org/dedi/dedi.public-keys.json",
+  "next_update": "2026-07-15T10:00:00Z",
+  "publisher": {
+    "domain": "example.org",
+    "key": {
+      "kid": "key-1",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+    }
+  },
+  "namespace": "example.org",
+  "registry": {
+    "name": "public-keys",
+    "schema": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/public_key.json",
+    "state": "live",
+    "updated_at": "2026-07-08T10:00:00Z"
+  },
+  "records": [
+    {
+      "record_name": "auth-service",
+      "details": {
+        "public_key_id": "example.org:auth",
+        "publicKey": "MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZk",
+        "keyType": "ed25519",
+        "keyFormat": "base64",
+        "entity": { "name": "Auth Service", "url": "https://example.org/auth" }
+      }
+    },
+    {
+      "record_name": "signing-service",
+      "details": {
+        "public_key_id": "example.org:signing",
+        "publicKey": "MCowBQYDK2VwAyEAo1RipVR3n0kf1c4mQpXfBc9M8sHhz3s0m3aPq0J0kQY",
+        "keyType": "ed25519",
+        "keyFormat": "base64",
+        "entity": { "name": "Signing Service", "url": "https://example.org/sign" }
+      }
+    }
+  ],
+  "proof": {
+    "verification_method": "key-1",
+    "canonicalization": "JCS",
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..ILLUSTRATIVE_DETACHED_SIGNATURE_NOT_CRYPTOGRAPHICALLY_VALID"
+  }
+}

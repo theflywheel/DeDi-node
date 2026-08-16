@@ -43,10 +43,35 @@ var sortExprs = map[string]string{
 	"status": "state ASC, name ASC",
 }
 
+// validStates whitelists the state/status filter value. The spec's own
+// enums are inconsistent (docs/conformance.md nit #1): namespace-query
+// `status` is constrained to [active, inactive] and registry-query `state`
+// to [live], but the entities we actually store use [active, archived,
+// revoked] (namespaces/registries) and [draft, live, suspended, revoked,
+// expired] (records). `inactive` never appears as a stored state. Rather
+// than pick one side and break either spec-conformant clients or existing
+// working queries, we validate against the union of both: the spec's
+// query enums plus every state value we ever write.
+var validStates = map[string]bool{
+	// spec query enums (openapi.yaml:255, 369)
+	"active":   true,
+	"inactive": true,
+	"live":     true,
+	// stored entity states (openapi.yaml:706, 741, 784)
+	"archived":  true,
+	"revoked":   true,
+	"suspended": true,
+	"expired":   true,
+	"draft":     true,
+}
+
 func (f *QueryFilters) normalize() (orderBy string, limit, offset int, err error) {
 	orderBy, okSort := sortExprs[f.Sort]
 	if !okSort {
 		return "", 0, 0, fmt.Errorf("invalid sort %q: %w", f.Sort, ErrInvalidFilter)
+	}
+	if f.State != nil && !validStates[*f.State] {
+		return "", 0, 0, fmt.Errorf("invalid state %q: %w", *f.State, ErrInvalidFilter)
 	}
 	if f.Page < 1 {
 		f.Page = 1

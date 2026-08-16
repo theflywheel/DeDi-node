@@ -1,0 +1,116 @@
+{
+  "uid": "dedi-nodes",
+  "title": "DeDi nodes",
+  "tags": ["dedi"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Nodes serving",
+      "description": "dedi_up is 1 only when the node can reach its database. A node answering HTTP while failing every lookup reads as 0 here.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(dedi_up)", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "green", "value": 6 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cluster leader",
+      "description": "Should be exactly 1. Zero means no writes are possible; more than one means a split brain.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(dedi_cluster_is_leader)", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Entries behind the furthest-ahead replica",
+      "description": "The cross-replica comparison a single replica cannot make about itself. Its own lag_entries can read 0 while this climbs.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "dedi:cluster_entries_behind_leader", "legendFormat": "{{node}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Seconds since the leader last made contact",
+      "description": "The signal lag_entries cannot give: a partitioned replica freezes its commit index alongside its applied one and reports zero lag. 0 on the leader, -1 if it has never heard from one.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "dedi_cluster_last_contact_seconds", "legendFormat": "{{node}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Checkpoint age",
+      "description": "Reported, not gated: the checkpointer writes nothing while the tree is unchanged, so an old checkpoint on a quiet registry is correct. -1 means the node has never signed one.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "dedi_checkpoint_age_seconds", "legendFormat": "{{node}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Log entries",
+      "description": "Entries in each node's append-only log. The ring nodes are independent operators, so their sizes differ legitimately.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "dedi_log_entries", "legendFormat": "{{node}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests served",
+      "description": "Rate by status class. The dashboard's own polling and health probes are excluded at the node.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (status_class) (rate(dedi_requests_total[5m]))",
+          "legendFormat": "{{status_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Peer reachability",
+      "description": "Each node's own view of its peers. A ring whose members have quietly become unreachable still renders as a ring in the UI.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "dedi_peer_reachable", "legendFormat": "{{node}} -> {{peer}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

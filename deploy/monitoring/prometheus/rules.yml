@@ -1,0 +1,105 @@
+# Recording and alerting rules for the DeDi nodes.
+#
+# The recording rule is the point of task #30. A replica's own lag_entries is
+# commit minus applied *on that replica* — the apply window, microseconds — so a
+# replica that has stopped receiving entries has commit == applied and
+# truthfully reports zero while drifting arbitrarily far behind. Only a
+# comparison across replicas answers "how far behind the leader is this one",
+# and only something scraping all of them can make it.
+
+groups:
+  - name: dedi-replication
+    rules:
+      # Entries behind the furthest-ahead replica. This is the subtraction the
+      # network view does in a browser, made available to an alert.
+      #
+      # `max by (job)` and `group_right` are both load-bearing. Aggregating with
+      # `without (node, instance)` drops exactly the labels the subtraction then
+      # has to match on, so every sample fails to pair and the rule evaluates
+      # green while producing nothing — a silently empty series that an alert
+      # would sit on top of forever.
+      - record: dedi:cluster_entries_behind_leader
+        expr: max by (job) (dedi_cluster_applied_index)
+              - on (job) group_right dedi_cluster_applied_index
+
+      - alert: DediReplicaBehindLeader
+        expr: dedi:cluster_entries_behind_leader > 100
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.node }} is {{ $value }} entries behind the leader"
+          description: >-
+            The replica is applying, but not keeping up. Reads it serves are
+            correct and stale. Check its database and the leader's write rate.
+
+      # The failure lag cannot see: a replica cut off from its leader freezes
+      # its commit index alongside its applied one and reports zero lag while
+      # its view goes arbitrarily stale.
+      - alert: DediReplicaOutOfContact
+        expr: dedi_cluster_last_contact_seconds > 60
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.node }} has not heard from the leader in {{ $value }}s"
+          description: >-
+            Its lag_entries may well read zero — that is what this alert exists
+            to catch. Check the private network and whether a leader exists.
+
+      # Brief during an election and normal; sustained means no writes are
+      # possible at all, so the alert is on the duration.
+      - alert: DediClusterHasNoLeader
+        expr: dedi_cluster_enabled == 1 and dedi_cluster_has_leader == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "the {{ $labels.job }} cluster has no leader"
+
+  - name: dedi-nodes
+    rules:
+      - alert: DediNodeDown
+        expr: up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.node }} is not answering scrapes"
+
+      - alert: DediNodeCannotReachDatabase
+        expr: dedi_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.node }} is running but cannot reach its database"
+          description: >-
+            Every read path goes through the database, so this node answers its
+            static pages while failing every lookup.
+
+      # A node that has never signed reports -1, which is a different fault from
+      # a stale checkpoint and is excluded here rather than folded in. The
+      # threshold is deliberately loose: the checkpointer writes nothing while
+      # the tree is unchanged, so on a quiet registry an old checkpoint is
+      # correct, and only a very old one suggests the signer itself is stuck.
+      - alert: DediCheckpointStale
+        expr: dedi_checkpoint_age_seconds > 3600
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.node }} has not signed a checkpoint in an hour"
+
+      - alert: DediNodeNeverSignedACheckpoint
+        expr: dedi_checkpoint_age_seconds == -1
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.node }} has never published a signed checkpoint"
+          description: >-
+            The node is healthy but unverifiable: nothing it serves can be
+            checked against a signature yet.
+
+      # This node's own view of its peers. A ring whose members have quietly
+      # become unreachable still renders as a ring in the UI.
+      - alert: DediPeerUnreachable
+        expr: dedi_peer_reachable == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.node }} cannot reach peer {{ $labels.peer }}"

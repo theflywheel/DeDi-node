@@ -1,0 +1,5 @@
+# head: 2026-07-21T00:00:00Z
+example.org
+univ.edu
+gleif.org
+https://lists.example.net/domains.txt

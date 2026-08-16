@@ -1,0 +1,75 @@
+{
+  "$id": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/dedi-manifest.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeDi Manifest (/.well-known/dedi.index.json)",
+  "description": "A signed document served at a publisher's /.well-known/dedi.index.json. It declares the publisher's current signing key(s) and lists its DeDi files. This is THE AUTHORITY: a DeDi file is authentic only if its publisher.key appears in this manifest's keys. Trust is rooted in the manifest being served under the domain's TLS at the well-known path (did:web-style). See docs/publishing-dedi-files.md. NOTE: the schema $id points at the mutable main branch and must be pinned to a release tag before release.",
+  "type": "object",
+  "required": ["dedi_version", "domain", "keys", "updated_at", "next_update", "files", "proof"],
+  "additionalProperties": false,
+  "properties": {
+    "dedi_version": { "type": "string" },
+    "type": { "type": "string", "const": "dedi-manifest", "description": "Optional discriminator." },
+    "domain": { "type": "string", "description": "The publisher domain. Self-identifies a relayed copy; a verifier checks that the serving host matches this." },
+    "name": { "type": "string", "description": "Optional human label." },
+    "keys": {
+      "type": "array",
+      "description": "The publisher's current signing key(s) as RFC 7517 JWKs. Presence in this array = valid. Rotation adds/removes; revocation removes.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["kid", "kty"],
+        "additionalProperties": true,
+        "properties": {
+          "kid": { "type": "string" },
+          "kty": { "type": "string" },
+          "crv": { "type": "string" },
+          "x": { "type": "string" },
+          "y": { "type": "string" },
+          "n": { "type": "string" },
+          "e": { "type": "string" }
+        }
+      }
+    },
+    "updated_at": { "type": "string", "format": "date-time", "description": "When the keys or file list last actually changed." },
+    "next_update": { "type": "string", "format": "date-time", "description": "How long a verifier may cache these keys before re-fetching; also the revocation-propagation bound." },
+    "files": {
+      "type": "array",
+      "description": "The DeDi files (registries) this publisher offers. An entry is a reference (the file is hosted at url, committed to by digest) or an inline entry (a complete DeDi file object embedded verbatim), never both. Registry names MUST be unique across entries.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Referenced entry: the DeDi file is hosted at url.",
+            "required": ["registry", "url", "digest"],
+            "additionalProperties": false,
+            "properties": {
+              "registry": { "type": "string", "description": "Registry name." },
+              "url": { "type": "string", "format": "uri", "description": "Absolute URL where the DeDi file is hosted; may be any host the publisher controls, including one different from the manifest's own domain. Authoritative for location: filename and directory conventions are never consulted." },
+              "digest": { "type": "string", "description": "Digest of the referenced DeDi file, so this signed manifest commits to its content and changes are detectable. Prefixed algorithm, e.g. 'sha-256:...'." },
+              "schema": {
+                "description": "Optional: the registry's schema (URL or inline), echoed for discovery/filtering without fetching the file.",
+                "oneOf": [{ "type": "string", "format": "uri" }, { "type": "object" }]
+              },
+              "state": { "type": "string", "enum": ["live", "inactive"], "description": "Optional echo of the registry's state for discovery." }
+            }
+          },
+          {
+            "description": "Inline entry: a complete DeDi file object embedded verbatim — its own proof and embedded key, source_url set to the manifest's well-known URL, no digest (the manifest's signature covers its bytes). Intended for small registries; verification is identical to a hosted file.",
+            "allOf": [{ "$ref": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/dedi-file.json" }]
+          }
+        ]
+      }
+    },
+    "proof": {
+      "type": "object",
+      "description": "Detached JWS over the JCS-canonicalized document with this proof block removed, signed by one of `keys`.",
+      "required": ["verification_method", "canonicalization", "jws"],
+      "additionalProperties": false,
+      "properties": {
+        "verification_method": { "type": "string", "description": "MUST reference a kid in `keys`." },
+        "canonicalization": { "type": "string", "enum": ["JCS"] },
+        "jws": { "type": "string" }
+      }
+    }
+  }
+}

@@ -189,13 +189,13 @@ func (c *CORD) Anchor(ctx context.Context, checkpoint []byte) (Ref, error) {
 	if err != nil {
 		return Ref{}, err
 	}
-	body := []byte{0x84}                        // extrinsic v4, signed
-	body = append(body, 0x00)                   // MultiAddress::Id
-	body = append(body, c.kp.PublicKey...)      //
-	body = append(body, 0x01)                   // MultiSignature::Sr25519
-	body = append(body, sig...)                 //
-	body = append(body, extra...)               //
-	body = append(body, callEnc...)             //
+	body := []byte{0x84}                   // extrinsic v4, signed
+	body = append(body, 0x00)              // MultiAddress::Id
+	body = append(body, c.kp.PublicKey...) //
+	body = append(body, 0x01)              // MultiSignature::Sr25519
+	body = append(body, sig...)            //
+	body = append(body, extra...)          //
+	body = append(body, callEnc...)        //
 	lenEnc, err := codec.Encode(types.NewUCompactFromUInt(uint64(len(body))))
 	if err != nil {
 		return Ref{}, err

@@ -2,16 +2,14 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
+
+	"github.com/theflywheel/DeDi-node/internal/testdb"
 )
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	url := testdb.URL(t)
 	ctx := context.Background()
 	s, err := Open(ctx, url)
 	if err != nil {

@@ -1,0 +1,37 @@
+{
+  "dedi_version": "0.1",
+  "type": "dedi-file",
+  "source_url": "https://example.org/dedi/dedi.revocations.json",
+  "next_update": "2026-07-09T10:00:00Z",
+  "publisher": {
+    "domain": "example.org",
+    "key": {
+      "kid": "key-1",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+    }
+  },
+  "namespace": "example.org",
+  "registry": {
+    "name": "revocations",
+    "schema": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/revoke.json",
+    "state": "live",
+    "updated_at": "2026-07-08T18:30:00Z"
+  },
+  "records": [
+    {
+      "record_name": "cred-8841",
+      "details": { "revoked_id": "cred-8841", "reason": "key compromise reported by holder" }
+    },
+    {
+      "record_name": "cred-9002",
+      "details": { "revoked_id": "cred-9002", "reason": "issued in error" }
+    }
+  ],
+  "proof": {
+    "verification_method": "key-1",
+    "canonicalization": "JCS",
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..ILLUSTRATIVE_DETACHED_SIGNATURE_NOT_CRYPTOGRAPHICALLY_VALID"
+  }
+}

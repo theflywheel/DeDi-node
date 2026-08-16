@@ -1,0 +1,50 @@
+# Scrape config for the DeDi project's nodes.
+#
+# Targets are private addresses (`*.railway.internal`), not public URLs: every
+# node now lives in this project, so scraping over the private network avoids
+# sending health traffic out to the internet and back, and it keeps /metrics
+# reachable even while a public domain is being reconfigured.
+#
+# Both halves of task #30 are here. `dedi_cluster_lag_entries` is per-replica
+# apply lag, and the recording rule below does the cross-replica subtraction
+# that a single replica cannot do for itself — see docs/replication.md.
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    project: dedi
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  # The witness ring: three independent nodes, each with its own key and log.
+  # Labelled by role so an alert can say "the ring" or "the replicated node"
+  # without hardcoding hostnames — they are different failure domains and a
+  # rule that conflates them is a rule that pages for the wrong reason.
+  - job_name: dedi-ring
+    metrics_path: /metrics
+    static_configs:
+      - targets: [dedid.railway.internal:8080]
+        labels: {node: node-a, role: ring}
+      - targets: [dedi-b.railway.internal:8080]
+        labels: {node: node-b, role: ring}
+      - targets: [dedi-c.railway.internal:8080]
+        labels: {node: node-c, role: ring}
+
+  # The replicated node: three replicas of ONE node. They share an identity and
+  # prove nothing about each other, so this job is about staying up, not trust.
+  - job_name: dedi-ha
+    metrics_path: /metrics
+    static_configs:
+      - targets: [dedi-ha-1.railway.internal:8080]
+        labels: {node: dedi-ha-1, role: replica}
+      - targets: [dedi-ha-2.railway.internal:8080]
+        labels: {node: dedi-ha-2, role: replica}
+      - targets: [dedi-ha-3.railway.internal:8080]
+        labels: {node: dedi-ha-3, role: replica}
+
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]

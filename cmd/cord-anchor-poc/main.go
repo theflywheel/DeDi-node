@@ -123,8 +123,8 @@ func main() {
 		[]byte{0x00}, // CheckMortality: immortal era
 		mustEncode(types.NewUCompactFromUInt(uint64(acct.Nonce))), // CheckNonce
 		mustEncode(types.NewUCompactFromUInt(0)),                  // ChargeAssetTxPayment.tip
-		[]byte{0x00}, // ChargeAssetTxPayment.asset_id = None
-		[]byte{0x00}, // CheckMetadataHash mode = Disabled
+		[]byte{0x00},                                              // ChargeAssetTxPayment.asset_id = None
+		[]byte{0x00},                                              // CheckMetadataHash mode = Disabled
 	)
 	additional := cat(
 		mustEncode(rv.SpecVersion),        // CheckSpecVersion
@@ -143,7 +143,7 @@ func main() {
 		log.Fatalf("sign: %v", err)
 	}
 	body := cat(
-		[]byte{0x84},              // extrinsic v4, signed
+		[]byte{0x84},                  // extrinsic v4, signed
 		[]byte{0x00}, alice.PublicKey, // MultiAddress::Id
 		[]byte{0x01}, sig, // MultiSignature::Sr25519
 		extra, callEnc,

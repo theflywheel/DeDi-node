@@ -1,0 +1,857 @@
+openapi: 3.0.3
+info:
+  title: DeDi API
+  description: |
+    DeDi (Decentralized Directory) API - Lookup, Query, and Versions endpoints.
+    
+    ## Authentication
+    
+    The API supports dual authentication methods:
+    - **API Key Authentication**: Bearer token in Authorization header (recommended for production)
+    - **Cookie Authentication**: Token cookie for browser integration
+    
+    ## Base Concepts
+    
+    - **Namespace**: Top-level organization unit for grouping related registries
+    - **Registry**: Schema-defined container for records within a namespace  
+    - **Record**: Individual data entries conforming to registry schema
+    
+    ## How Lookup, Query, and Versions Work Together
+    
+    - **Lookup**: Fetch the full details of a single known resource (namespace, registry, or record) by its exact name or ID.
+      Optionally pass `version_id` or `as_on` to retrieve a historical snapshot.
+    - **Query**: Browse and filter the contents of a namespace or registry. Returns paginated summary lists
+      with support for filtering by date, state, name, and sorting. Useful for list/search views.
+    - **Versions**: Retrieve the complete version history of any resource. Use the returned version IDs
+      with the Lookup endpoints (`?version_id=`) to time-travel to a past state of that resource.
+    
+    **Typical flow:**
+    1. Use **Query** to find what exists inside a namespace or registry.
+    2. Use **Lookup** to get the full details of a specific resource.
+    3. Use **Versions** to see all historical versions, then pass a `version_id` to **Lookup** to inspect a past snapshot.
+    
+  version: 2.0.0
+  contact:
+    name: DeDi Support
+    url: https://docs.dedi.global
+  license:
+    name: MIT
+    
+servers:
+  - url: https://api.dedi.global
+    description: Production server
+  - url: https://staging-api.dedi.global
+    description: Staging server
+
+security:
+  - BearerAuth: []
+  - CookieAuth: []
+
+paths:
+
+  # Access endpoints
+  /dedi/lookup/{namespace}:
+    get:
+      tags:
+        - Lookup
+      summary: Namespace lookup
+      operationId: lookupNamespace
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version_id
+          in: query
+          schema:
+            type: string
+        - name: as_on
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Namespace retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Namespace'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dedi/lookup/{namespace}/{registry_name}:
+    get:
+      tags:
+        - Lookup
+      summary: Registry lookup
+      operationId: lookupRegistry
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: registry_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version_id
+          in: query
+          schema:
+            type: string
+        - name: as_on
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Registry retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Registry'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace or registry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dedi/lookup/{namespace}/{registry_name}/{record_name}:
+    get:
+      tags:
+        - Lookup
+      summary: Record lookup
+      operationId: lookupRecord
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: registry_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: record_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version_id
+          in: query
+          schema:
+            type: string
+        - name: as_on
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Record retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Record'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace, registry, or record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                
+  # Query endpoints
+  /dedi/query/{namespace}:
+    get:
+      tags:
+        - Query
+      summary: Query namespace registries
+      operationId: queryNamespaceRegistries
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive]
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [date, status, name, id]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: as_on
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Registries retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      namespace_id:
+                        type: string
+                      namespace_name:
+                        type: string
+                      domain:
+                        type: string
+                        nullable: true
+                      created_by:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+                      total_registries:
+                        type: integer
+                      page_number:
+                        type: integer
+                      page_size:
+                        type: integer
+                      registries:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RegistrySummary'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dedi/query/{namespace}/{registry_name}:
+    get:
+      tags:
+        - Query
+      summary: Query registry records
+      operationId: queryRegistryRecords
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: registry_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [live]
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [date, status, name, id]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: as_on
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Records retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      namespace_id:
+                        type: string
+                      namespace_name:
+                        type: string
+                      registry_id:
+                        type: string
+                      registry_name:
+                        type: string
+                      schema:
+                        type: object
+                      meta:
+                        type: object
+                      created_by:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+                      total_records:
+                        type: integer
+                      total_pages:
+                        type: integer
+                      page_number:
+                        type: integer
+                      page_size:
+                        type: integer
+                      records:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RecordSummary'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace or registry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Version endpoints
+  /dedi/versions/{namespace}:
+    get:
+      tags:
+        - Versions
+      summary: Get namespace versions
+      operationId: getNamespaceVersions
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Namespace versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      created_by:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+                      total_versions:
+                        type: integer
+                      versions:
+                        type: array
+                        items:
+                          type: string
+                      ttl:
+                        type: integer
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dedi/versions/{namespace}/{registry_name}:
+    get:
+      tags:
+        - Versions
+      summary: Get registry versions
+      operationId: getRegistryVersions
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: registry_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Registry versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      registry_name:
+                        type: string
+                      created_by:
+                        type: string
+                      schema:
+                        type: object
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+                      total_versions:
+                        type: integer
+                      versions:
+                        type: array
+                        items:
+                          type: string
+                      ttl:
+                        type: integer
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace or registry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dedi/versions/{namespace}/{registry_name}/{record_name}:
+    get:
+      tags:
+        - Versions
+      summary: Get record versions
+      operationId: getRecordVersions
+      security: []
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: registry_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: record_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Record versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      created_by:
+                        type: string
+                      schema:
+                        type: object
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+                      total_versions:
+                        type: integer
+                      versions:
+                        type: array
+                        items:
+                          type: string
+                      ttl:
+                        type: integer
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Namespace, registry, or record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: API key authentication using Bearer token
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: Cookie-based authentication for browser integration
+
+  schemas:
+    Namespace:
+      type: object
+      properties:
+        namespace_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        digest:
+          type: string
+        meta:
+          type: object
+        version:
+          type: string
+        version_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        domain:
+          type: string
+        state:
+          type: string
+          enum: [active, archived, revoked]
+        ttl:
+          type: integer
+
+    Registry:
+      type: object
+      properties:
+        registry_id:
+          type: string
+        registry_name:
+          type: string
+        namespace_id:
+          type: string
+        description:
+          type: string
+        digest:
+          type: string
+        schema:
+          type: object
+        meta:
+          type: object
+        version:
+          type: string
+        version_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        state:
+          type: string
+          enum: [active, archived, revoked]
+        ttl:
+          type: integer
+
+    Record:
+      type: object
+      properties:
+        record_id:
+          type: string
+        record_name:
+          type: string
+        registry_id:
+          type: string
+        registry_name:
+          type: string
+        namespace_id:
+          type: string
+        namespace:
+          type: string
+        description:
+          type: string
+        digest:
+          type: string
+        details:
+          type: object
+        meta:
+          type: object
+        version:
+          type: string
+        version_count:
+          type: integer
+        genesis:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        state:
+          type: string
+          enum: [draft, live, suspended, revoked, expired]
+        valid_till:
+          type: string
+          format: date-time
+          nullable: true
+        ttl:
+          type: integer
+
+    RegistrySummary:
+      type: object
+      properties:
+        registry_id:
+          type: string
+        registry_name:
+          type: string
+        description:
+          type: string
+        digest:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+        record_count:
+          type: integer
+        ttl:
+          type: integer
+
+    RecordSummary:
+      type: object
+      properties:
+        record_id:
+          type: string
+        record_name:
+          type: string
+        digest:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+        ttl:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: An error occurred
+        error:
+          type: string
+          example: Invalid request parameters
+        code:
+          type: string
+          example: INVALID_REQUEST
+
+tags:
+  - name: Lookup
+    description: Access individual resources
+  - name: Query
+    description: Query collections of resources with filtering
+  - name: Versions
+    description: Access version history of resources

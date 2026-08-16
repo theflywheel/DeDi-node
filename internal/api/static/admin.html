@@ -1,0 +1,1067 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeDi Node · Operator console</title>
+<style>
+  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  h3 { font-size: .98em; margin: 1.1em 0 .3em; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  a { cursor: pointer; }
+  label { display: block; margin: .5em 0 .1em; }
+  input, select { font-family: monospace; font-size: 1em; width: 100%; box-sizing: border-box; padding: .2em .3em; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2em; }
+  .grid .full { grid-column: 1 / -1; }
+  fieldset { border: 1px solid #ccc; margin: .8em 0; padding: .4em 1em 1em; }
+  legend { padding: 0 .4em; }
+  button { font-family: monospace; font-size: 1em; padding: .3em .9em; margin-top: .8em; }
+  .tabs a { margin-right: 1em; padding-bottom: .15em; }
+  .tabs a.sel { border-bottom: 2px solid #333; font-weight: bold; }
+  .pill { font-size: .85em; padding: 0 .4em; border: 1px solid #ccc; border-radius: 3px; }
+  .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
+  .err { color: #b00; font-size: .9em; }
+  #detail { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
+</style>
+</head>
+<body>
+
+<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="/admin">Console</a></nav>
+<h1>Operator console</h1>
+<p class="mut">Onboarding participants onto a Beckn network served by this node: who exists,
+what keys they present, and when they stop being valid. Onboarding is a governed act — every
+action here is an <b>append</b> to the transparency log, never an edit or a delete.</p>
+
+<div class="banner" id="mode">
+  <b>Unlocked by a publisher key.</b> Writes are signed, not session-authenticated
+  (<a href="https://github.com/theflywheel/DeDi-node/blob/main/docs/governance.md">governance</a>).
+  Without a key loaded, the forms generate the record and the command to apply it. Load a key and
+  they publish directly.
+</div>
+
+<fieldset>
+  <legend>publisher key</legend>
+  <div class="grid">
+    <div><label for="k-kid">key id</label><input id="k-kid" placeholder="op-1" spellcheck="false"></div>
+    <div><label for="k-priv">private key <span class="mut">(base64, from <code>dedid pubkeygen</code>)</span></label>
+      <input id="k-priv" type="password" spellcheck="false" autocomplete="off"></div>
+  </div>
+  <p class="mut" style="margin:.4em 0 0">The key is held in this page's memory only — never stored,
+  never sent to the node. Only the signature it produces is. It is cleared when you close the tab.
+  <b>Paste it only on a node you trust</b>: anything served this page could read it.</p>
+  <button onclick="loadKey()">load key</button>
+  <button onclick="clearKey()">forget key</button>
+  <span id="k-state" class="mut">no key loaded</span>
+</fieldset>
+
+<form onsubmit="return reload()">
+<div class="grid">
+  <div><label for="ns">namespace</label><input id="ns" value="beckn-testnet" spellcheck="false"></div>
+  <div><label for="reg">registry</label><input id="reg" value="subscribers.beckn.one" spellcheck="false"></div>
+</div>
+<button type="submit">load</button>
+</form>
+
+<p class="tabs" style="margin-top:1.4em">
+  <a id="tab-list" class="sel" onclick="show('list')">Participants</a>
+  <a id="tab-new" onclick="show('new')">Onboard</a>
+  <a id="tab-key" onclick="show('key')">Rotate key</a>
+  <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
+  <a id="tab-children" onclick="show('children')">Child nodes</a>
+  <a id="tab-push" onclick="show('push')">Push</a>
+  <a id="tab-domain" onclick="show('domain')">Who serves</a>
+</p>
+
+<!-- ---------- participants ---------- -->
+<div id="view-list">
+  <div id="participants"><p class="mut">loading...</p></div>
+  <div id="detail"></div>
+</div>
+
+<!-- ---------- onboard ---------- -->
+<div id="view-new" hidden>
+  <h2>Onboard a participant</h2>
+  <p class="mut">The <b>key id</b> becomes the record name — that is what ONIX asks for on every
+  message (<code>/lookup/{subscriber_id}/{registry}/{key_id}</code>).</p>
+  <fieldset><legend>identity</legend>
+    <div class="grid">
+      <div class="full"><label for="f-sub">subscriber_id</label><input id="f-sub" placeholder="bpp.example.com" spellcheck="false"></div>
+      <div><label for="f-role">role</label>
+        <select id="f-role"><option>BAP</option><option>BPP</option><option>BG</option></select></div>
+      <div><label for="f-status">status</label>
+        <select id="f-status">
+          <option>SUBSCRIBED</option><option>INITIATED</option><option>UNDER_SUBSCRIPTION</option>
+          <option>UNSUBSCRIBED</option><option>INVALID_SSL</option>
+        </select></div>
+      <div class="full"><label for="f-url">callback url</label><input id="f-url" placeholder="https://bpp.example.com/beckn" spellcheck="false"></div>
+      <div><label for="f-domain">domain</label><input id="f-domain" placeholder="retail" spellcheck="false"></div>
+      <div><label for="f-net">network memberships <span class="mut">(comma-separated)</span></label>
+        <input id="f-net" value="beckn.one/testnet" spellcheck="false"></div>
+    </div>
+  </fieldset>
+  <fieldset><legend>keys</legend>
+    <div class="grid">
+      <div class="full"><label for="f-kid">key id <span class="mut">(= record name)</span></label><input id="f-kid" spellcheck="false"></div>
+      <div class="full"><label for="f-sign">signing public key <span class="mut">(Ed25519, std base64, 32 bytes)</span></label><input id="f-sign" spellcheck="false"></div>
+      <div class="full"><label for="f-encr">encryption public key <span class="mut">(X25519, std base64, 32 bytes)</span></label><input id="f-encr" spellcheck="false"></div>
+      <div><label for="f-from">valid from <span class="mut">(RFC 3339)</span></label><input id="f-from" placeholder="2026-01-01T00:00:00Z" spellcheck="false"></div>
+      <div><label for="f-until">valid until</label><input id="f-until" placeholder="2027-01-01T00:00:00Z" spellcheck="false"></div>
+    </div>
+  </fieldset>
+  <button onclick="genOnboard()">publish / generate</button>
+  <div id="out-new"></div>
+</div>
+
+<!-- ---------- rotate ---------- -->
+<div id="view-key" hidden>
+  <h2>Rotate a key</h2>
+  <p class="mut">Rotation is a new version, not a replacement: the old key stays resolvable via
+  <code>?as_on=</code> so signatures on older messages still verify. Publish the new key
+  <i>before</i> the old one expires so the windows overlap.</p>
+  <div class="grid">
+    <div class="full"><label for="r-rec">record <span class="mut">(existing key id)</span></label><input id="r-rec" spellcheck="false"></div>
+    <div class="full"><label for="r-sign">new signing public key</label><input id="r-sign" spellcheck="false"></div>
+    <div><label for="r-from">valid from</label><input id="r-from" placeholder="2026-06-01T00:00:00Z" spellcheck="false"></div>
+    <div><label for="r-until">valid until</label><input id="r-until" placeholder="2027-06-01T00:00:00Z" spellcheck="false"></div>
+  </div>
+  <button onclick="genRotate()">generate new version</button>
+  <div id="out-key"></div>
+</div>
+
+<!-- ---------- revoke ---------- -->
+<div id="view-revoke" hidden>
+  <h2>Revoke a participant</h2>
+  <p class="mut">A revocation is a new version with <code>state: revoked</code>, never a deletion —
+  history stays provable. Beckn wildcard lookups return live records only, so a revoked
+  participant then 404s and ONIX rejects its messages with 401.</p>
+  <div class="grid">
+    <div class="full"><label for="v-rec">record <span class="mut">(key id)</span></label><input id="v-rec" spellcheck="false"></div>
+    <div class="full"><label for="v-sub">subscriber_id <span class="mut">(defaults to the record name)</span></label><input id="v-sub" spellcheck="false"></div>
+    <div class="full"><label for="v-reason">reason <span class="mut">(recorded in the log)</span></label><input id="v-reason" placeholder="key compromise" spellcheck="false"></div>
+  </div>
+  <button onclick="genRevoke()">generate revocation</button>
+  <div id="out-revoke"></div>
+</div>
+
+<!-- ---------- child nodes ---------- -->
+<div id="view-children" hidden>
+  <h2>Child nodes</h2>
+  <p class="mut">A child node is a <b>separate node</b> — its own identity key, its own database,
+  its own log — holding a namespace this one delegates to it. That is a different thing from a
+  replica and from a witness, and worth keeping straight:</p>
+  <table style="margin:.6em 0 1em">
+    <tr><th></th><th>Replica</th><th>Witness</th><th>Child</th></tr>
+    <tr><td>Identity</td><td>this node's key</td><td>a stranger's key</td><td>its own key</td></tr>
+    <tr><td>Log</td><td>this log, copied</td><td>its own, unrelated</td><td>its own, delegated</td></tr>
+    <tr><td>Buys you</td><td>uptime</td><td>tamper evidence</td><td>a namespace someone else runs</td></tr>
+  </table>
+
+  <div class="banner">
+    <b>This node never holds the child's private key.</b> It issues a one-time enrolment offer; the
+    child generates its own key on first boot and enrols by presenting the <i>public</i> half. A
+    parent that had held the private key could forge the child's checkpoints forever, and the
+    child's log would then prove nothing you had not already asserted yourself.
+  </div>
+
+  <fieldset><legend>delegate a namespace</legend>
+    <div class="grid">
+      <div><label for="c-ns">child namespace</label><input id="c-ns" placeholder="beckn.mobility" spellcheck="false"></div>
+      <div><label for="c-label">label <span class="mut">(for the console only)</span></label><input id="c-label" placeholder="Mobility registry" spellcheck="false"></div>
+      <div><label for="c-provider">deploy as</label><select id="c-provider"></select></div>
+      <div><label for="c-image">image</label><input id="c-image" placeholder="ghcr.io/theflywheel/dedi-node:latest" spellcheck="false"></div>
+      <div class="full"><label for="c-url">public URL the child will have <span class="mut">(optional; the parent needs it to witness the child)</span></label>
+        <input id="c-url" placeholder="https://mobility.example.org" spellcheck="false"></div>
+      <div class="full"><label for="c-db">child database URL <span class="mut">(must be a database no other node writes to)</span></label>
+        <input id="c-db" type="password" placeholder="postgres://user:pass@host:5432/child" spellcheck="false" autocomplete="off"></div>
+    </div>
+    <p class="mut" style="margin:.4em 0 0">The namespace must sit exactly one level under
+    <code id="c-parent">this node's</code> — you can only delegate what you hold.</p>
+    <button onclick="createChild()">mint offer &amp; render config</button>
+  </fieldset>
+  <div id="out-children"></div>
+
+  <h3>Delegated so far</h3>
+  <div id="children-list"><p class="mut">loading...</p></div>
+  <div id="children-tree"></div>
+</div>
+
+<div id="view-push" hidden>
+  <h2>Push notification</h2>
+  <p class="mut">Revocation otherwise travels only as fast as caches expire. A subscriber
+  registered here is told the moment a record changes — but the push carries only
+  <em>which</em> entry changed and its sequence number, never the payload. It is a
+  signal to re-read and verify, not something to act on. Consumers should keep
+  checking the log; this only stops them waiting.</p>
+
+  <div id="push-health"></div>
+
+  <fieldset>
+    <legend>Notify a consumer</legend>
+    <div class="grid">
+      <div><label for="w-reg">registry</label><input id="w-reg" placeholder="subscribers" spellcheck="false"></div>
+      <div class="full"><label for="w-url">target URL <span class="mut">(this node will POST here, signed with its identity key)</span></label>
+        <input id="w-url" placeholder="https://consumer.example/dedi-hook" spellcheck="false"></div>
+    </div>
+    <button onclick="createSubscription()">subscribe</button>
+  </fieldset>
+  <div id="out-push"></div>
+
+  <h3>Subscriptions</h3>
+  <div id="push-list"><p class="mut">loading...</p></div>
+</div>
+
+<div id="view-domain" hidden>
+  <h2>Who serves a domain</h2>
+  <p class="mut">The directory can now answer discovery, not only trust: not just
+  <em>what key does this subscriber use</em>, but <em>who serves retail</em>. Revocation
+  therefore has a second meaning here — a revoked participant stops being returned as
+  somewhere to send business, not merely as somewhere whose signature verifies.</p>
+  <fieldset>
+    <legend>Search</legend>
+    <div class="grid">
+      <div><label for="d-reg">registry</label><input id="d-reg" placeholder="subscribers" spellcheck="false"></div>
+      <div><label for="d-domain">domain</label><input id="d-domain" placeholder="retail" spellcheck="false"></div>
+    </div>
+    <button onclick="findByDomain()">search</button>
+  </fieldset>
+  <div id="domain-list"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Record names come from the store, which accepts any non-empty string, so
+// they are untrusted input here. They are never interpolated into JavaScript:
+// a name is carried in a data- attribute (HTML-escaped by esc, which covers
+// the quote that would end the attribute) and read back as a plain string by a
+// delegated listener. Building an inline onclick from one would let a crafted
+// name run in the operator's console — the one page holding the publisher key.
+function onAction(root, action, fn){
+  root.addEventListener('click', e => {
+    const el = e.target.closest('[data-action="' + action + '"]');
+    if(el && root.contains(el)) fn(el.dataset.rec);
+  });
+}
+const actionLink = (action, rec, label) =>
+  '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
+const VIEWS = ['list','new','key','revoke','children','push','domain'];
+
+// ---- request signing ----
+// Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
+// nowhere else: not localStorage, not a cookie, never in a request body.
+let SIGNER = null;   // {kid, key: CryptoKey}
+
+function b64dec(s){ const bin = atob(s); const u = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i); return u; }
+function b64enc(bytes){ let s=''; for(const b of bytes) s += String.fromCharCode(b); return btoa(s); }
+
+// WebCrypto imports Ed25519 private keys as PKCS#8 only, and dedid writes the
+// raw 64-byte Go key (seed||public). Wrap the seed in the fixed PKCS#8 prefix.
+const PKCS8_ED25519_PREFIX = [0x30,0x2e,0x02,0x01,0x00,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x04,0x22,0x04,0x20];
+async function importEd25519(rawB64){
+  const raw = b64dec(rawB64.trim());
+  if(raw.length !== 64 && raw.length !== 32) throw new Error('expected a 32- or 64-byte Ed25519 key');
+  const seed = raw.slice(0, 32);
+  const pkcs8 = new Uint8Array(PKCS8_ED25519_PREFIX.length + 32);
+  pkcs8.set(PKCS8_ED25519_PREFIX, 0);
+  pkcs8.set(seed, PKCS8_ED25519_PREFIX.length);
+  return crypto.subtle.importKey('pkcs8', pkcs8, {name:'Ed25519'}, false, ['sign']);
+}
+
+async function loadKey(){
+  const kid = $('k-kid').value.trim(), priv = $('k-priv').value.trim();
+  if(!kid || !priv){ $('k-state').innerHTML = '<span class="no">key id and private key are both required</span>'; return; }
+  try {
+    SIGNER = { kid, key: await importEd25519(priv) };
+    $('k-priv').value = '';   // do not leave it sitting in the DOM
+    $('k-state').innerHTML = '<span class="ok">key ' + esc(kid) + ' loaded — writes will publish directly</span>';
+    loadSubscriptions();   // the push list needs the key, so it could not load before now
+  } catch(e){
+    SIGNER = null;
+    $('k-state').innerHTML = '<span class="no">' + esc(e.message) + '</span>';
+  }
+}
+function clearKey(){
+  SIGNER = null;
+  $('k-priv').value = '';
+  $('k-state').innerHTML = '<span class="mut">no key loaded</span>';
+}
+
+// recordLookup builds the read URL for a record.
+//
+// include_revoked is on because this is the operator console: a revoked
+// participant must stay visible here, and reinstating one needs its current
+// digest for the If-Match. The read plane withholds revoked records by default
+// so that a resolver — ONIX's LookupNode in particular — cannot keep routing to
+// a participant that has been taken off the network.
+const recordLookup = (ns, reg, rec) =>
+  '/dedi/lookup/' + p(ns) + '/' + p(reg) + '/' + p(rec) + '?include_revoked=true';
+
+// currentVersion reads what is published at path today, so a write can say
+// which version it is replacing. Returns null when nothing is there yet.
+async function currentVersion(ns, reg, rec){
+  const r = await fetch(recordLookup(ns, reg, rec));
+  if(!r.ok) return null;
+  const d = (await r.json()).data;
+  return d.version_tag || (d.digest + '-' + d.state);
+}
+
+// The signed preimage must match publisher.Preimage byte for byte: scheme,
+// method, request URI, base64(sha256(body)), If-Match, If-None-Match, RFC 3339
+// timestamp — newline separated.
+//
+// The precondition is signed, not just sent: that is what stops a captured
+// request being replayed with the header stripped. It is therefore decided
+// here, before signing, and can never be added to the request afterwards.
+async function signedFetch(method, path, bodyObj, pre){
+  pre = pre || {};
+  const ifMatch = pre.ifMatch || '';
+  const ifNoneMatch = pre.ifNoneMatch || '';
+  const body = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
+  const bytes = new TextEncoder().encode(body);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');  // seconds precision, as Go emits
+  const preimage = ['dedi/v1/publish', method.toUpperCase(), path, b64enc(digest),
+                    ifMatch, ifNoneMatch, ts].join('\n');
+  const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', SIGNER.key, new TextEncoder().encode(preimage)));
+  const headers = {
+    'Content-Type': 'application/json',
+    'DeDi-Key-Id': SIGNER.kid,
+    'DeDi-Timestamp': ts,
+    'DeDi-Signature': b64enc(sig),
+  };
+  if(ifMatch) headers['If-Match'] = ifMatch;
+  if(ifNoneMatch) headers['If-None-Match'] = ifNoneMatch;
+  return fetch(path, { method, headers, body: body === '' ? undefined : body });
+}
+
+// apply POSTs a write and reports what the node did, including the no-op case
+// where an identical publish appended nothing.
+async function apply(box, method, path, bodyObj, what, pre){
+  const el = $(box);
+  el.innerHTML = '<p class="mut">publishing...</p>';
+  try {
+    const resp = await signedFetch(method, path, bodyObj, pre);
+    const j = await resp.json();
+    if(!resp.ok){
+      const hint = resp.status === 412
+        ? '<p class="mut">this record changed since the form was loaded — reload and re-apply</p>' : '';
+      el.innerHTML = '<p class="no">' + esc(j.error || ('HTTP ' + resp.status)) +
+        '</p><p class="mut">code ' + esc(j.code || resp.status) + '</p>' + hint;
+      return false;
+    }
+    const d = j.data || {};
+    el.innerHTML = '<p class="ok">' + esc(what) + ' &check;</p>' +
+      '<p class="mut">' + esc(j.message) + '</p>' +
+      '<table><tr><th>version</th><th>state</th><th>digest</th><th>by</th></tr>' +
+      '<tr><td>' + esc(d.version) + (d.unchanged ? ' <span class="pill">no change</span>' : '') +
+      '</td><td>' + esc(d.state) + '</td><td class="mut">' + esc(String(d.digest).slice(0,16)) +
+      '…</td><td class="mut">' + esc(d.created_by) + '</td></tr></table>';
+    reload();
+    return true;
+  } catch(e){
+    el.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+    return false;
+  }
+}
+
+const recordPath = (ns, reg, rec) =>
+  '/admin/namespaces/' + p(ns) + '/registries/' + p(reg) + '/records/' + p(rec);
+
+function show(v){
+  if(!VIEWS.includes(v)) v = 'list';
+  VIEWS.forEach(x => { $('view-'+x).hidden = (x !== v); $('tab-'+x).className = (x === v ? 'sel' : ''); });
+  if(location.hash.slice(1) !== v) location.hash = v;   // tabs are linkable
+}
+addEventListener('hashchange', () => show(location.hash.slice(1) || 'list'));
+
+async function jget(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+const ns  = () => $('ns').value.trim();
+const reg = () => $('reg').value.trim();
+const p   = s => encodeURIComponent(s);
+
+// ---- participants ----
+function reload(){
+  const box = $('participants');
+  $('detail').innerHTML = '';
+  box.innerHTML = '<p class="mut">loading...</p>';
+  queryAllRecords().then(async recs => {
+    if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
+    // The query endpoint returns names + state; payload detail needs a lookup per record.
+    const rows = await Promise.all(recs.map(async r => {
+      let d = {};
+      try { d = (await jget(recordLookup(ns(), reg(), r.record_name))).data; }
+      catch(e){ /* record may have been revoked between calls */ }
+      return { name: r.record_name, state: r.state || d.state || '?', det: d.details || {}, ver: d.version };
+    }));
+    box.innerHTML = '<table><tr><th>subscriber</th><th>role</th><th>domain</th><th>status</th>' +
+      '<th>key id</th><th>valid until</th><th>state</th><th>v</th></tr>' +
+      rows.map(r => {
+        const t = r.det, live = r.state === 'live';
+        // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
+        return '<tr><td>' + actionLink('detail', r.name, t.subscriber_id || '—') + '</td>' +
+          '<td>' + esc(t.type || t.role || '—') + '</td><td>' + esc(t.domain || '—') + '</td>' +
+          '<td>' + esc(t.status || '—') + '</td>' +
+          '<td class="mut">' + esc(r.name.slice(0, 14)) + (r.name.length > 14 ? '…' : '') + '</td>' +
+          '<td>' + expiry(t.valid_until) + '</td>' +
+          '<td class="' + (live ? 'ok' : 'no') + '">' + esc(r.state) + '</td>' +
+          '<td class="mut">' + esc(r.ver || '?') + '</td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">' + rows.length + ' participant(s). Click a subscriber for version history.</p>';
+  }).catch(e => box.innerHTML = '<p class="no">' + esc(e.message) + '</p>');
+  return false;
+}
+
+async function queryAllRecords(){
+  const pageSize = 100; // API maximum; avoids hiding records behind the default first page.
+  const path = page => '/dedi/query/' + p(ns()) + '/' + p(reg()) +
+    '?page_size=' + pageSize + '&page=' + page;
+  const first = await jget(path(1));
+  const data = first.data || {};
+  const totalPages = data.total_pages || 1;
+  const recs = data.records || [];
+  if(totalPages <= 1) return recs;
+  const rest = await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) =>
+    jget(path(i + 2)).then(j => (j.data && j.data.records) || [])));
+  return recs.concat(...rest);
+}
+
+// Expiry is the field most likely to bite an operator, so surface it loudly.
+function expiry(until){
+  if(!until) return '<span class="mut">—</span>';
+  const t = Date.parse(until);
+  if(isNaN(t)) return esc(until);
+  const days = Math.floor((t - Date.now()) / 86400000);
+  if(days < 0)  return '<span class="no">expired</span>';
+  if(days < 30) return '<span class="no">' + days + 'd</span>';
+  return '<span class="mut">' + esc(until.slice(0, 10)) + '</span>';
+}
+
+function detail(rec){
+  const box = $('detail');
+  box.innerHTML = '<h3>' + esc(rec) + '</h3><p class="mut">loading...</p>';
+  const base = recordLookup(ns(), reg(), rec);
+  Promise.all([
+    jget(base).catch(() => null),
+    jget('/dedi/versions/' + p(ns()) + '/' + p(reg()) + '/' + p(rec)).catch(() => null),
+  ]).then(async ([cur, vers]) => {
+    let out = '<h3>' + esc(rec) + '</h3>';
+    if(cur) out += '<pre>' + esc(JSON.stringify(cur.data.details, null, 2)) + '</pre>';
+    // /dedi/versions returns a flat array of version ids; the per-version detail
+    // (state, who appended it, when) needs a version-pinned lookup each.
+    const ids = (vers && vers.data.versions) || [];
+    const recent = ids.slice(-10).reverse();
+    if(recent.length){
+      const rows = await Promise.all(recent.map(async id => {
+        try {
+          const d = (await jget(base + '&version_id=' + p(id))).data;
+          return { id, state: d.state || '?', at: (d.created_at || '').slice(0, 19), by: d.created_by || '?' };
+        } catch(e){ return { id, state: '?', at: '', by: '' }; }
+      }));
+      out += '<table><tr><th>version</th><th>state</th><th>created</th><th>by</th></tr>' +
+        rows.map(v => '<tr><td>' + esc(v.id) + '</td><td class="' + (v.state === 'live' ? 'ok' : 'no') + '">' +
+          esc(v.state) + '</td><td class="mut">' + esc(v.at) + '</td><td class="mut">' +
+          esc(v.by) + '</td></tr>').join('') + '</table>' +
+        '<p class="mut">Every row is a log entry — the audit trail for this participant.' +
+        (ids.length > recent.length ? ' Showing the ' + recent.length + ' most recent of ' + ids.length + '.' : '') +
+        '</p>';
+    }
+    out += '<p>' + actionLink('rotate', rec, 'rotate key') + ' &middot; ' +
+           actionLink('revoke', rec, 'revoke') + '</p>';
+    box.innerHTML = out;
+  });
+}
+function prefill(rec){ $('r-rec').value = rec; show('key'); }
+function prefillRevoke(rec){ $('v-rec').value = rec; show('revoke'); }
+
+// ---- generators ----
+const b64re = /^[A-Za-z0-9+/]{43}=$/;   // 32 raw bytes in std base64
+function need(errs, id, label, extra){
+  const v = $(id).value.trim();
+  if(!v){ errs.push(label + ' is required'); return v; }
+  if(extra){ const e = extra(v); if(e) errs.push(label + ': ' + e); }
+  return v;
+}
+const isB64  = v => b64re.test(v) ? '' : 'expected 32 raw bytes in standard base64 (44 chars, ending "=")';
+const isTime = v => isNaN(Date.parse(v)) ? 'expected an RFC 3339 timestamp' : '';
+const isURL  = v => /^https?:\/\/.+/.test(v) ? '' : 'expected an http(s) URL';
+
+function genOnboard(){
+  const errs = [];
+  const sub  = need(errs, 'f-sub',  'subscriber_id');
+  const url  = need(errs, 'f-url',  'callback url', isURL);
+  const kid  = need(errs, 'f-kid',  'key id');
+  const sign = need(errs, 'f-sign', 'signing public key', isB64);
+  const encr = need(errs, 'f-encr', 'encryption public key', isB64);
+  const from = need(errs, 'f-from', 'valid from',  isTime);
+  const till = need(errs, 'f-until','valid until', isTime);
+  if(from && till && Date.parse(till) <= Date.parse(from)) errs.push('valid until must be after valid from');
+  if(errs.length) return fail('out-new', errs);
+
+  // Field names are the ones the ONIX dediregistry client reads off details:
+  // subscriber_id, type, url, domain, signing_public_key, encr_public_key.
+  // status / valid_* are additive operator metadata and are ignored by ONIX.
+  const payload = {
+    subscriber_id: sub, type: $('f-role').value, url: url,
+    signing_public_key: sign, encr_public_key: encr,
+    domain: $('f-domain').value.trim(), status: $('f-status').value,
+    valid_from: from, valid_until: till,
+  };
+  const nets = $('f-net').value.split(',').map(s => s.trim()).filter(Boolean);
+  if(nets.length) payload.network_memberships = nets;
+  if(SIGNER){
+    // Onboarding is normally a create, but re-onboarding an existing
+    // participant is a legitimate replace — so state whichever it actually is.
+    return currentVersion(ns(), reg(), kid)
+      .then(cur => apply('out-new', 'POST', recordPath(ns(), reg(), kid) + '/publish',
+                         {payload}, 'Onboarded ' + sub,
+                         cur ? {ifMatch: cur} : {ifNoneMatch: '*'}));
+  }
+  emit('out-new', kid, payload, 'live', 'Onboard ' + sub);
+}
+
+function genRotate(){
+  const errs = [];
+  const rec  = need(errs, 'r-rec',  'record');
+  const sign = need(errs, 'r-sign', 'new signing public key', isB64);
+  const from = need(errs, 'r-from', 'valid from',  isTime);
+  const till = need(errs, 'r-until','valid until', isTime);
+  if(errs.length) return fail('out-key', errs);
+  const fields = { signing_public_key: sign, valid_from: from, valid_until: till };
+  if(SIGNER){
+    // An append replaces the whole payload, so rotation has to carry the
+    // current one forward rather than publishing the changed fields alone.
+    return jget(recordLookup(ns(), reg(), rec))
+      .then(j => apply('out-key', 'POST', recordPath(ns(), reg(), rec) + '/publish',
+                       {payload: Object.assign({}, j.data.details, fields)}, 'Rotated key for ' + rec,
+                       {ifMatch: j.data.version_tag || (j.data.digest + '-' + j.data.state)}))
+      .catch(e => fail('out-key', ['could not read the current record: ' + e.message]));
+  }
+  // Same rule without a key loaded. A seed command is runnable as printed, so
+  // emitting only the changed fields would produce a version missing
+  // subscriber_id, type, url and the rest — a participant ONIX can no longer
+  // resolve. Warning the operator in prose is not enough; merge it for them.
+  return withCurrent('out-key', rec, cur =>
+    emit('out-key', rec, Object.assign({}, cur, fields), 'live', 'Rotate key for ' + rec,
+         'The current payload has been merged in — an append replaces the whole payload, ' +
+         'so the changed fields alone would drop the rest.'));
+}
+
+function genRevoke(){
+  const errs = [];
+  const rec = need(errs, 'v-rec', 'record');
+  if(errs.length) return fail('out-revoke', errs);
+  const reason = $('v-reason').value.trim();
+  if(SIGNER){
+    return currentVersion(ns(), reg(), rec)
+      .then(cur => cur
+        ? apply('out-revoke', 'POST', recordPath(ns(), reg(), rec) + '/revoke',
+                reason ? {reason} : {}, 'Revoked ' + rec, {ifMatch: cur})
+        : fail('out-revoke', ['no such record: ' + rec]));
+  }
+  // Revocation changes state, not content: the payload has to be carried
+  // forward so the record stays inspectable at the version that revoked it.
+  return withCurrent('out-revoke', rec, cur => {
+    const payload = Object.assign({}, cur, { status: 'UNSUBSCRIBED' });
+    if(!payload.subscriber_id) payload.subscriber_id = $('v-sub').value.trim() || rec;
+    if(reason) payload.revocation_reason = reason;
+    emit('out-revoke', rec, payload, 'revoked', 'Revoke ' + rec,
+         'Caching validators may serve the old key until their TTL expires.');
+  });
+}
+
+// withCurrent runs fn against the record's current payload. Every generated
+// write replaces the whole payload, so nothing may be emitted without it.
+function withCurrent(box, rec, fn){
+  return jget(recordLookup(ns(), reg(), rec))
+    .then(j => fn(j.data.details || {}))
+    .catch(e => fail(box, ['could not read the current record: ' + e.message +
+                           ' — a new version must carry its payload forward, so nothing was generated']));
+}
+
+function fail(box, errs){
+  $(box).innerHTML = '<p class="err">' + errs.map(esc).join('<br>') + '</p>';
+  return false;
+}
+
+// Emits the seed file + the command that applies it. Parent payloads are omitted
+// deliberately: dedid seed treats that as record-only, preserving their versions.
+function emit(box, recName, payload, state, title, note){
+  const seed = {
+    namespace: ns(),
+    registries: [{ name: reg(), records: [{ name: recName, payload, state }] }],
+  };
+  const json = JSON.stringify(seed, null, 2);
+  const cmd = 'cat > onboard.json <<\'EOF\'\n' + json + '\nEOF\n\n' +
+              'DEDI_DB_URL="$DEDI_DB_URL" dedid seed -file onboard.json';
+  $(box).innerHTML =
+    '<h3>' + esc(title) + '</h3>' +
+    (note ? '<p class="mut">' + note + '</p>' : '') +
+    '<p class="mut">record <code>' + esc(ns() + '/' + reg() + '/' + recName) +
+      '</code> &middot; state <span class="pill">' + esc(state) + '</span></p>' +
+    '<pre id="' + box + '-cmd">' + esc(cmd) + '</pre>' +
+    '<button onclick="copy(\'' + box + '-cmd\', this)">copy</button>' +
+    '<p class="mut">Applying this appends a new version and it goes live on the next ' +
+    'checkpoint, with an inclusion proof like any other record.</p>';
+}
+
+function copy(id, btn){
+  navigator.clipboard.writeText($(id).textContent).then(() => {
+    btn.textContent = 'copied';
+    setTimeout(() => btn.textContent = 'copy', 1200);
+  }, () => btn.textContent = 'copy failed');
+}
+
+// Delegated once, on the containers the rows are rendered into, so re-rendering
+// never has to re-bind and no handler is ever built from a record name.
+onAction($('participants'), 'detail', detail);
+onAction($('detail'), 'rotate', prefill);
+onAction($('detail'), 'revoke', prefillRevoke);
+// Bound to the container, not to the row: the children table is replaced
+// wholesale on every reload, and a listener on a row would go with it.
+onAction($('children-list'), 'unchild', revokeChild);
+onAction($('children-list'), 'chain', showDescendants);
+
+show(location.hash.slice(1) || 'list');
+reload();
+loadChildren();
+loadSubscriptions();
+
+// ---------- child nodes ----------
+//
+// The parent namespace is the one the loaded publisher key is scoped to, which
+// is also the one the child must sit under. It is read from the namespace field
+// rather than asked for twice.
+const parentNS = () => ns();
+
+// PROVIDERS is filled from the node so the console offers exactly what this
+// build can render — a hardcoded list would drift the moment someone links in
+// their own provider, and would fail at submit rather than at selection.
+let PROVIDERS = ['env'];
+
+function renderProviders(){
+  const sel = $('c-provider');
+  sel.innerHTML = PROVIDERS.map(n => '<option>' + esc(n) + '</option>').join('');
+}
+
+// CHILD_STATE remembers each child's state from the last load, so the revoke
+// confirmation can describe what is about to happen rather than assuming the
+// worse case. Kept beside the table rather than encoded into the link, so the
+// only child-supplied value reaching the DOM stays the namespace.
+const CHILD_STATE = {};
+// Where each child is reachable, for walking the chain below it.
+const CHILD_URL = {};
+
+// offerLife says whether an unredeemed offer can still be used.
+//
+// "offered" on its own is two different situations wearing one label: a child
+// that has not booted yet, and an offer nobody will ever redeem. They call for
+// opposite responses — wait, or mint again — and the row could not tell them
+// apart while it showed only the state.
+function offerLife(k){
+  if(!k.expires_at) return '<span class="mut">— never enrolled</span>';
+  if(k.expired){
+    return '<span class="no">— expired, never enrolled</span> ' +
+      '<span class="mut">mint a fresh offer; this one cannot be redeemed</span>';
+  }
+  const mins = Math.max(0, Math.round((new Date(k.expires_at) - Date.now()) / 60000));
+  return '<span class="mut">— not yet enrolled, expires in ' + mins + 'm</span>';
+}
+
+// witnessCell says what this node has actually verified about a child.
+//
+// Two separate claims, and they are shown together because either one alone
+// misleads. The verdict — size, root, consistency_ok — is evidence, backed by a
+// proof a reader can check against the child's own key. Whether the loop is
+// still running is not evidence at all; it is this node's report about itself.
+//
+// Showing the verdict without it was the bug: a verdict is only rewritten when
+// the child's tree changes, so a loop that has been failing for hours keeps
+// displaying its last consistency_ok, indistinguishable from a check that ran a
+// second ago. Age cannot stand in either — on a quiet child the newest verdict
+// is legitimately old.
+function witnessCell(k){
+  if(k.state !== 'active') return '<span class="mut">—</span>';
+  const wv = k.witness;
+  if(!wv) return '<span class="mut">not yet checked</span>';
+  const h = wv.health || {};
+  let head;
+  if(wv.consistency_ok === false){
+    // The alarm case, and the only one this table exists to catch: the child's
+    // log is no longer append-only.
+    head = '<span class="no"><b>append-only FAILED</b></span>';
+  } else if(wv.consistency_ok === true){
+    head = '<span class="ok">append-only ✓</span> <span class="mut">size ' + esc(wv.size) + '</span>';
+  } else {
+    head = '<span class="mut">no verdict yet</span>';
+  }
+  let note = '';
+  if(h.standby){
+    note = '<span class="mut">standby — the leader checks this one</span>';
+  } else if(h.stale){
+    note = '<span class="no">not being refreshed' +
+      (h.last_error ? ': ' + esc(h.last_error) : '') + '</span>';
+  } else if(h.seconds_since_success !== undefined){
+    note = '<span class="mut">checked ' + esc(h.seconds_since_success) + 's ago</span>';
+  }
+  return head + (note ? '<br>' + note : '');
+}
+
+async function loadChildren(){
+  $('c-parent').textContent = parentNS();
+  renderProviders();
+  const box = $('children-list');
+  try {
+    const j = await jget('/dedi/delegations/' + p(parentNS()));
+    const kids = (j.data && j.data.children) || [];
+    if(!kids.length){
+      box.innerHTML = '<p class="mut">No namespaces delegated yet.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>namespace</th><th>state</th><th>node</th>' +
+      '<th>verifier key</th><th>witnessed</th><th></th></tr>' +
+      kids.map(k => {
+        CHILD_STATE[k.namespace] = k.state;
+        if(/^https?:\/\//i.test(k.child_url || '')) CHILD_URL[k.namespace] = k.child_url;
+        // An offer that was never redeemed is the quiet failure this table
+        // exists to surface: nothing is wrong with the parent, and a child
+        // somewhere is serving without a delegation.
+        const state = k.state === 'active'
+          ? '<span class="ok">active</span>' +
+            (k.enrolled_at ? ' <span class="mut">since ' + esc(k.enrolled_at) + '</span>' : '')
+          : '<span class="no">' + esc(k.state) + '</span>' +
+            (k.state === 'offered' ? ' ' + offerLife(k) : '') +
+            (k.revoked_at ? ' <span class="mut">' + esc(k.revoked_at) +
+              (k.reason ? ' — ' + esc(k.reason) : '') + '</span>' : '');
+        // Escaping is not enough for an href: esc() leaves "javascript:alert(1)"
+        // intact, and the operator clicking it runs script in the one page
+        // holding a publisher key. The scheme is checked, and anything else is
+        // shown as inert text rather than silently dropped — a child that
+        // enrolled with a strange URL is something to see, not to hide.
+        const safeURL = /^https?:\/\//i.test(k.child_url || '');
+        const label = esc(k.child_origin || k.child_url || '');
+        const url = !k.child_url ? '<span class="mut">—</span>'
+          : safeURL ? '<a href="' + esc(k.child_url) + '" target="_blank" rel="noopener">' + label + '</a>'
+          : label + ' <span class="no">(unusable URL: ' + esc(k.child_url) + ')</span>';
+        // Reachability, kept visibly apart from the verdict beside it. Being up
+        // proves nothing about a log and being briefly down disproves nothing;
+        // the value of showing it here is only that an operator checking on a
+        // child no longer has to open another page to learn it answers at all.
+        const n = k.node;
+        const reach = !n ? ''
+          : n.reachable
+            ? ' <span class="pill">up</span>'
+            : ' <span class="no">unreachable' + (n.error ? ': ' + esc(n.error) : '') + '</span>';
+        return '<tr><td>' + esc(k.namespace) + (k.label ? ' <span class="mut">' + esc(k.label) + '</span>' : '') +
+          '</td><td>' + state + '</td><td>' + url + reach +
+          '</td><td class="mut">' + esc((k.child_key || '—').slice(0, 28)) + (k.child_key ? '…' : '') +
+          '</td><td>' + witnessCell(k) + '</td><td>' +
+          // "discard" for an offer nobody claimed and "revoke" for a live
+          // child: the same call, but they are not the same act, and one word
+          // for both makes the destructive one look routine.
+          (k.state === 'revoked' ? '<span class="mut">—</span>'
+            : actionLink('unchild', k.namespace,
+                k.state === 'offered' ? 'discard' : 'revoke')) +
+          (k.state === 'active' && CHILD_URL[k.namespace]
+            ? ' ' + actionLink('chain', k.namespace, 'descendants') : '') +
+          '</td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">The verifier key is the child\'s own. A relying party checks the child\'s ' +
+      'checkpoints against it directly — this node is not in that path, which is the point of the ' +
+      'child holding its own key.</p>';
+  } catch(e){
+    box.innerHTML = '<p class="mut">No delegations readable here (' + esc(e.message) + ').</p>';
+  }
+}
+
+async function createChild(){
+  const box = $('out-children');
+  if(!SIGNER){
+    return fail('out-children', ['Load a publisher key first — delegating a namespace is a signed write.']);
+  }
+  const child = $('c-ns').value.trim();
+  if(!child){ return fail('out-children', ['A child namespace is required.']); }
+  if(child.indexOf(parentNS() + '.') !== 0){
+    // Checked here as well as on the node, so the operator is corrected while
+    // still looking at the field rather than after a round trip.
+    return fail('out-children', ['"' + child + '" must sit one level under "' + parentNS() + '".']);
+  }
+  box.innerHTML = '<p class="mut">minting...</p>';
+  const body = {
+    namespace: child,
+    label: $('c-label').value.trim(),
+    provider: $('c-provider').value,
+    image: $('c-image').value.trim(),
+    db_url: $('c-db').value,
+    public_url: $('c-url').value.trim(),
+  };
+  try {
+    const resp = await signedFetch('POST', '/admin/namespaces/' + p(parentNS()) + '/children', body);
+    const j = await resp.json();
+    if(!resp.ok){ return fail('out-children', [j.error || ('HTTP ' + resp.status)]); }
+    const d = j.data || {};
+    const art = d.artifact || {};
+    if(d.providers){ PROVIDERS = d.providers; renderProviders(); }
+    box.innerHTML =
+      '<div class="banner"><b>Offer minted for ' + esc(d.namespace) + '.</b> ' +
+      'It expires at <code>' + esc(d.expires_at) + '</code> and is shown <b>once</b> — the log ' +
+      'holds only its hash, so if you lose this you mint a new one rather than recover it.</div>' +
+      '<h3>' + esc(art.filename || 'config') + ' <span class="mut">(' + esc(art.provider) + ')</span></h3>' +
+      '<pre id="c-art">' + esc(art.content || '') + '</pre>' +
+      '<button onclick="copyArtifact()">copy</button>' +
+      (art.notes && art.notes.length
+        ? '<ul class="mut">' + art.notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>' : '') +
+      '<p class="mut">Apply this where the child will run. It boots, generates its own key, and ' +
+      'enrols against this node; the row below turns <span class="ok">active</span> when it does. ' +
+      'Until then it holds no delegation.</p>';
+    // The offer is already in the log, so it should appear immediately —
+    // including when the child never turns up.
+    loadChildren();
+  } catch(e){
+    fail('out-children', [e.message]);
+  }
+}
+
+// revokeChild withdraws a delegation.
+//
+// Confirmed first, and the confirmation says what revocation does *not* do.
+// The intuitive reading of this button is that it turns the child off; it does
+// not, and cannot — the child is someone else's process with its own key and
+// its own log. What it changes is that this node's log stops vouching for it.
+// An operator who clicks expecting a shutdown and gets a still-serving node has
+// been misled by the UI, not by the mechanism.
+async function revokeChild(child){
+  if(!SIGNER){
+    return fail('out-children', ['Load a publisher key first — revoking is a signed write.']);
+  }
+  const prompt = CHILD_STATE[child] === 'offered'
+    // Nobody redeemed this one, so there is no other operator to affect and
+    // nothing to explain about what survives.
+    ? 'Discard the unredeemed offer for ' + child + '?\n\n' +
+      'The token stops working immediately. If a child was about to boot with it, it will ' +
+      'come up healthy and unenrolled.'
+    : 'Revoke the delegation of ' + child + '?\n\n' +
+      'This node stops vouching for it and stops witnessing it, and the log records the ' +
+      'withdrawal with a timestamp.\n\n' +
+      'The child node keeps running, keeps its key and keeps its own log — revoking here ' +
+      'cannot and does not shut it down.';
+  if(!confirm(prompt)) return;
+  const box = $('out-children');
+  box.innerHTML = '<p class="mut">revoking...</p>';
+  try {
+    const resp = await signedFetch('POST',
+      '/admin/namespaces/' + p(parentNS()) + '/children/' + p(child) + '/revoke',
+      { reason: 'revoked from the admin console' });
+    const j = await resp.json();
+    if(!resp.ok){ return fail('out-children', [j.error || ('HTTP ' + resp.status)]); }
+    box.innerHTML = '<p class="ok">' + esc(child) + ' revoked &check;</p>' +
+      '<p class="mut">' + esc((j.data && j.data.note) || '') + '</p>' +
+      '<p class="mut">The namespace can be delegated again from the form above.</p>';
+    loadChildren();
+  } catch(e){
+    fail('out-children', [e.message]);
+  }
+}
+
+// showDescendants walks one level further down the chain.
+//
+// The fetch goes to the child directly, not through this node. That is the
+// whole point: a hierarchy assembled here from what the parent says about its
+// grandchildren would be the parent's word about a log it does not hold. Read
+// from the child, it is the child's own answer, signed by the child's own key —
+// and the child's read plane is public and CORS-open precisely so a browser can
+// do this without anyone's cooperation.
+//
+// One level per click rather than a recursive crawl. A chain can be long and
+// each hop is a separate node that may be slow or down; expanding on demand
+// keeps a stalled grandchild from holding up the view of everything above it.
+async function showDescendants(child){
+  const box = $('children-tree');
+  const url = CHILD_URL[child];
+  if(!url){ box.innerHTML = '<p class="mut">No reachable URL for ' + esc(child) + '.</p>'; return; }
+  box.innerHTML = '<p class="mut">asking ' + esc(child) + ' directly...</p>';
+  try {
+    const resp = await fetch(url.replace(/\/$/, '') + '/dedi/delegations/' + p(child));
+    const j = await resp.json();
+    const kids = (j.data && j.data.children) || [];
+    const head = '<h3>Below ' + esc(child) + '</h3>' +
+      '<p class="mut">Read from ' + esc(url) + ' directly — this is that node\'s own answer, ' +
+      'not this one\'s account of it.</p>';
+    if(!kids.length){
+      box.innerHTML = head + '<p class="mut">It has delegated nothing.</p>';
+      return;
+    }
+    box.innerHTML = head + '<table><tr><th>namespace</th><th>state</th><th>node</th></tr>' +
+      kids.map(g =>
+        '<tr><td>' + esc(g.namespace) + '</td><td>' +
+        (g.state === 'active' ? '<span class="ok">active</span>'
+                              : '<span class="no">' + esc(g.state) + '</span>') +
+        '</td><td class="mut">' + esc(g.child_origin || '—') + '</td></tr>').join('') +
+      '</table>';
+  } catch(e){
+    // Worth distinguishing from "nothing delegated": a grandchild that cannot
+    // be reached is not the same as one that does not exist, and the operator
+    // is the only one who can tell which.
+    box.innerHTML = '<p class="no">Could not reach ' + esc(child) + ' (' + esc(e.message) + ').</p>' +
+      '<p class="mut">It may be down, or it may not be serving this URL any more. Either way ' +
+      'this node cannot answer for what it has delegated.</p>';
+  }
+}
+
+// ---------- push notification ----------
+//
+// The loop's health and each subscription's counters are rendered as two
+// separate things, and that separation is the point. A subscription's counters
+// only move when something is published, so a delivery loop that died hours ago
+// leaves behind rows that read "0 pending" — indistinguishable from a healthy
+// queue. Only the loop can say whether it is still running.
+function deliveryHealth(d){
+  if(!d || !d.running){
+    return '<p class="no">The delivery loop is not running on this node. ' +
+      'Nothing below is being sent, however healthy the queues look.</p>';
+  }
+  if(!d.leader){
+    return '<p class="mut">This replica is not the leader, so it does not deliver. ' +
+      'That is normal — the leader holds the same subscriptions and is sending them.</p>';
+  }
+  return '<p class="ok">Delivering</p><p class="mut">last swept ' +
+    esc(d.last_sweep || 'never') + '</p>';
+}
+
+async function loadSubscriptions(){
+  const box = $('push-list');
+  // Listing needs the publisher key: who this node pushes to is the operator's
+  // own wiring, and the targets are internal addresses more often than not, so
+  // the route is behind the write plane rather than public like delegations.
+  if(!SIGNER){
+    box.innerHTML = '<p class="mut">Load your publisher key to see subscriptions.</p>';
+    $('push-health').innerHTML = '';
+    return;
+  }
+  try {
+    const r = await signedFetch('GET', '/admin/namespaces/' + p(ns()) + '/subscriptions');
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = (await r.json()).data || {};
+    $('push-health').innerHTML = deliveryHealth(d.delivery);
+    const subs = (d.subscriptions || []).filter(x => x.state === 'active');
+    if(!subs.length){
+      box.innerHTML = '<p class="mut">Nobody is subscribed. Revocations here reach ' +
+        'consumers only when their caches expire.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>registry</th><th>target</th><th>queue</th>' +
+      '<th>never delivered</th><th></th></tr>' +
+      subs.map(x => {
+        // An href is not made safe by escaping — the scheme is checked, and an
+        // unusable one is shown as inert text rather than hidden.
+        const safe = /^https?:\/\//i.test(x.target_url || '');
+        const target = safe
+          ? '<a href="' + esc(x.target_url) + '" target="_blank" rel="noopener">' + esc(x.target_url) + '</a>'
+          : esc(x.target_url) + ' <span class="no">(unusable URL)</span>';
+        const queue = x.retrying
+          ? '<span class="no">retrying (' + esc(x.retrying) + ' failed)' +
+            (x.last_error ? ': ' + esc(x.last_error) : '') + '</span>'
+          : (x.pending ? '<span class="mut">' + esc(x.pending) + ' pending</span>'
+                       : '<span class="ok">up to date</span>');
+        // Dead letters are the ones that matter most and are easiest to miss:
+        // a consumer that was never told about a revocation is still trusting
+        // a key this node has withdrawn.
+        const dead = x.dead_lettered
+          ? '<span class="no">' + esc(x.dead_lettered) + ' given up on</span>'
+          : '<span class="mut">none</span>';
+        return '<tr><td>' + esc(x.registry) + '</td><td>' + target + '</td>' +
+          '<td>' + queue + '</td><td>' + dead + '</td>' +
+          '<td><a href="#" data-action="unsub" data-rec="' + esc(x.id) + '">unsubscribe</a></td></tr>';
+      }).join('') + '</table>';
+  } catch(e){
+    box.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+    $('push-health').innerHTML = '';
+  }
+}
+
+async function createSubscription(){
+  const reg = $('w-reg').value.trim(), url = $('w-url').value.trim();
+  const el = $('out-push');
+  if(!reg || !url){ el.innerHTML = '<p class="no">registry and target URL are both required</p>'; return; }
+  el.innerHTML = '<p class="mut">subscribing...</p>';
+  try {
+    const r = await signedFetch('POST',
+      '/admin/namespaces/' + p(ns()) + '/registries/' + p(reg) + '/subscriptions',
+      { target_url: url });
+    const j = await r.json();
+    if(!r.ok){ el.innerHTML = '<p class="no">' + esc(j.error || ('HTTP ' + r.status)) + '</p>'; return; }
+    el.innerHTML = '<p class="ok">subscribed &check;</p>';
+    $('w-url').value = '';
+    loadSubscriptions();
+  } catch(e){
+    el.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+  }
+}
+
+async function unsubscribe(id){
+  if(!confirm('Stop notifying this consumer?\n\nIt keeps whatever it has already cached, and ' +
+              'will go back to noticing revocations only when those caches expire.')) return;
+  const r = await signedFetch('DELETE', '/admin/namespaces/' + p(ns()) + '/subscriptions/' + p(id));
+  if(!r.ok){ $('out-push').innerHTML = '<p class="no">HTTP ' + r.status + '</p>'; return; }
+  loadSubscriptions();
+}
+
+onAction($('push-list'), 'unsub', unsubscribe);
+
+// ---------- who serves a domain ----------
+//
+// A public read, so no key is needed. What comes back is a starting point and
+// not an answer to be trusted: this node assembled the list, and only each
+// record and its inclusion proof say what was actually published — hence the
+// verify link on every row rather than a summary the operator reads and
+// believes.
+async function findByDomain(){
+  const reg = $('d-reg').value.trim(), domain = $('d-domain').value.trim();
+  const box = $('domain-list');
+  if(!reg || !domain){ box.innerHTML = '<p class="no">registry and domain are both required</p>'; return; }
+  box.innerHTML = '<p class="mut">searching...</p>';
+  try {
+    const j = await jget('/dedi/query/' + p(ns()) + '/' + p(reg) + '?domain=' + encodeURIComponent(domain));
+    const list = (j.data && j.data.participants) || [];
+    if(!list.length){
+      box.innerHTML = '<p class="mut">Nobody live serves ' + esc(domain) + ' in ' +
+        esc(ns()) + '/' + esc(reg) + '.</p>';
+      return;
+    }
+    box.innerHTML = '<table><tr><th>subscriber</th><th>type</th><th>url</th><th>record</th></tr>' +
+      list.map(x => {
+        // Escaping does not make an href safe: a participant chooses its own
+        // url, and javascript: survives esc() intact.
+        const safe = /^https?:\/\//i.test(x.url || '');
+        const url = !x.url ? '<span class="mut">—</span>'
+          : safe ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.url) + '</a>'
+          : esc(x.url) + ' <span class="no">(unusable URL)</span>';
+        return '<tr><td>' + esc(x.subscriber_id || '—') + '</td>' +
+          '<td class="mut">' + esc(x.type || '—') + '</td><td>' + url + '</td>' +
+          '<td><a href="' + esc(x.lookup_url) + '" target="_blank" rel="noopener">verify</a></td></tr>';
+      }).join('') + '</table>' +
+      '<p class="mut">' + esc(list.length) + ' live. This node assembled the list — ' +
+      'follow a record to check what it actually published.</p>';
+  } catch(e){
+    box.innerHTML = '<p class="no">' + esc(e.message) + '</p>';
+  }
+}
+
+function copyArtifact(){
+  navigator.clipboard.writeText($('c-art').textContent);
+}
+</script>
+</body>
+</html>

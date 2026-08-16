@@ -40,6 +40,32 @@ func (s *Store) Resolve(ctx context.Context, entryType, ns, reg, rec string, ver
 	return scanEntry(s.pool.QueryRow(ctx, q, args...))
 }
 
+// ResolveCurrentForWrite reads the current resource version under the append
+// lock and applies the write precondition to the same serialized view.
+func (s *Store) ResolveCurrentForWrite(ctx context.Context, in AppendInput) (Entry, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, logWriteLock); err != nil {
+		return Entry{}, err
+	}
+	e, err := scanEntry(tx.QueryRow(ctx,
+		`SELECT `+entryCols+` FROM log_entries
+		  WHERE entry_type=$1 AND namespace=$2 AND registry=$3 AND record_name=$4
+		  ORDER BY version_num DESC LIMIT 1`,
+		in.EntryType, in.Namespace, in.Registry, in.RecordName))
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := checkPrecondition(in, e.Digest, e.State); err != nil {
+		return Entry{}, err
+	}
+	return e, nil
+}
+
 // Versions returns every version of a resource in ascending version order.
 func (s *Store) Versions(ctx context.Context, entryType, ns, reg, rec string) ([]Entry, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+entryCols+` FROM log_entries

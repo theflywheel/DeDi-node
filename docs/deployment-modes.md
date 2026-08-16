@@ -12,6 +12,14 @@ place.
 | **2 · Witnessed** | + any other dedid node watching this one | `DEDI_WITNESS_*` on the watcher | Split views and forked history: an independent operator continuously demands consistency proofs and records verdicts in its own log. Cheating becomes *provable by a third party*. |
 | **3 · Anchored** | + a ledger the checkpoints are published to | `DEDI_ANCHOR_*` | Backdating and checkpoint suppression: roots are pinned into an external, ordered timeline the operator does not control. |
 
+**Availability is a separate axis, not a fourth mode.** Any of these can run as
+a Raft cluster of replicas (`DEDI_CLUSTER_*`, see `docs/replication.md`), which
+keeps the directory serving when a machine dies. It is crash tolerance and
+carries no trust claim whatsoever: a quorum of replicas run by one operator
+agrees with that operator. Whatever a node defends against above, it defends
+against exactly as well replicated and unreplicated — no better. Do not present
+replicas as witnesses.
+
 Modes compose: a production node typically runs 1+2, adds 3 when an external
 timeline is wanted. Nothing about a mode is load-bearing for reads — if a
 witness or anchor target is down, the node serves traffic unaffected and the
@@ -45,6 +53,30 @@ docker compose -f docker-compose.yml -f docker-compose.witness.yml up -d
 
 Verdicts are browsable under the watcher's `_witness` namespace. Two operators
 witnessing each other is the honest minimum for decentralised trust.
+
+**Rings.** A node witnesses exactly one target, so three or more nodes are
+arranged as a cycle — A → B → C → A. Every node is then watched by exactly one
+other and watches exactly one other: no node is privileged, and none goes
+unobserved. A star (everyone watches A) leaves A's watchers unwatched and A
+watching nobody, which is strictly weaker for the same number of nodes.
+
+Nodes in a ring do **not** replicate each other. Each keeps its own key, its own
+database and its own log; federation beyond witnessing is an explicit non-goal
+(design.md §3). What the ring distributes is *trust*, not data.
+
+**Seeing the network.** `DEDI_PEERS` lists the other nodes, as
+`name=url` pairs, and the node then polls each for its signed checkpoint and
+reports the result on `/dedi/network` and in its explorer:
+
+```sh
+DEDI_PEERS='node-b=https://b.example.org,node-c=https://c.example.org'
+DEDI_PEER_INTERVAL=30s
+DEDI_NODE_NAME=node-a
+```
+
+This is an observation, not a proof — it establishes that a peer answered, and
+nothing about whether that peer is honest. Only witnessing does that, and the
+two are reported separately so one is never mistaken for the other.
 
 ## Mode 3 — Anchored
 
@@ -86,3 +118,7 @@ layout from on-chain metadata, so the same flags work against:
   each other).
 - Institutional / cross-network deployments that want an operator-independent
   timeline: **1+2+3**.
+
+Add replicas when the cost of the directory being *unreachable* matters — for
+Beckn, an unresolvable subscriber key is a 401 NACK on every message in flight.
+That is an availability question and is orthogonal to the mode you pick.

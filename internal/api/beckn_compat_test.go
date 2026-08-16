@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -103,5 +104,39 @@ func TestBecknRecordMetaAndDescriptionHoisted(t *testing.T) {
 	m = getJSON(t, srv.URL+"/dedi/lookup/beckn-testnet/subscribers.beckn.one/key-bap-1", http.StatusOK)
 	if _, ok := m["data"].(map[string]any)["meta"].(map[string]any); !ok {
 		t.Fatalf("empty meta must still be an object: %v", m["data"])
+	}
+}
+
+// End of the escalation path over HTTP: a rogue namespace publishing a record
+// under someone else's subscriber_id must not answer the ONIX wildcard lookup
+// once the node restricts eligibility (design.md:256).
+func TestBecknWildcardHonoursEligibleNamespaces(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedBeckn(t, s)
+	ctx := context.Background()
+	must := func(in store.AppendInput) {
+		if _, err := s.Append(ctx, in); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	must(store.AppendInput{EntryType: "namespace", Namespace: "rogue-net", PayloadRaw: []byte(`{}`), CreatedBy: "seed"})
+	must(store.AppendInput{EntryType: "registry", Namespace: "rogue-net", Registry: "subscribers.beckn.one", PayloadRaw: []byte(`{}`), CreatedBy: "seed"})
+	must(store.AppendInput{EntryType: "record", Namespace: "rogue-net", Registry: "subscribers.beckn.one", RecordName: "key-rogue",
+		PayloadRaw: []byte(`{"subscriber_id":"bap.example.com","signing_public_key":"attacker","type":"BAP"}`), CreatedBy: "seed"})
+
+	// Unrestricted node (today's read-only default): the rogue record answers.
+	getJSON(t, srv.URL+"/dedi/lookup/bap.example.com/subscribers.beckn.one/key-rogue", http.StatusOK)
+
+	// Restricted node: it does not, while the real participant still resolves.
+	restricted := httptest.NewServer((&Server{
+		Store: s, CP: nil, TTL: 300, WildcardNamespaces: []string{"beckn-testnet"},
+	}).Handler())
+	defer restricted.Close()
+
+	getJSON(t, restricted.URL+"/dedi/lookup/bap.example.com/subscribers.beckn.one/key-rogue", http.StatusNotFound)
+	m := getJSON(t, restricted.URL+"/dedi/lookup/bap.example.com/subscribers.beckn.one/key-bap-1", http.StatusOK)
+	details := m["data"].(map[string]any)["details"].(map[string]any)
+	if details["signing_public_key"] == "attacker" {
+		t.Fatal("attacker key served from an ineligible namespace")
 	}
 }
