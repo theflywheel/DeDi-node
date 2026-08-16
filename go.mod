@@ -9,6 +9,7 @@ require (
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/crypto v0.7.0
 	golang.org/x/mod v0.38.0
 )
