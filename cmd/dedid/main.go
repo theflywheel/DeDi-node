@@ -715,6 +715,7 @@ func serve() error {
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard,
+		AdminAuth:    adminAuth(keys != nil),
 		PublicURL:    publicURL,
 		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) },
 		// Off unless the operator says otherwise: the node fetches webhook
@@ -908,4 +909,30 @@ func witnessState(h witness.Health) api.WitnessState {
 		LastError: h.LastError, Attempts: h.Attempts, Failures: h.Failures,
 		Interval: h.Interval, Standby: h.Standby,
 	}
+}
+
+// adminAuth builds the deployment-level gate on the admin surface from the
+// environment.
+//
+// It is deliberately additive: the publisher signature still decides whether a
+// write is accepted, whose key id is recorded on the version, and which
+// namespaces that key may touch. This only decides who may reach the surface —
+// the operator of the deployment, rather than a publisher on it.
+//
+// Optional, because the write plane was already closed to anything unsigned and
+// making it mandatory would lock out every existing deployment and every signed
+// script on the next restart. Left unset with the write plane open, it says so
+// loudly: the console is a public form soliciting a private key, and that is
+// worth one line on every boot until someone configures it.
+func adminAuth(writeEnabled bool) *api.AdminAuth {
+	user := envOr("DEDI_ADMIN_USER", "admin")
+	pass := os.Getenv("DEDI_ADMIN_PASSWORD")
+	if pass == "" {
+		if writeEnabled {
+			log.Printf("WARNING: the admin console and write API are open to anyone who can reach this node. " +
+				"Writes still require a publisher signature, but set DEDI_ADMIN_PASSWORD to gate the surface itself.")
+		}
+		return nil
+	}
+	return &api.AdminAuth{User: user, Password: pass, Realm: "dedid admin"}
 }

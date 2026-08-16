@@ -85,10 +85,15 @@ func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
 }
 
 // admin serves the operator console: participant onboarding, key rotation and
-// revocation. The page is read-only against the node — it drives the public read
-// endpoints and generates the seed file an operator applies out of band, because
-// dedid exposes no write API (docs/governance.md).
+// revocation. The page holds no privilege of its own — it reads the public
+// endpoints, and writes are Ed25519-signed in the browser with a publisher key
+// the operator pastes in, which is imported non-extractable and never stored.
+//
+// It is served only where a write plane exists, behind the operator gate when
+// one is configured, and with a policy that assumes the pasted key is the thing
+// worth stealing. See adminPageHeaders.
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
+	adminPageHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(adminHTML)
 }
