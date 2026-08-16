@@ -58,6 +58,18 @@ another, and `DEDI_PEERS` to have it display the network it belongs to.
 
 ### Run a node of your own
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/mfW-Zh)
+
+One click gives you a Postgres with a volume and a node on a public domain,
+signing checkpoints, with nothing to fill in — it pulls
+[`flywheelai/dedi-node`](https://hub.docker.com/r/flywheelai/dedi-node) and
+mints its own identity key on first boot. It serves reads and accepts no writes
+until you generate a publisher key, which is the intended starting state.
+Details, and how to change what the button deploys:
+[docs/railway-template.md](docs/railway-template.md).
+
+From a checkout instead, which is how the nodes above were provisioned:
+
     scripts/deploy_railway.py --name my-dedi-node
 
 Provisions a Postgres, the node, and a domain, and waits until the node is actually serving. The
