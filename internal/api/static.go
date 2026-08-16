@@ -80,6 +80,10 @@ func (s *Server) verifyScript(w http.ResponseWriter, r *http.Request) {
 // docs serves the embedded explainer page (sequence diagrams + test cases).
 func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(docsHTML, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
+	// The contents list is generated from what this build actually embeds, not
+	// written into the page. A hand-maintained index is a list of links that
+	// stops matching the documents the moment someone adds one.
+	page = bytes.Replace(page, []byte("{{DOC_INDEX}}"), []byte(s.docIndex()), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
 }

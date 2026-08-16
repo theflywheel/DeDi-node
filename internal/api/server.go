@@ -174,6 +174,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
+	// Every markdown document in docs/, rendered from the copy embedded in this
+	// binary. Served by the node itself so a deployment can explain itself
+	// without reaching the internet — see the package comment on embed.go.
+	mux.HandleFunc("GET /docs/{page}", s.docPage)
 	// The console is only served where there is something for it to drive. On a
 	// read-only node it is a form soliciting a private key for a write plane
 	// that does not exist — attack surface with no counterpart.

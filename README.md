@@ -4,6 +4,10 @@ Self-hostable, open-source implementation of the [DeDi protocol](https://github.
 
 Why this exists (the story): [docs/why.md](docs/why.md). Design: [docs/design.md](docs/design.md). Status: M1 (core node) in progress.
 
+Every node serves its own documentation at `/docs`, rendered from the copy
+embedded in the binary it is running — so a deployment can explain itself
+without reaching the internet, and the docs are always the same age as the code.
+
 ## Quickstart
 
     make up                      # Postgres 16 on :5433
