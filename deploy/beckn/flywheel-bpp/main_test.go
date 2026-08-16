@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -152,5 +153,58 @@ func TestNonDiscoverActionsAreAckedAndIgnored(t *testing.T) {
 	case <-called:
 		t.Fatal("confirm produced a callback")
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// Beckn 2.0.0 requires catalogs[].provider and the BPP caller rejects a
+// callback without one. The upstream supplies it for schemes and omits it for
+// the provider domains, so filling the gap is what makes those three usable.
+func TestCatalogsWithoutAProviderGetOneBeforeTheyAreSigned(t *testing.T) {
+	cats := []any{map[string]any{"id": "weather", "resources": []any{}}}
+	got := withProvider(cats, "weather")[0].(map[string]any)
+
+	p, ok := got["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("no provider added: %v", got)
+	}
+	if p["id"] != "weather.theflywheel.in" {
+		t.Errorf("provider id = %v, want the subscriber it is registered under", p["id"])
+	}
+	if got["isActive"] != true {
+		t.Errorf("isActive = %v, want true", got["isActive"])
+	}
+}
+
+// Where the upstream names a provider it is the truthful one and more specific
+// than anything we could invent, so it must survive untouched.
+func TestAnUpstreamProviderIsNeverOverwritten(t *testing.T) {
+	theirs := map[string]any{"id": "schemes.india.gov.in"}
+	cats := []any{map[string]any{"provider": theirs, "resources": []any{}}}
+	got := withProvider(cats, "schemes")[0].(map[string]any)
+	if fmt.Sprintf("%v", got["provider"]) != fmt.Sprintf("%v", theirs) {
+		t.Errorf("provider = %v, want the upstream's %v", got["provider"], theirs)
+	}
+}
+
+// A conformant Beckn 2.0.0 discover must carry filters.type — the adapter NACKs
+// it otherwise — so flattening every string searches for the expression
+// language as well as the query. This is the shape every real request has.
+func TestQueryComesFromTheExpressionNotTheWholeFilter(t *testing.T) {
+	msg := map[string]any{"intent": map[string]any{
+		"filters": map[string]any{"type": "jsonpath", "expression": "Pune"},
+	}}
+	if got := queryFromIntent(msg); got != "Pune" {
+		t.Errorf("query = %q, want %q — the expression language is not a search term", got, "Pune")
+	}
+}
+
+// An intent carrying its terms somewhere other than an expression is still
+// legitimate; dropping it would turn a working search into an empty one.
+func TestAnIntentWithoutAnExpressionStillFlattens(t *testing.T) {
+	msg := map[string]any{"intent": map[string]any{
+		"filters": map[string]any{"attributes": map[string]any{"commodity": "onion", "market": "pune"}},
+	}}
+	if got := queryFromIntent(msg); got != "onion pune" {
+		t.Errorf("query = %q, want %q", got, "onion pune")
 	}
 }

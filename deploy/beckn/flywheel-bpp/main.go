@@ -150,7 +150,52 @@ func (p *proxy) search(domain, q string) ([]any, float64, error) {
 	if d.Error != "" {
 		return nil, 0, fmt.Errorf("upstream: %s", d.Error)
 	}
-	return d.Response.Message.Catalogs, d.Total, nil
+	return withProvider(d.Response.Message.Catalogs, domain), d.Total, nil
+}
+
+// providers names the upstream source behind each domain, by the subscriber id
+// it is registered under in our own registry.
+var providers = map[string][2]string{
+	"schemes": {"schemes.india.gov.in", "Government of India · myScheme"},
+	"weather": {"weather.theflywheel.in", "Weather Union + Open-Meteo"},
+	"mandi":   {"mandi.theflywheel.in", "CommodityOnline + MandiGuru"},
+	"news":    {"news.theflywheel.in", "Event Registry · agriculture news"},
+}
+
+// withProvider fills in the catalog's provider when the upstream left it out.
+//
+// Beckn 2.0.0 requires it and the BPP caller rejects the callback without one
+// ("property \"provider\" is missing"). The upstream sets it for schemes and
+// omits it for weather, mandi and news, which never shows up on its own stack
+// because only its schemes path goes through an adapter — the UI reads
+// /beckn/search directly and validates nothing.
+//
+// Naming the provider is ours to do rather than a workaround: on this network
+// we are the BPP publishing this catalog, and an unattributed one would tell a
+// consumer nothing about where the data came from.
+func withProvider(catalogs []any, domain string) []any {
+	p, known := providers[domain]
+	if !known {
+		return catalogs
+	}
+	for _, c := range catalogs {
+		cat, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Never overwrite: where the upstream names a provider, that is the
+		// truthful one and it is more specific than anything we could supply.
+		if _, has := cat["provider"]; !has {
+			cat["provider"] = map[string]any{
+				"id":         p[0],
+				"descriptor": map[string]any{"name": p[1]},
+			}
+		}
+		if _, has := cat["isActive"]; !has {
+			cat["isActive"] = true
+		}
+	}
+	return catalogs
 }
 
 // domainOf maps the Beckn context domain onto the upstream's domain parameter.
@@ -172,14 +217,36 @@ func domainOf(ctx map[string]any) string {
 	}
 }
 
-// queryFromIntent flattens every string in the intent, which is what the
-// upstream BPP does with the same message. Matching it matters: the two must
-// agree on what the user asked for, or the demo's displayed request and its
-// results describe different searches.
+// queryFromIntent recovers what the user actually asked for.
+//
+// filters.expression is preferred over flattening because Beckn 2.0.0 requires
+// filters.type alongside it — a schema-valid discover is NACKed without it
+// ("property \"type\" is missing"). Flattening every string therefore drops the
+// expression language into the query on every conformant request: "Pune" is
+// searched for as "Pune jsonpath". Fuzzy scheme matching shrugs that off;
+// geocoding a city and looking up a commodity do not.
+//
+// The upstream BPP flattens unconditionally and never notices, because its own
+// UI reads /beckn/search directly and never builds a protocol envelope. On the
+// signed path there is no such escape, so this diverges deliberately.
+//
+// Anything else still flattens: an intent that carries its terms in descriptors
+// or attributes rather than an expression is legitimate, and dropping it would
+// turn a working search into an empty one.
 func queryFromIntent(msg map[string]any) string {
-	intent, ok := msg["intent"]
+	intent, ok := msg["intent"].(map[string]any)
 	if !ok {
-		return ""
+		if _, present := msg["intent"]; !present {
+			return ""
+		}
+		var terms []string
+		collectStrings(msg["intent"], &terms)
+		return strings.Join(terms, " ")
+	}
+	if filters, ok := intent["filters"].(map[string]any); ok {
+		if expr, ok := filters["expression"].(string); ok && strings.TrimSpace(expr) != "" {
+			return strings.TrimSpace(expr)
+		}
 	}
 	var terms []string
 	collectStrings(intent, &terms)
