@@ -46,10 +46,13 @@ Three independently operated nodes carry the `beckn-testnet` registry, arranged 
 privileged. Each node has its own identity key, its own Postgres and its own log; they are separate
 operators, not replicas. Every node's explorer shows the whole network and which peers are up.
 
-- **Node A:** https://dedi.beckn.try-dough.com/ — the node carrying the Beckn subscribers, plus [/docs](https://dedi.beckn.try-dough.com/docs) (sequence diagrams + test cases).
-- **Node B:** https://dedi-b-production.up.railway.app/
-- **Node C:** https://dedi-c-production.up.railway.app/ — stood up from scratch with `scripts/deploy_railway.py`, key and all.
-- **Status page:** https://status.beckn.try-dough.com/ — per-node health, log and network monitors, plus the trust ring.
+- **Node A:** https://dedid-production-c2cd.up.railway.app/ — the node carrying the Beckn subscribers, plus [/docs](https://dedid-production-c2cd.up.railway.app/docs) (sequence diagrams + test cases). Also reachable at `dedi.beckn.try-dough.com` once that record resolves.
+- **Node B:** https://dedi-b-production-cd9f.up.railway.app/
+- **Node C:** https://dedi-c-production-c17f.up.railway.app/ — stood up from scratch with `scripts/deploy_railway.py`, key and all.
+
+Each node reports its own state at `/healthz` — database reachability, tree size, and
+the age of its newest checkpoint, which is the number that tells you whether a node is
+merely up or actually signing.
 
 The ring is the decentralised-trust property: a node cannot rewrite its history without the node
 watching it holding a consistency proof that says so, recorded in that node's own `_witness`
