@@ -9,6 +9,7 @@ require (
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
+	github.com/theflywheel/dedi-conformance v0.0.0-20260816103321-e65fcf816dc6
 	golang.org/x/crypto v0.7.0
 	golang.org/x/mod v0.38.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -49,3 +50,8 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
+
+// The conformance suite is vendored as a git submodule rather than resolved
+// from the module proxy, so the version this repo is measured against is the
+// commit recorded here — not whatever the proxy last saw.
+replace github.com/theflywheel/dedi-conformance => ./third_party/dedi-conformance

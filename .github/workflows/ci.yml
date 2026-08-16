@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # The store is Postgres-backed and the tests exercise real SQL —
+      # advisory locks, transactional restore, schema validation inside the
+      # write lock. A fake would test the fake.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dedi
+          POSTGRES_PASSWORD: dedi
+          POSTGRES_DB: dedi
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U dedi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Two submodules, both needed: docs/spec/lfdt is the standard the
+          # conformance tests read, and third_party/dedi-conformance is the
+          # suite itself, which go.mod `replace`s to that path.
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: gofmt
+        run: |
+          # Excluding the submodules: they are upstream's code, and this repo
+          # does not get to fail its build over their formatting.
+          unformatted=$(gofmt -l . | grep -v '^docs/spec/lfdt/' | grep -v '^third_party/' || true)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+
+      - run: go vet ./...
+
+      # -p 1 because the tests share one database and truncate it between
+      # cases; running packages in parallel makes them tear out each other's
+      # fixtures, which fails in a way that looks like a real bug.
+      - name: test
+        run: go test -p 1 ./...
+        env:
+          TEST_DATABASE_URL: postgres://dedi:dedi@localhost:5432/dedi?sslmode=disable
+
+      # Named separately so a conformance regression is legible in the checks
+      # list rather than buried in the full run. It has already passed above;
+      # this re-runs only that test and prints its report.
+      - name: conformance against the published suite
+        run: go test ./conformance/ -run TestAgainstTheStandardSuite -v
+        env:
+          TEST_DATABASE_URL: postgres://dedi:dedi@localhost:5432/dedi?sslmode=disable
+
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Deliberately no submodules: nothing outside tests reads the spec, so
+      # the image must build without them. If that ever stops being true this
+      # job is what catches it.
+      - run: docker build -t dedid:ci .
