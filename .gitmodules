@@ -1,0 +1,4 @@
+[submodule "docs/spec/lfdt"]
+	path = docs/spec/lfdt
+	url = https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol.git
+	branch = main

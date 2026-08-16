@@ -102,6 +102,13 @@ func (c Components) Resolve(s SchemaObj) SchemaObj {
 func LoadSpec(path string) (*Spec, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// The overwhelmingly likely cause is a checkout whose spec
+			// submodule was never initialised, which otherwise reads as
+			// "the spec is missing" rather than "fetch it".
+			return nil, fmt.Errorf("conformance: the spec is not present at %s — "+
+				"it is a git submodule, so run `git submodule update --init --recursive`: %w", path, err)
+		}
 		return nil, fmt.Errorf("conformance: reading spec: %w", err)
 	}
 	var spec Spec

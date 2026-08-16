@@ -1,7 +1,7 @@
 # Built-in reference registry schemas
 
-The DeDi standard ships five reference registry schemas, vendored read-only
-at `docs/spec/lfdt/schemas/`:
+The DeDi standard ships five reference registry schemas, read-only in the spec
+submodule at `docs/spec/lfdt/schemas/`:
 
 - `Beckn_subscriber.json`
 - `Beckn_subscriber_reference.json`
@@ -54,8 +54,9 @@ domain-specific registry still pastes its schema as before.
 
 `go:embed` cannot reach outside its own package directory, so
 `internal/refschemas/schemas/` holds a copy of the five files, not a
-reference to `docs/spec/lfdt/schemas/`. If the vendored spec is updated,
-refresh the copy with:
+reference to `docs/spec/lfdt/schemas/`. When the spec submodule's pin moves,
+refresh the copy with — and check the filenames still exist, since upstream has
+renamed these before:
 
 ```
 go generate ./internal/refschemas/...

@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// specPath is where the vendored DeDi standard lives. Read-only: this suite
-// never edits it.
+// specPath is where the DeDi standard lives: the pinned spec submodule.
+// Read-only — this suite never edits it.
 const specPath = "../docs/spec/lfdt/api/openapi.yaml"
 
 // classifiedEndpoints is the suite's map of every endpoint it knows how to
