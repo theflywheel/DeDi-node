@@ -45,7 +45,12 @@ type createChildRequest struct {
 // rather than a guess at the operator's registry: a wrong-but-plausible image
 // reference fails at pull time with a message about the image, long after the
 // operator has stopped thinking about this form.
-const defaultImage = "ghcr.io/theflywheel/dedi-node:latest"
+//
+// It must be a *publicly pullable* reference. The previous value pointed at a
+// GHCR package that was private, so a child provisioned with the default
+// failed on pull with an authentication error — the operator's first
+// experience of delegation, for a reason nothing in the form mentioned.
+const defaultImage = "flywheelai/dedi-node:latest"
 
 // createChild mints a delegation offer for a child namespace and returns the
 // rendered deploy artifact for it.
