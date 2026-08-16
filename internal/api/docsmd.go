@@ -265,6 +265,14 @@ func (s *Server) docPage(w http.ResponseWriter, r *http.Request) {
 // a documentation page that needs a stylesheet fetch is a page that renders
 // unstyled the one time the network is the thing going wrong.
 func (s *Server) docLayout(title, body string) string {
+	mermaid := ""
+	if strings.Contains(body, `<pre class="mermaid">`) {
+		mermaid = `
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });
+</script>`
+	}
 	return `<!doctype html>
 <html lang="en">
 <head>
@@ -294,6 +302,7 @@ func (s *Server) docLayout(title, body string) string {
 <nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="` + s.demoHref() + `">Demo</a></nav>
 ` + body + `
 <p class="back"><a href="/docs">← All documentation</a></p>
+` + mermaid + `
 </body>
 </html>`
 }

@@ -119,3 +119,15 @@ func TestMermaidFencesBecomeDiagrams(t *testing.T) {
 		t.Skip("no document currently contains a mermaid diagram")
 	}
 }
+
+func TestMermaidDocsLoadRuntime(t *testing.T) {
+	layout := (&Server{}).docLayout("Diagram", `<pre class="mermaid">graph TD; A-->B;</pre>`)
+	if !strings.Contains(layout, "mermaid.esm.min.mjs") {
+		t.Fatal("doc layout with a mermaid block did not load the Mermaid runtime")
+	}
+
+	layout = (&Server{}).docLayout("Plain", `<pre><code>graph TD; A-->B;</code></pre>`)
+	if strings.Contains(layout, "mermaid.esm.min.mjs") {
+		t.Fatal("doc layout loaded the Mermaid runtime for a page with no mermaid block")
+	}
+}

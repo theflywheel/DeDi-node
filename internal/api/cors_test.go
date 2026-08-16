@@ -105,7 +105,9 @@ func TestVerificationCodeIsServedOnceForBothPages(t *testing.T) {
 
 func TestEvidencePageDoesNotCountAsServedTraffic(t *testing.T) {
 	// It polls nothing, but it is this node's own page, like /docs and /admin.
-	for _, p := range []string{"/verify", "/verify/", "/static/verify.js"} {
+	for _, p := range []string{
+		"/verify", "/verify/", "/static/verify.js", "/docs/witnessing",
+	} {
 		if !selfTraffic(p) {
 			t.Errorf("%s should not count as served traffic", p)
 		}

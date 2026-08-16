@@ -92,7 +92,7 @@ func (s *Server) counted(h http.Handler) http.Handler {
 }
 
 func selfTraffic(path string) bool {
-	return path == "/" || path == "/docs" || path == "/docs/" ||
+	return path == "/" || path == "/docs" || strings.HasPrefix(path, "/docs/") ||
 		path == "/admin" || path == "/admin/" ||
 		path == "/verify" || path == "/verify/" ||
 		path == "/dedi/stats" || path == "/dedi/network" || path == "/healthz" ||
