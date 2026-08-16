@@ -39,6 +39,8 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
+	github.com/yuin/goldmark v1.8.5 // indirect
 	go.etcd.io/bbolt v1.3.5 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
