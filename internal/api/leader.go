@@ -20,6 +20,23 @@ func (s *Server) writer() Appender {
 	return s.Store
 }
 
+// onFollower reports whether this node is a clustered replica that is not the
+// leader, and therefore must not decide anything about a write from its own
+// state.
+//
+// A follower's store is a replica of the log as of whatever it has applied,
+// which by construction may trail the leader. That is fine for reads — they are
+// answered as of a checkpoint and say so — but a write decision made from it is
+// a claim about the current version, and the follower is not the authority on
+// that.
+func (s *Server) onFollower() bool {
+	if s.Cluster == nil {
+		return false
+	}
+	st := s.Cluster()
+	return st.Enabled && st.Role != "leader"
+}
+
 // redirectToLeader points a write at the replica that can serve it.
 //
 // 307 rather than 308: the redirect is about who is leader *now*, which changes

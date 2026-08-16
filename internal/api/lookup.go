@@ -100,6 +100,29 @@ func (s *Server) lookupRegistry(w http.ResponseWriter, r *http.Request) {
 // registries" segment (beckn-onix pkg/plugin/implementation/dediregistry).
 const becknWildcardRegistry = "subscribers.beckn.one"
 
+// becknNamespaceEligible reports whether a namespace may answer as authority
+// for beckn subscriber identity.
+//
+// A nil allowlist is no restriction, which is the shape a node has when its
+// write plane is closed: with nobody able to publish, there is nothing to scope.
+// Configuring publisher keys makes DEDI_WILDCARD_NAMESPACES mandatory, so the
+// check only binds where it has something to protect against.
+//
+// This governs the unversioned read — what a subscriber binds to *now*, which
+// is what routing consumes. Asking for a specific version or an as-on time is
+// reading history, and history is not an identity claim.
+func (s *Server) becknNamespaceEligible(ns string) bool {
+	if s.WildcardNamespaces == nil {
+		return true
+	}
+	for _, n := range s.WildcardNamespaces {
+		if n == ns {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 	ns, reg, rec := r.PathValue("namespace"), r.PathValue("registry_name"), r.PathValue("record_name")
 	if internalNamespaceGuard(w, r, ns, "record") {
@@ -115,8 +138,21 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, vid, asOn)
-	if errors.Is(err, store.ErrNotFound) && reg == becknWildcardRegistry && vid == nil && asOn == nil {
-		e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec, s.WildcardNamespaces)
+	if reg == becknWildcardRegistry && vid == nil && asOn == nil {
+		// An exact hit here used to be returned whatever namespace it sat in,
+		// so the eligibility allowlist only ever guarded the fallback. With the
+		// write plane open that is a hole: a publisher scoped to a namespace
+		// named after someone else's subscriber_id could create
+		// subscribers.beckn.one/{key_id} under it and answer ONIX lookups for
+		// an identity it does not hold, because ONIX reads any 200 on this path
+		// as a live participant.
+		//
+		// So an ineligible exact hit is not authoritative and does not short
+		// the search — the eligible namespaces still get their chance to answer,
+		// which is what FindBecknSubscriber is for.
+		if errors.Is(err, store.ErrNotFound) || !s.becknNamespaceEligible(ns) {
+			e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec, s.WildcardNamespaces)
+		}
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		notFound(w, "record")

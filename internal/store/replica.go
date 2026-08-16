@@ -46,13 +46,31 @@ func (s *Store) AllEntries(ctx context.Context) ([]Entry, error) {
 // appliedIndex is the Raft index the snapshot was taken at; it is restored
 // with the state so the rebuilt replica does not replay the commands the
 // snapshot already contains.
+// The whole restore is one transaction. It used to truncate on the pool and
+// then replay entry by entry, each in its own transaction, which meant a
+// snapshot that failed halfway — a bad snapshot, schema drift, a dropped
+// connection — left the replica with its previous state permanently deleted and
+// a prefix of the new one committed. That is the worst outcome available: not a
+// replica that failed to restore, but one that is silently serving a truncated
+// log. Either the replacement lands whole or nothing moves.
 func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Checkpoint, appliedIndex uint64) error {
-	if _, err := s.pool.Exec(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// One lock for the whole restore rather than one per entry: the replayed
+	// entries are a contiguous log and must not interleave with anything else.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, logWriteLock); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
 		`TRUNCATE log_entries, tree_hashes, checkpoints, raft_applied`); err != nil {
 		return fmt.Errorf("clear replica state: %w", err)
 	}
 	for _, e := range entries {
-		applied, err := s.Apply(ctx, AppendInput{
+		in := AppendInput{
 			EntryType:  e.EntryType,
 			Namespace:  e.Namespace,
 			Registry:   e.Registry,
@@ -61,7 +79,12 @@ func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Chec
 			State:      e.State,
 			CreatedBy:  e.CreatedBy,
 			CreatedAt:  e.CreatedAt,
-		})
+		}
+		raw, err := prepareAppend(&in)
+		if err != nil {
+			return fmt.Errorf("replay entry %d: %w", e.Seq, err)
+		}
+		applied, err := applyLocked(ctx, tx, in, raw)
 		if err != nil {
 			return fmt.Errorf("replay entry %d: %w", e.Seq, err)
 		}
@@ -71,9 +94,14 @@ func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Chec
 		}
 	}
 	for _, c := range checkpoints {
-		if err := s.SaveCheckpoint(ctx, c.TreeSize, c.RootHash, c.NoteText); err != nil {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO checkpoints (tree_size, root_hash, note_text) VALUES ($1,$2,$3)`,
+			c.TreeSize, c.RootHash, c.NoteText); err != nil {
 			return fmt.Errorf("restore checkpoint %d: %w", c.TreeSize, err)
 		}
 	}
-	return s.markApplied(ctx, appliedIndex)
+	if err := recordApplied(ctx, tx, appliedIndex); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

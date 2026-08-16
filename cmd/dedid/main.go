@@ -375,6 +375,25 @@ func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey str
 		return "", "", fmt.Errorf("read node key %s: %w", keyFile, readErr)
 	}
 
+	// Self-provisioning is per-database, and Raft replicas each have their own.
+	// A clustered deployment that forgets the key would therefore mint a
+	// *different* identity on every replica: the current leader's checkpoints
+	// verify under one key, and the moment leadership moves the same origin
+	// starts signing under another — which is indistinguishable from a forked
+	// log to every witness watching, and no health surface on any replica would
+	// show anything wrong. One click is worth having; one click into a cluster
+	// that silently breaks its own identity invariant is not.
+	//
+	// EnsureIdentity does resolve the race when replicas share a database, which
+	// is how the HA replica set is deployed. It cannot help across the separate
+	// databases Raft membership implies, so the requirement is on the operator.
+	if id := strings.TrimSpace(os.Getenv("DEDI_CLUSTER_ID")); id != "" {
+		return "", "", fmt.Errorf("DEDI_CLUSTER_ID=%s requires an explicit shared identity: "+
+			"set DEDI_KEY or DEDI_KEY_FILE to the same key on every replica "+
+			"(`dedid keygen` once, then distribute), because a self-provisioned "+
+			"identity is per-database and would differ on each replica", id)
+	}
+
 	// The generated key is only a candidate — if this node already has an
 	// identity, or another replica claims one first, EnsureIdentity returns the
 	// stored one and this key is discarded.

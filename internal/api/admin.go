@@ -186,6 +186,15 @@ func conflict(w http.ResponseWriter, err error) {
 //
 // Returns true when it has already answered the request.
 func (s *Server) unchanged(w http.ResponseWriter, r *http.Request, state string, payload []byte, in store.AppendInput) bool {
+	// A follower reads its own replica, which may not have applied the leader's
+	// latest version yet. Answering 200 "unchanged" from that is a stale claim
+	// about the current version: a client republishing what this replica happens
+	// to hold, with a matching If-Match, would be told it succeeded while the
+	// leader still has something else. Let the append redirect instead — the
+	// leader can make the same no-op decision correctly.
+	if s.onFollower() {
+		return false
+	}
 	current, err := s.Store.ResolveCurrentForWrite(r.Context(), in)
 	if errors.Is(err, store.ErrVersionConflict) {
 		conflict(w, err)
@@ -414,8 +423,11 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
-	// Revoking an already-revoked record is a no-op, not a second revocation.
-	if current.State == "revoked" {
+	// Revoking an already-revoked record is a no-op, not a second revocation —
+	// but only the leader may say so. On a follower `current` came from a replica
+	// that may not have applied the leader's latest version, so "already
+	// revoked" is a guess; fall through and let the append redirect.
+	if current.State == "revoked" && !s.onFollower() {
 		lockedCurrent, err := s.Store.ResolveCurrentForWrite(r.Context(), in)
 		if errors.Is(err, store.ErrVersionConflict) {
 			conflict(w, err)

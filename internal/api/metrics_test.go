@@ -74,7 +74,7 @@ func TestMetricsExposesNodeHealth(t *testing.T) {
 // /dedi/network, which means catching a falling-behind replica required a human
 // to have the page open.
 func TestMetricsExposesReplicaLag(t *testing.T) {
-	srv, _ := followerServer(t, cluster.State{
+	srv, _, _ := followerServer(t, cluster.State{
 		Enabled: true, NodeID: "r1", Role: "follower", LeaderID: "r0",
 		Term: 4, CommitIndex: 12, AppliedIndex: 9, LagEntries: 3,
 		LastContactSeconds: 90,

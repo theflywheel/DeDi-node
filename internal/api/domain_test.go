@@ -53,7 +53,7 @@ func domainServer(t *testing.T, ns string, z stubZone) (*httptest.Server, *store
 	}
 	srv := httptest.NewServer((&Server{
 		Store: s, CP: &checkpoint.Checkpointer{Store: s, SKey: skey, Origin: "domain.test/log", Interval: time.Hour},
-		TTL:   300, VerifierKey: domainTestNodeKey,
+		TTL: 300, VerifierKey: domainTestNodeKey,
 		WildcardNamespaces: []string{ns},
 		Auth:               &publisher.Authenticator{Keys: keys},
 		DNSResolver:        z,
