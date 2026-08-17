@@ -97,11 +97,12 @@ client or crawler has no defined semantics for any of it.
 | `?proof=inclusion` | lookup | **No** — param not in spec. |
 | `?domain=` discovery | `query/{ns}/{reg}` | **No** — param not in spec. |
 | `network_memberships`, `expired`, `not_yet_valid` | record body, `omitempty` | **No** — fields not in the `Record` schema. |
-| `_witness` namespace | `witness.go:28` | **No** — verdicts are visible through spec read endpoints as records no spec defines. Fixed as of task #45: any namespace prefixed `_` now 404s from `/dedi/lookup`, `/dedi/query`, and `/dedi/versions` unless the request carries `?internal=1`, so `_witness` no longer answers a spec-only crawler; the explorer and verify pages keep working by passing that param. |
+| `_witness` namespace | `witness.go:28` | **No** — verdicts are visible through spec read endpoints as records no spec defines. Fixed as of task #45: any namespace prefixed `_` now 404s from `/dedi/lookup`, `/dedi/query`, and `/dedi/versions` unless the request carries `?internal=1`, so `_witness` no longer answers a spec-only crawler; the explorer and verify pages keep working by passing that param. Since issue #27 the verdicts are also published properly, at `GET /dedi/witness` — the hiding rule is unchanged, but reading a verdict no longer requires knowing about it. |
 | Webhooks / subscriptions | `/admin/*` | **No** — spec freshness is pull + `next_update`. |
 | Anchoring | internal only | n/a — not externally visible. |
 | `/dedi/log/*` proofs | new paths | Generous reading of "verification/availability"; logs never named. |
 | `/dedi/network`, `/dedi/stats`, UI pages, `/healthz` | new paths | Operational surface, outside API scope. |
+| `GET /dedi/witness[/{target}]` | `witnessview.go` | **No** — paths not in spec. Verdicts about other nodes; same category as `/dedi/log/*` above (issue #27). |
 | Raft replication | internal | **Yes** — "availability guarantees" is named verbatim. |
 
 The two worst offenders were the ones occupying space the spec owns:

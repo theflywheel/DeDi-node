@@ -143,6 +143,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
 	mux.HandleFunc("GET /dedi/stats", s.stats)
 	mux.HandleFunc("GET /dedi/network", s.networkView)
+	// What this node has independently verified about other nodes. A first-class
+	// surface rather than a reserved namespace behind ?internal=1, because a
+	// verdict is the one claim a stranger is meant to come and read — see the
+	// file comment on witnessview.go and issue #27.
+	mux.HandleFunc("GET /dedi/witness", s.witnessView)
+	mux.HandleFunc("GET /dedi/witness/{$}", s.witnessView)
+	mux.HandleFunc("GET /dedi/witness/{target}", s.witnessOneView)
 	mux.HandleFunc("GET /dedi/delegations/{namespace}", s.listDelegations)
 	// File-publication model (docs/spec/lfdt/docs/publishing-dedi-files.md):
 	// this node as a publisher, alongside the API surface above. The
