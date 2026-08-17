@@ -59,9 +59,11 @@ the age of its newest checkpoint, which is the number that tells you whether a n
 merely up or actually signing.
 
 The ring is the decentralised-trust property: a node cannot rewrite its history without the node
-watching it holding a consistency proof that says so, recorded in that node's own `_witness`
-namespace. Set `DEDI_WITNESS_TARGET_URL` + `DEDI_WITNESS_TARGET_KEY` to make any node witness
-another, and `DEDI_PEERS` to have it display the network it belongs to.
+watching it holding a consistency proof that says so. `GET /dedi/witness` on any node publishes
+what it has verified about the others, each verdict carrying the target's URL and verifier key so
+you can redo the check without trusting the witness. Set `DEDI_WITNESS_TARGET_URL` +
+`DEDI_WITNESS_TARGET_KEY` to make any node witness another, and `DEDI_PEERS` to have it display
+the network it belongs to.
 
 ### Run a node of your own
 

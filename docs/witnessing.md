@@ -149,47 +149,84 @@ gives false comfort.
 
 ## Reading a verdict
 
-```sh
-BASE=https://node-a.example
-ORIGIN=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" \
-         "node-b.example/log")
+Everything this node has verified, about everyone:
 
-curl -s "$BASE/dedi/lookup/_witness/$ORIGIN/checkpoint?internal=1" | jq .data.details
+```sh
+curl -s https://node-a.example/dedi/witness | jq .data
 ```
 
 ```json
 {
-  "consistency_ok": true,
-  "size": 1744,
-  "root": "D3lzRh1lbCP9+1sriWOkVKeb++ITYno0CW50OON14K4=",
-  "target": "https://node-b.example/dedi"
+  "witness": "node-a.example/log",
+  "total": 1,
+  "consistent": 1,
+  "targets": [
+    {
+      "origin": "node-b.example/log",
+      "target_url": "https://node-b.example/dedi",
+      "target_key": "node-b.example+7f3a1c9d+Aa4b…",
+      "witnessed": true,
+      "consistency_ok": true,
+      "size": 1744,
+      "root": "D3lzRh1lbCP9+1sriWOkVKeb++ITYno0CW50OON14K4=",
+      "state": "live",
+      "verdict_at": "2026-08-18T04:11:07Z",
+      "version_num": 1743,
+      "health": { "checking": true, "stale": false, "seconds_since_success": 21 },
+      "verdict_url": "/dedi/witness/node-b.example%2Flog"
+    }
+  ]
 }
 ```
 
-The registry name is the target's **log origin**, percent-encoded, because an
-origin contains a slash. `/dedi/query/_witness/{origin}?internal=1` lists the
-verdict's whole version history — one version per time the target's tree moved,
-which is the audit trail.
+Follow `verdict_url` for one target and the response additionally carries the
+**inclusion proof of the verdict itself** — the leaf index, tree size and
+checkpoint that pin this conclusion to a position in node A's own log. That is
+the difference between a verdict and an assertion over HTTP: with the proof, A
+cannot show you `consistency_ok: true` and someone else a different answer
+without the two checkpoints disagreeing.
 
-### Why `?internal=1`
+Three fields exist so you can leave this node behind entirely. `target_url` and
+`target_key` are where to fetch B's checkpoint and the key to check its
+signature with; `size` and `root` are what A claims it verified. Together they
+are everything needed to [redo the check yourself](#checking-it-yourself).
 
-Namespaces beginning with `_` are the node's own bookkeeping, and the spec read
-endpoints hide them by default so that a crawler reading the standard's
-endpoints does not index them as ordinary directory data. `?internal=1` is the
-documented escape hatch (`internal/api/internal_ns.go`).
+### `witnessed` and `consistency_ok` are different questions
 
-Omit it and you get a 404 that looks exactly like "no such registry" — which is
-how the flag manages to be both the answer and very hard to find. Our own status
-page's witness monitors were built without it and sat amber, apparently
-reporting a broken ring, for as long as nobody checked why. An earlier draft of
-this page asserted the verdicts could not be read at all, on the same evidence.
+`witnessed: false` means there is a target here that has never been successfully
+checked — enrolled, configured, never verified. It is deliberately not the same
+shape as a failure, and neither one counts toward `consistent`.
 
-That is a genuine problem with the interface rather than a quirk to learn: the
-one internal namespace a stranger is *supposed* to read is behind a flag whose
-name tells them not to. Tracked as
-[issue #27](https://github.com/theflywheel/DeDi-node/issues/27), where the
-options are to exempt `_witness` from the hiding rule or to give verdicts a
-first-class endpoint of their own.
+Reducing with something like `.consistency_ok // true` would quietly turn "never
+verified" into "verified fine", which is the one wrong answer this endpoint
+exists to prevent. `consistent` is computed server-side so a monitor does not
+have to reimplement that reduction and get it subtly wrong.
+
+### The verdict is also in the log
+
+`/dedi/witness` is a view. The underlying entries live in the reserved
+`_witness` namespace, and `_`-prefixed namespaces stay hidden from the spec read
+endpoints (`/dedi/lookup`, `/dedi/query`, `/dedi/versions`) so a crawler reading
+the standard's endpoints does not index a node's bookkeeping as directory data.
+`?internal=1` is the escape hatch, and it is how you get the **version history**
+— one version per time the target's tree moved, which is the audit trail:
+
+```sh
+ORIGIN=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" \
+         "node-b.example/log")
+curl -s "https://node-a.example/dedi/versions/_witness/$ORIGIN/checkpoint?internal=1"
+```
+
+That flag used to be the *only* way to read a verdict at all, which was
+backwards: the one internal namespace a stranger is supposed to read sat behind
+a parameter named `internal`, and omitting it returned a 404 indistinguishable
+from "this node witnesses nobody". Our own status page's witness monitors were
+built without it and sat amber, apparently reporting a broken ring, for as long
+as nobody asked why — and an earlier draft of this page concluded from the same
+404 that verdicts were unreadable, which was wrong. `/dedi/witness`
+([issue #27](https://github.com/theflywheel/DeDi-node/issues/27)) is the fix:
+the claim is published under a name that says what it is, and the hiding rule is
+left exactly as it was.
 
 ### Checking it yourself
 

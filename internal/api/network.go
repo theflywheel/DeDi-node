@@ -46,6 +46,11 @@ func (s *Server) networkView(w http.ResponseWriter, r *http.Request) {
 		// this, a browser can verify the target's checkpoint signature against
 		// the target's own key, without this node in the loop.
 		"witness_key": s.WitnessTargetKey,
+		// Where the verdicts themselves live. Named here because this view is
+		// where a reader arrives asking "is anyone checking this node", and
+		// until they can follow a link from the answer, the evidence may as
+		// well not be published.
+		"witness_verdicts_url": "/dedi/witness",
 	}
 	if s.WitnessHealth != nil {
 		data["witness_health"] = witnessHealth(s.WitnessHealth())

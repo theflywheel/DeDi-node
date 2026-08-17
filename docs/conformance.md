@@ -97,11 +97,12 @@ client or crawler has no defined semantics for any of it.
 | `?proof=inclusion` | lookup | **No** — param not in spec. |
 | `?domain=` discovery | `query/{ns}/{reg}` | **No** — param not in spec. |
 | `network_memberships`, `expired`, `not_yet_valid` | record body, `omitempty` | **No** — fields not in the `Record` schema. |
-| `_witness` namespace | `witness.go:28` | **No** — verdicts are visible through spec read endpoints as records no spec defines. Fixed as of task #45: any namespace prefixed `_` now 404s from `/dedi/lookup`, `/dedi/query`, and `/dedi/versions` unless the request carries `?internal=1`, so `_witness` no longer answers a spec-only crawler; the explorer and verify pages keep working by passing that param. |
+| `_witness` namespace | `witness.go:28` | **No** — verdicts are visible through spec read endpoints as records no spec defines. Fixed as of task #45: any namespace prefixed `_` now 404s from `/dedi/lookup`, `/dedi/query`, and `/dedi/versions` unless the request carries `?internal=1`, so `_witness` no longer answers a spec-only crawler; the explorer and verify pages keep working by passing that param. Since issue #27 the verdicts are also published properly, at `GET /dedi/witness` — the hiding rule is unchanged, but reading a verdict no longer requires knowing about it. |
 | Webhooks / subscriptions | `/admin/*` | **No** — spec freshness is pull + `next_update`. |
 | Anchoring | internal only | n/a — not externally visible. |
 | `/dedi/log/*` proofs | new paths | Generous reading of "verification/availability"; logs never named. |
 | `/dedi/network`, `/dedi/stats`, UI pages, `/healthz` | new paths | Operational surface, outside API scope. |
+| `GET /dedi/witness`, `GET /dedi/witness/{target}` | `witnessview.go` | **No** — not in the spec. A read surface for this node's own verdicts about other nodes, added by issue #27 so the claim is not reachable only via `?internal=1`. It sits under `/dedi/` alongside `/dedi/log/checkpoint`, which is the same kind of thing — evidence about the log rather than directory data — and unlike `/enrol` (task #44) it is a read, so it cannot be mistaken for a spec write path. It reads no namespace a conformant client can see and returns nothing a conformant client depends on. |
 | Raft replication | internal | **Yes** — "availability guarantees" is named verbatim. |
 
 The two worst offenders were the ones occupying space the spec owns:
