@@ -102,7 +102,7 @@ client or crawler has no defined semantics for any of it.
 | Anchoring | internal only | n/a — not externally visible. |
 | `/dedi/log/*` proofs | new paths | Generous reading of "verification/availability"; logs never named. |
 | `/dedi/network`, `/dedi/stats`, UI pages, `/healthz` | new paths | Operational surface, outside API scope. |
-| `GET /dedi/witness`, `GET /dedi/witness/{target}` | `witnessview.go` | **No** — not in the spec. A read surface for this node's own verdicts about other nodes, added by issue #27 so the claim is not reachable only via `?internal=1`. It sits under `/dedi/` alongside `/dedi/log/checkpoint`, which is the same kind of thing — evidence about the log rather than directory data — and unlike `/enrol` (task #44) it is a read, so it cannot be mistaken for a spec write path. It reads no namespace a conformant client can see and returns nothing a conformant client depends on. |
+| `GET /dedi/witness[/{target}]` | `witnessview.go` | **No** — paths not in spec. Verdicts about other nodes; same category as `/dedi/log/*` above (issue #27). |
 | Raft replication | internal | **Yes** — "availability guarantees" is named verbatim. |
 
 The two worst offenders were the ones occupying space the spec owns:
