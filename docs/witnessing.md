@@ -168,8 +168,9 @@ curl -s "$BASE/dedi/lookup/_witness/$ORIGIN/checkpoint?internal=1" | jq .data.de
 
 The registry name is the target's **log origin**, percent-encoded, because an
 origin contains a slash. `/dedi/query/_witness/{origin}?internal=1` lists the
-verdict's whole version history — one version per time the target's tree moved,
-which is the audit trail.
+current witness records. `/dedi/versions/_witness/{origin}/checkpoint?internal=1`
+lists the verdict's whole version history, one version per time the target's
+tree moved, which is the audit trail.
 
 ### Why `?internal=1`
 
