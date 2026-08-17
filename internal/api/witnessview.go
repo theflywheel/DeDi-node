@@ -52,20 +52,33 @@ func (s *Server) witnessTargetView(ctx context.Context, origin string, reg store
 		// this verification instead of accepting our summary of it.
 		"verdict_url": "/dedi/witness/" + url.PathEscape(origin),
 	}
-	// internal/witness writes the target URL as a plain top-level field on the
-	// registry payload, beside the description.
+	// internal/witness writes the target URL and verifier key as plain top-level
+	// fields on the registry payload, beside the description.
 	var rp struct {
-		Target string `json:"target"`
+		Target    string `json:"target"`
+		TargetKey string `json:"target_key"`
 	}
 	if json.Unmarshal(reg.PayloadRaw, &rp) == nil && rp.Target != "" {
 		out["target_url"] = rp.Target
 	}
-	// The target's verifier key, where this node knows it. Public by
-	// construction — a verifier key is exactly what you hand out so others can
-	// check you — and without it a reader cannot validate the target's
-	// checkpoint signature themselves and is left trusting us.
-	if origin == s.WitnessTarget && s.WitnessTargetKey != "" {
+	// The target's verifier key. Public by construction — a verifier key is
+	// exactly what you hand out so others can check you — and without it a
+	// reader cannot validate the target's checkpoint signature themselves and
+	// is left trusting us, which is the trust this endpoint exists to remove.
+	//
+	// The configured ring target is a fallback for registries written before the
+	// key was recorded on them. It cannot cover a delegated child, whose key
+	// lives in a delegation record in a parent namespace this view cannot
+	// identify from the origin alone — which is why the witness now records it.
+	switch {
+	case rp.TargetKey != "":
+		out["target_key"] = rp.TargetKey
+	case origin == s.WitnessTarget && s.WitnessTargetKey != "":
 		out["target_key"] = s.WitnessTargetKey
+	default:
+		// Said out loud rather than left as a missing field, so a reader can
+		// tell "this node cannot help you check it" from "we forgot".
+		out["target_key_known"] = false
 	}
 
 	e, err := s.Store.Resolve(ctx, "record", witnessNamespace, origin, "checkpoint", nil, nil)
@@ -137,10 +150,28 @@ func (s *Server) witnessTargets(ctx context.Context) ([]store.SummaryRow, error)
 		}
 		return nil, err
 	}
-	// Page size is deliberately generous: the number of targets is bounded by
-	// how many nodes an operator has chosen to witness, not by user input.
-	rows, _, err := s.Store.QueryRegistries(ctx, witnessNamespace, store.QueryFilters{PageSize: 100})
-	return rows, err
+	// Paged through to the end rather than taking the first page.
+	//
+	// QueryFilters.normalize caps PageSize at 100, so a single call quietly
+	// returns a prefix once a node witnesses more than that — and this endpoint
+	// would then report a truncated `total` and a `consistent` count summed over
+	// the part it happened to see. A monitor reading "12 of 12 consistent" has
+	// no way to know it was told about 12 of 130, and the targets it was not
+	// told about are exactly the ones nobody is watching. Silent truncation is
+	// the one failure this endpoint must not have.
+	const page = 100
+	var all []store.SummaryRow
+	for p := 1; ; p++ {
+		rows, total, err := s.Store.QueryRegistries(ctx, witnessNamespace,
+			store.QueryFilters{Page: p, PageSize: page})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rows...)
+		if len(rows) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
 }
 
 // witnessView answers "what has this node verified, and about whom".

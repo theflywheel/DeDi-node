@@ -174,14 +174,55 @@ func (w *Witness) ensureParents(ctx context.Context) error {
 			return err
 		}
 	}
-	if _, err := w.Store.Resolve(ctx, "registry", witnessNS, w.Origin, "", nil, nil); errors.Is(err, store.ErrNotFound) {
-		p, _ := json.Marshal(map[string]any{"description": "witnessed checkpoints of " + w.Origin, "target": w.TargetURL})
+	reg, err := w.Store.Resolve(ctx, "registry", witnessNS, w.Origin, "", nil, nil)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
 		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS, Registry: w.Origin,
-			PayloadRaw: p, CreatedBy: "witness"}); err != nil {
+			PayloadRaw: w.registryPayload(), CreatedBy: "witness"}); err != nil {
 			return err
+		}
+	case err != nil:
+		return err
+	default:
+		// Upgrade path. Registries created before the target key was recorded
+		// carry no `target_key`, and the verdicts filed under them are then
+		// unre-checkable by anyone who does not already hold the target's key —
+		// which is every reader the endpoint exists for. Appending a new
+		// registry version is how this log corrects anything.
+		var have struct {
+			TargetKey string `json:"target_key"`
+		}
+		if json.Unmarshal(reg.PayloadRaw, &have) == nil && have.TargetKey != w.TargetKey && w.TargetKey != "" {
+			if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS,
+				Registry: w.Origin, PayloadRaw: w.registryPayload(), CreatedBy: "witness"}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// registryPayload describes the target a verdict is about.
+//
+// The verifier key is recorded here rather than left to the read plane to find,
+// because the read plane cannot find it for a delegated child: the child's key
+// lives in a delegation record in some parent namespace, and the witness
+// registry does not know which. Every witness — ring peer or child — already
+// holds the key it verifies against, so the honest place for it is the registry
+// that says what is being verified.
+//
+// It is a *verifier* key, published precisely so others can check the target
+// without asking us to vouch for it.
+func (w *Witness) registryPayload() []byte {
+	p := map[string]any{
+		"description": "witnessed checkpoints of " + w.Origin,
+		"target":      w.TargetURL,
+	}
+	if w.TargetKey != "" {
+		p["target_key"] = w.TargetKey
+	}
+	b, _ := json.Marshal(p)
+	return b
 }
 
 // VerifyOnce checks the target's latest checkpoint; if it advanced, verifies
@@ -194,6 +235,16 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	rootB64 := base64.StdEncoding.EncodeToString(root[:])
+
+	// Before the early return below, not after it. The parents describe the
+	// target — including the verifier key a reader needs to re-check any verdict
+	// filed under them — and that description has to be able to catch up even
+	// when the verdict itself does not change. Left where it used to be, an
+	// existing registry missing its key would stay that way for as long as the
+	// target's tree was quiet, which on a working ring is most of the time.
+	if err := w.ensureParents(ctx); err != nil {
+		return Result{}, err
+	}
 	last, lastRoot, have := w.lastWitnessed(ctx)
 
 	// An unchanged tree is only unchanged if its root still agrees. Returning
@@ -206,9 +257,6 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	if have && size == last {
 		if root == lastRoot {
 			return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
-		}
-		if err := w.ensureParents(ctx); err != nil {
-			return Result{}, err
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": false,
@@ -244,9 +292,6 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 		}
 	}
 
-	if err := w.ensureParents(ctx); err != nil {
-		return Result{}, err
-	}
 	payload, _ := json.Marshal(map[string]any{
 		"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": consistencyOK,
 	})
