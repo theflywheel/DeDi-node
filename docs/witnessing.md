@@ -149,27 +149,61 @@ gives false comfort.
 
 ## Reading a verdict
 
-In principle:
+```sh
+BASE=https://node-a.example
+ORIGIN=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" \
+         "node-b.example/log")
 
+curl -s "$BASE/dedi/lookup/_witness/$ORIGIN/checkpoint?internal=1" | jq .data.details
 ```
-GET /dedi/query/_witness/{target-origin}
-GET /dedi/lookup/_witness/{target-origin}/checkpoint
+
+```json
+{
+  "consistency_ok": true,
+  "size": 1744,
+  "root": "D3lzRh1lbCP9+1sriWOkVKeb++ITYno0CW50OON14K4=",
+  "target": "https://node-b.example/dedi"
+}
 ```
 
-**In practice this does not work today, and the reason is worth knowing.** The
-registry name is the target's log origin, and a log origin contains a slash
-(`host/log`). Go's HTTP router decodes percent-escapes before matching routes,
-so `%2F` becomes a real path separator and the request never matches. The
-verdicts are being written, they are in the log, they are provable — and they
-are unreachable through the API that exists to serve them.
+The registry name is the target's **log origin**, percent-encoded, because an
+origin contains a slash. `/dedi/query/_witness/{origin}?internal=1` lists the
+verdict's whole version history — one version per time the target's tree moved,
+which is the audit trail.
 
-That is tracked as
-[issue #27](https://github.com/theflywheel/DeDi-node/issues/27). Until it is
-fixed, a verdict is readable by its operator and nobody else, which means the
-ring currently proves less to a third party than the design says it does. It is
-called out here rather than left for someone to discover, because a document
-describing a guarantee that the interface does not yet deliver is worse than no
-document.
+### Why `?internal=1`
 
-Our own status page found this: the witness monitors have been amber since the
-day they were created, and they were right.
+Namespaces beginning with `_` are the node's own bookkeeping, and the spec read
+endpoints hide them by default so that a crawler reading the standard's
+endpoints does not index them as ordinary directory data. `?internal=1` is the
+documented escape hatch (`internal/api/internal_ns.go`).
+
+Omit it and you get a 404 that looks exactly like "no such registry" — which is
+how the flag manages to be both the answer and very hard to find. Our own status
+page's witness monitors were built without it and sat amber, apparently
+reporting a broken ring, for as long as nobody checked why. An earlier draft of
+this page asserted the verdicts could not be read at all, on the same evidence.
+
+That is a genuine problem with the interface rather than a quirk to learn: the
+one internal namespace a stranger is *supposed* to read is behind a flag whose
+name tells them not to. Tracked as
+[issue #27](https://github.com/theflywheel/DeDi-node/issues/27), where the
+options are to exempt `_witness` from the hiding rule or to give verdicts a
+first-class endpoint of their own.
+
+### Checking it yourself
+
+Do not stop at `consistency_ok: true`. That is this node's assertion, and taking
+it on faith is the habit witnessing exists to replace. The verdict carries the
+size and root it checked, so fetch the target's own checkpoint and its
+consistency proof and recompute:
+
+```sh
+curl -s https://node-b.example/dedi/log/checkpoint
+curl -s "https://node-b.example/dedi/log/proof/consistency?old=<size>&new=<newer>"
+```
+
+Verify the checkpoint signature against the target's key, then run the RFC 6962
+check. If that agrees, you have established the append-only property yourself,
+with the witness in the path only as a source of the older checkpoint — which is
+the entire job the witness was doing for you.
