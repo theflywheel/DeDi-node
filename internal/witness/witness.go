@@ -235,6 +235,16 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	rootB64 := base64.StdEncoding.EncodeToString(root[:])
+
+	// Before the early return below, not after it. The parents describe the
+	// target — including the verifier key a reader needs to re-check any verdict
+	// filed under them — and that description has to be able to catch up even
+	// when the verdict itself does not change. Left where it used to be, an
+	// existing registry missing its key would stay that way for as long as the
+	// target's tree was quiet, which on a working ring is most of the time.
+	if err := w.ensureParents(ctx); err != nil {
+		return Result{}, err
+	}
 	last, lastRoot, have := w.lastWitnessed(ctx)
 
 	// An unchanged tree is only unchanged if its root still agrees. Returning
@@ -247,9 +257,6 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	if have && size == last {
 		if root == lastRoot {
 			return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
-		}
-		if err := w.ensureParents(ctx); err != nil {
-			return Result{}, err
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": false,
@@ -285,9 +292,6 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 		}
 	}
 
-	if err := w.ensureParents(ctx); err != nil {
-		return Result{}, err
-	}
 	payload, _ := json.Marshal(map[string]any{
 		"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": consistencyOK,
 	})

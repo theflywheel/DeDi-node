@@ -423,3 +423,51 @@ func TestExistingRegistryGainsTheTargetKey(t *testing.T) {
 		t.Errorf("version_num = %d, want a new version appended", e.VersionNum)
 	}
 }
+
+// The deployed shape of the upgrade: an old registry that already has a verdict
+// under it, against a target whose tree has not moved. VerifyOnce returns early
+// on an unchanged root, so if the registry is only reconciled on the path that
+// writes a verdict, a live ring node never gains its key — the quiet case is the
+// normal case, not the edge case.
+func TestExistingRegistryGainsTheKeyWhileTheTargetIsQuiet(t *testing.T) {
+	s, cp, srv, vkey, _ := setup(t)
+	ctx := context.Background()
+	seed(t, s, "a")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+
+	// A first run establishes the verdict, then the registry is rewritten to the
+	// old key-less shape: exactly what a node upgraded in place looks like.
+	if _, err := w.VerifyOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS,
+		Registry:   "target.test",
+		PayloadRaw: []byte(`{"description":"witnessed checkpoints of target.test","target":"` + srv.URL + `/dedi"}`),
+		CreatedBy:  "witness"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The target has not moved, so this run writes no verdict.
+	r, err := w.VerifyOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Fresh {
+		t.Fatalf("expected an unchanged target, got %+v", r)
+	}
+
+	e, err := s.Resolve(ctx, "registry", witnessNS, "target.test", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		TargetKey string `json:"target_key"`
+	}
+	if json.Unmarshal(e.PayloadRaw, &got) != nil || got.TargetKey != vkey {
+		t.Fatalf("a quiet target left the registry without its key: %s", e.PayloadRaw)
+	}
+}
