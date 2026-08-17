@@ -351,3 +351,75 @@ func TestWitnessDetectsARewriteThatKeepsTheSameSize(t *testing.T) {
 		t.Fatalf("same-size rewrite verdict state %q, want revoked", e.State)
 	}
 }
+
+// The verifier key belongs on the witness registry, because it is the only
+// thing that lets a reader re-check the verdict without asking this node to
+// vouch for it — and for a delegated child the read plane has no other way to
+// find it.
+func TestRegistryRecordsTheTargetKey(t *testing.T) {
+	s, cp, srv, vkey, _ := setup(t)
+	ctx := context.Background()
+	seed(t, s, "a")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+	if _, err := w.VerifyOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := s.Resolve(ctx, "registry", witnessNS, "target.test", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		TargetKey string `json:"target_key"`
+	}
+	if json.Unmarshal(e.PayloadRaw, &got) != nil || got.TargetKey != vkey {
+		t.Fatalf("registry payload does not carry the target key: %s", e.PayloadRaw)
+	}
+}
+
+// Registries written before the key was recorded must gain it, or the verdicts
+// already filed under them stay unre-checkable for ever. Appending a new
+// registry version is how this log corrects anything.
+func TestExistingRegistryGainsTheTargetKey(t *testing.T) {
+	s, cp, srv, vkey, _ := setup(t)
+	ctx := context.Background()
+	seed(t, s, "a")
+	if _, _, err := cp.PublishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The old shape: description and target, no key.
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: witnessNS,
+		PayloadRaw: []byte(`{"description":"witnessed"}`), CreatedBy: "witness"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNS,
+		Registry:   "target.test",
+		PayloadRaw: []byte(`{"description":"witnessed checkpoints of target.test","target":"` + srv.URL + `/dedi"}`),
+		CreatedBy:  "witness"}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Witness{Store: s, TargetURL: srv.URL + "/dedi", TargetKey: vkey,
+		Origin: "target.test", Interval: time.Hour, Client: srv.Client()}
+	if _, err := w.VerifyOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := s.Resolve(ctx, "registry", witnessNS, "target.test", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		TargetKey string `json:"target_key"`
+	}
+	if json.Unmarshal(e.PayloadRaw, &got) != nil || got.TargetKey != vkey {
+		t.Fatalf("an existing registry did not gain the key: %s", e.PayloadRaw)
+	}
+	if e.VersionNum < 2 {
+		t.Errorf("version_num = %d, want a new version appended", e.VersionNum)
+	}
+}

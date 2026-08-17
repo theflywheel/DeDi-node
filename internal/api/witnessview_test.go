@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -218,5 +219,72 @@ func TestNetworkViewLinksToTheVerdicts(t *testing.T) {
 	m := getJSON(t, srv.URL+"/dedi/network", http.StatusOK)
 	if m["data"].(map[string]any)["witness_verdicts_url"] != "/dedi/witness" {
 		t.Errorf("network view does not point at the verdicts: %v", m["data"])
+	}
+}
+
+// The store caps a page at 100 rows. A node witnessing more than that must not
+// be told about a prefix and left to report it as the whole set: a monitor
+// reading "12 of 12 consistent" cannot tell it was shown 12 of 130, and the
+// targets it was not shown are precisely the ones nobody is watching.
+func TestEveryTargetIsListedPastTheStorePageLimit(t *testing.T) {
+	srv, s, _ := testServer(t)
+	const n = 105
+	for i := 0; i < n; i++ {
+		seedVerdict(t, s, fmt.Sprintf("t%03d.example/log", i), soundVerdict(int64(i+1)), "live")
+	}
+
+	m := getJSON(t, srv.URL+"/dedi/witness", http.StatusOK)
+	data := m["data"].(map[string]any)
+	if got := len(data["targets"].([]any)); got != n {
+		t.Errorf("listed %d targets, want %d — the tail was silently dropped", got, n)
+	}
+	if data["total"].(float64) != n {
+		t.Errorf("total = %v, want %d", data["total"], n)
+	}
+	if data["consistent"].(float64) != n {
+		t.Errorf("consistent = %v, want %d", data["consistent"], n)
+	}
+}
+
+// The verifier key is what makes a verdict re-checkable without us. It has to
+// come from the registry, because for a delegated child the node's configured
+// ring target is the wrong key and the child's own key lives in a delegation
+// record this view cannot locate from the origin alone.
+func TestTargetKeyComesFromTheWitnessRegistry(t *testing.T) {
+	srv, s, _ := testServer(t)
+	ctx := context.Background()
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: witnessNamespace,
+		PayloadRaw: []byte(`{"description":"witnessed"}`), CreatedBy: "witness"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "registry", Namespace: witnessNamespace,
+		Registry:   "child.example/log",
+		PayloadRaw: []byte(`{"target":"https://child.example/dedi","target_key":"child.example+abcd1234+AaaBBB"}`),
+		CreatedBy:  "witness"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNamespace,
+		Registry: "child.example/log", RecordName: "checkpoint",
+		PayloadRaw: []byte(soundVerdict(7)), State: "live", CreatedBy: "witness"}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := getJSON(t, srv.URL+"/dedi/witness", http.StatusOK)
+	got := m["data"].(map[string]any)["targets"].([]any)[0].(map[string]any)
+	if got["target_key"] != "child.example+abcd1234+AaaBBB" {
+		t.Errorf("target_key = %v, want the key recorded on the registry", got["target_key"])
+	}
+}
+
+// A target whose key this node does not hold says so, rather than omitting the
+// field — "we cannot help you check this" and "we forgot" are different facts.
+func TestUnknownTargetKeyIsStated(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedVerdict(t, s, testTargetOrigin, soundVerdict(1), "live")
+
+	m := getJSON(t, srv.URL+"/dedi/witness", http.StatusOK)
+	got := m["data"].(map[string]any)["targets"].([]any)[0].(map[string]any)
+	if got["target_key_known"] != false {
+		t.Errorf("target_key_known = %v, want false", got["target_key_known"])
 	}
 }
