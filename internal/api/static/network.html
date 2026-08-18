@@ -360,6 +360,16 @@ async function recheck(a, b, t){
   const say = h => { out.innerHTML = h; };
   say('<p class="mut">checking&hellip;</p>');
   const base = apiBase(b, t);
+  // The same pre-check collect() does, for the same reason. A browser silently
+  // blocks an http:// fetch from an https:// page, and without naming it the
+  // reader gets "could not complete the check" for what is really a one-line
+  // deployment fix — indistinguishable from a target that is refusing to answer.
+  if (location.protocol === 'https:' && base.startsWith('http:')) {
+    say('<p class="warn"><b>Your browser will not fetch that.</b> This page is served over https and the ' +
+      'target&rsquo;s URL is <code>' + esc(base) + '</code>. Nothing is established either way; the target ' +
+      'needs an https URL before anyone can check it from here.</p>');
+    return;
+  }
   try {
     const cpText = await text(base + '/log/checkpoint');
     const note = parseNote(cpText);
