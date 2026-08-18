@@ -26,6 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Kept although the build no longer emulates anything: the Dockerfile
+      # cross-compiles, so QEMU is unused as long as the runtime stage only
+      # COPYs. It is nine seconds of insurance against a future RUN in that
+      # stage failing obscurely instead of merely being slow.
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -59,6 +63,12 @@ jobs:
           # arm64 is not optional: a good share of self-hosters are on Apple
           # silicon or Graviton, and an amd64-only image fails there at run time
           # rather than at pull time, which is a confusing way to find out.
+          #
+          # It is also no longer expensive. This step took 731 seconds because
+          # the Dockerfile had no --platform on its build stage, so buildx ran
+          # the whole Go compile under QEMU for arm64. Cross-compiling instead
+          # halved a cold both-platform build locally, 166s -> 78s, which is
+          # less than the emulated amd64 build alone took.
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
