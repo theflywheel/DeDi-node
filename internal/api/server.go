@@ -69,6 +69,11 @@ type Server struct {
 	// only thing that can actually change the log.
 	AdminAuth *AdminAuth
 
+	// StatusURL points at an external monitor watching this node from outside.
+	// Empty by default and by design: a node cannot honestly claim someone is
+	// watching it unless its operator says who.
+	StatusURL string
+
 	// PublicURL is this node's externally reachable base URL. Behind a proxy
 	// the request's own Host is the proxy's, so a child told to enrol against
 	// it cannot reach us; this is what the child is handed instead.
@@ -141,6 +146,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /dedi/versions/{namespace}/{registry_name}/{record_name}", s.versionsRecord)
 	mux.HandleFunc("GET /dedi/log/checkpoint", s.logCheckpoint)
 	mux.HandleFunc("GET /dedi/log/proof/consistency", s.logConsistency)
+	// The signing history, and the write activity that makes a gap in it
+	// readable. See the file comment on statusview.go: neither series answers
+	// the question on its own.
+	mux.HandleFunc("GET /dedi/log/history", s.logHistory)
 	mux.HandleFunc("GET /dedi/stats", s.stats)
 	mux.HandleFunc("GET /dedi/network", s.networkView)
 	// What this node has independently verified about other nodes. A first-class
@@ -187,6 +196,10 @@ func (s *Server) Handler() http.Handler {
 	// the other is the argument the data supports.
 	mux.HandleFunc("GET /network", s.networkPage)
 	mux.HandleFunc("GET /network/{$}", s.networkPage)
+	// What this node signed and when — a record of signing, not of
+	// availability. The distinction is the page's whole thesis.
+	mux.HandleFunc("GET /status", s.statusPage)
+	mux.HandleFunc("GET /status/{$}", s.statusPage)
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)

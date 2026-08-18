@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status</title>
+<style>
+  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.3em; margin: 0 0 .2em; }
+  h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; font-weight: normal; }
+  td.num { font-variant-numeric: tabular-nums; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; } .warn { color: #8a6d00; }
+  .wit { color: #1f4788; }
+  .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
+  /* The one claim on this page that is not self-reported gets the colour the
+     other pages reserve for exactly that. */
+  .checked { border: 1px solid #1f4788; border-left-width: 3px; padding: .5em .8em; margin: .8em 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: .5em; margin: .6em 0 1em; }
+  .card { border: 1px solid #ccc; padding: .5em .7em; }
+  .card .v { font-size: 1.25em; font-variant-numeric: tabular-nums; }
+  .chart { border: 1px solid #ccc; padding: .7em; }
+  .row { display: flex; align-items: flex-end; gap: 1px; height: 3.4em; }
+  .row.act { height: 2.4em; }
+  .cell { flex: 1 1 0; min-width: 0; }
+  .lbl { display: flex; justify-content: space-between; font-size: .82em; margin: .2em 0 .5em; }
+  .key { display: flex; gap: 1.2em; flex-wrap: wrap; font-size: .85em; margin-top: .6em; }
+  .key span { display: flex; gap: .35em; align-items: center; }
+  .sw { width: 1em; height: .8em; display: inline-block; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+{{NAV}}
+
+<h1>Status</h1>
+<p class="mut" id="lede">Loading&hellip;</p>
+
+<div class="banner">
+  <b>This is a record of signing, not of availability.</b> It shows what this node committed to and when,
+  read out of its own database. It cannot tell you whether the node was reachable &mdash; a node with a wedged
+  listener and a healthy signer produces a perfect timeline, and a node that was down serves no page at all.
+  For reachability, something outside has to watch.<span id="ext"></span></p>
+  <p class="mut" style="margin:.4em 0 0" id="whosigns">&nbsp;</p>
+</div>
+
+<div id="checked" class="checked"><span class="mut">asking the ring&hellip;</span></div>
+
+<div class="cards" id="cards"></div>
+
+<h2>Signing, and what there was to sign</h2>
+<p class="mut" id="chart-lede">The top row is checkpoints; the bottom row is entries written. Read together
+they say something neither says alone: nothing written and nothing signed is a quiet log, which is correct
+&mdash; the node signs only when the tree grows. Entries that no signature covers are the only genuine fault
+here, and that is decided by log position rather than by which half-hour a signature happened to land in.</p>
+
+<div class="chart">
+  <div class="lbl"><span class="mut" id="t-from">&hellip;</span><span class="wit">checkpoints signed</span><span class="mut">now</span></div>
+  <div class="row" id="row-cp"></div>
+  <div class="lbl" style="margin-top:.5em"><span class="mut">&nbsp;</span><span class="mut">entries written</span><span class="mut">&nbsp;</span></div>
+  <div class="row act" id="row-act"></div>
+  <div class="key">
+    <span><i class="sw" style="background:#1f4788"></i> signed</span>
+    <span><i class="sw" style="background:#ccc"></i> entries written</span>
+    <span><i class="sw" style="background:#fff"></i> idle &mdash; nothing to sign</span>
+    <span><i class="sw" style="background:#b00"></i> writes unsigned</span>
+  </div>
+</div>
+<p class="mut" id="verdict" style="margin-top:.5em"></p>
+
+<h2>Right now</h2>
+<table id="now"><tr><td class="mut">reading&hellip;</td></tr></table>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => Number(n).toLocaleString();
+const BUCKETS = 48, BUCKET_SECONDS = 1800;
+
+async function j(url, ms){
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms || 8000);
+  try {
+    const r = await fetch(url, { signal: c.signal });
+    if (!r.ok) throw new Error(url + ' -> ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+function ago(sec){
+  sec = Math.round(sec);
+  if (sec < 90) return sec + 's';
+  if (sec < 5400) return Math.round(sec/60) + 'm';
+  if (sec < 172800) return Math.round(sec/3600) + 'h';
+  return Math.round(sec/86400) + 'd';
+}
+
+// One fetch of /metrics, four values out of it. Four separate scrapes was four
+// chances for a slow read to hang the page with no timeout, and four times the
+// work for one page load.
+async function metrics(){
+  const out = {};
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 8000);
+    const r = await fetch('/metrics', { signal: c.signal });
+    clearTimeout(t);
+    if (!r.ok) return out;
+    const body = await r.text();
+    for (const name of ['dedi_checkpoint_age_seconds', 'dedi_checkpoint_tree_size',
+                        'dedi_log_entries', 'dedi_uptime_seconds']) {
+      // The exponent form is not optional: metrics.go formats with %g, which
+      // switches to 1.03e+06 past a million, and a regex stopping at the 'e'
+      // reads a twelve-day-old checkpoint as one second old.
+      const m = body.match(new RegExp('^' + name + '\\s+(-?[\\d.]+(?:[eE][+-]?\\d+)?)', 'm'));
+      if (m) out[name] = Number(m[1]);
+    }
+  } catch (e) { /* the cards say "—"; the chart above does not depend on this */ }
+  return out;
+}
+
+// A checkpoint covers a PREFIX of the log, so an entry at or below the latest
+// checkpoint's tree size is signed whenever either happened. Deciding it by
+// whether a signature landed in the same half-hour compares two clocks against
+// a bucket boundary and is wrong routinely — steady-state signing is one tick
+// after the write it covers, which is often the next bucket.
+function render(d){
+  const buckets = d.buckets || [];
+  const signedThrough = d.signed_through === undefined ? -1 : d.signed_through;
+  const rowCp = $('row-cp'), rowAct = $('row-act');
+  rowCp.innerHTML = ''; rowAct.innerHTML = '';
+  const maxE = Math.max(1, ...buckets.map(b => b.entries || 0));
+  let unsigned = 0, idle = 0, signing = 0;
+
+  for (const b of buckets) {
+    const wrote = (b.entries || 0) > 0;
+    const signed = (b.checkpoints || 0) > 0;
+    const covered = b.max_seq === undefined || b.max_seq <= signedThrough;
+    const when = new Date(b.at).toLocaleString();
+
+    let colour, title;
+    if (wrote && !covered) {
+      colour = '#b00';
+      title = when + ' — ' + num(b.entries) + ' entries, and nothing has signed up to position ' +
+        num(b.max_seq) + ' yet';
+      unsigned++;
+    } else if (signed) {
+      colour = '#1f4788';
+      title = when + ' — signed ' + num(b.checkpoints) + ' checkpoint(s)';
+      signing++;
+    } else if (wrote) {
+      colour = '#9fb4d6';
+      title = when + ' — ' + num(b.entries) + ' entries, all covered by a later signature';
+      signing++;
+    } else {
+      colour = '#f4f4f4';
+      title = when + ' — nothing written, so nothing to sign';
+      idle++;
+    }
+
+    const c = document.createElement('div');
+    c.className = 'cell';
+    c.style.background = colour;
+    c.style.height = (colour === '#f4f4f4') ? '18%' : '100%';
+    c.style.alignSelf = 'flex-end';
+    c.title = title;
+    rowCp.appendChild(c);
+
+    const a = document.createElement('div');
+    a.className = 'cell';
+    a.style.background = wrote ? '#ccc' : '#fafafa';
+    a.style.height = wrote ? Math.max(12, Math.round((b.entries / maxE) * 100)) + '%' : '4%';
+    a.style.alignSelf = 'flex-end';
+    a.title = wrote ? num(b.entries) + ' entries' : 'no entries';
+    rowAct.appendChild(a);
+  }
+
+  const hours = Math.round(buckets.length * (d.bucket_seconds || BUCKET_SECONDS) / 3600);
+  $('t-from').textContent = hours + 'h ago';
+  $('verdict').innerHTML = unsigned > 0
+    ? '<span class="no"><b>' + unsigned + ' of ' + buckets.length + ' periods hold writes that no signature ' +
+      'covers.</b></span> That is the one shape here that is a fault rather than a quiet spell.'
+    : '<span class="ok">Every write in this window is covered by a signature.</span> ' +
+      '<span class="mut">' + idle + ' of ' + buckets.length + ' periods had nothing written, so there was ' +
+      'nothing to sign. This page cannot tell an idle log from a node that was not running &mdash; nothing ' +
+      'here is evidence of reachability either way.</span>';
+}
+
+// The one claim here that is not this node talking about itself.
+//
+// A fork verdict wins outright. Sorting all verdicts by time and keeping the
+// newest let a second peer's happy verdict overwrite a first peer's ✗ — turning
+// the one detection the ring exists to surface into a blue "independently
+// verified".
+async function lastChecked(){
+  const el = $('checked');
+  try {
+    const net = (await j('/dedi/network')).data;
+    const self = (net.nodes || []).find(n => n.self) || {};
+    const peers = (net.nodes || []).filter(n => !n.self && n.url);
+    let best = null, by = null, forked = null, forkedBy = null;
+    let asked = 0, failed = 0;
+    await Promise.all(peers.map(async p => {
+      asked++;
+      try {
+        const d = (await j(p.url.replace(/\/$/, '') + '/dedi/witness')).data;
+        for (const t of (d.targets || [])) {
+          if (t.origin !== self.origin) continue;
+          if (t.consistency_ok === false) { forked = t; forkedBy = p.name; continue; }
+          if (t.witnessed === true && (!best || (t.verdict_at || '') > (best.verdict_at || ''))) {
+            best = t; by = p.name;
+          }
+        }
+      } catch (e) { failed++; }
+    }));
+
+    if (forked) {
+      el.innerHTML = '<b class="no">✗ ' + esc(forkedBy) + ' has caught this log changing under it.</b> ' +
+        '<span class="mut">' + esc(forked.detail || '') + ' <a href="/network">see the ring</a></span>';
+      return;
+    }
+    if (best) {
+      el.innerHTML = '<b class="wit">' + esc(by) + ' independently verified this log</b> ' +
+        '<span class="mut">at ' + num(best.size) + ' entries' +
+        (best.verdict_at ? ', ' + esc(best.verdict_at.slice(0,16).replace('T',' ')) : '') +
+        '. That is the only claim on this page not made by this node about itself, and you can ' +
+        '<a href="/network">check it yourself</a>.' +
+        (failed ? ' (' + failed + ' of ' + asked + ' peers did not answer, so there may be more.)' : '') +
+        '</span>';
+      return;
+    }
+    // Silence, no peers, and a clean "nobody witnesses us" are three different
+    // facts. Collapsing them is the mistake the overview page was rewritten
+    // twice to stop making.
+    let head, body;
+    if (asked === 0) {
+      head = 'No independent check to show.';
+      body = 'This node knows of no peers to ask, so nothing here has been checked by anyone else.';
+    } else if (failed === asked) {
+      head = 'Could not find out.';
+      body = 'None of the ' + asked + ' known peers answered, so this page cannot say whether anyone has ' +
+        'checked this log.';
+    } else {
+      head = 'No independent check to show.';
+      body = 'Of ' + asked + ' known peers, ' + (asked - failed) + ' answered and none reports witnessing ' +
+        'this log' + (failed ? '; ' + failed + ' did not answer and may be' : '') + '.';
+    }
+    el.innerHTML = '<b>' + head + '</b> <span class="mut">' + body + ' Everything else on this page is this ' +
+      'node&rsquo;s own account of itself. <a href="/network">the ring</a></span>';
+  } catch (e) {
+    el.innerHTML = '<span class="mut">Could not reach the ring to see whether anyone has checked this ' +
+      'node.</span>';
+  }
+}
+
+function card(label, value, cls){
+  return '<div class="card"><div class="mut" style="font-size:.85em">' + esc(label) + '</div>' +
+    '<div class="v ' + cls + '">' + value + '</div></div>';
+}
+
+(async function(){
+  // The external monitor is named only when this deployment's operator has said
+  // who it is. Hardcoding one would have every node running this binary assert
+  // that something it does not run, and cannot see, is watching it.
+  const ext = '{{STATUS_URL}}';
+  $('ext').innerHTML = ext
+    ? ' <a href="' + ext + '">The external monitor</a> does that, and neither of us can answer the ' +
+      'other&rsquo;s question.'
+    : ' No external monitor is configured for this node, so nothing here or anywhere else on it can tell ' +
+      'you whether it was reachable.';
+
+  try {
+    const d = (await j('/dedi/log/history?buckets=' + BUCKETS + '&bucket_seconds=' + BUCKET_SECONDS)).data;
+    $('lede').textContent = 'What this node signed over the last ' +
+      Math.round(BUCKETS * BUCKET_SECONDS / 3600) + ' hours, and what there was to sign.';
+
+    // On a Raft follower this node signs nothing at all: every checkpoint here
+    // is the leader's signature, applied locally. A page saying "what this node
+    // signed" is simply wrong on two of every three replicas.
+    if (d.cluster_enabled && d.signs_here === false) {
+      $('whosigns').innerHTML = '<b>This replica does not sign.</b> It is a ' + esc(d.role || 'follower') +
+        '; the cluster&rsquo;s leader signs and the checkpoints are replicated here. The top row below is ' +
+        'the cluster&rsquo;s signing history, not this process&rsquo;s.';
+      $('chart-lede').innerHTML = $('chart-lede').innerHTML.replace('the node signs only when the tree grows',
+        'the cluster signs only when the tree grows');
+    }
+    render(d);
+
+    const m = await metrics();
+    const age = m['dedi_checkpoint_age_seconds'];
+    const up = m['dedi_uptime_seconds'];
+    $('cards').innerHTML =
+      card('last signed', age === undefined ? '—' : age < 0 ? 'never' : ago(age) + ' ago',
+           age !== undefined && age >= 0 && age < 3600 ? 'ok' : 'mut') +
+      card('tree size', m['dedi_checkpoint_tree_size'] === undefined ? '—' : num(m['dedi_checkpoint_tree_size']), '') +
+      card('entries', m['dedi_log_entries'] === undefined ? '—' : num(m['dedi_log_entries']), '') +
+      card('this process up', up === undefined ? '—' : ago(up), 'mut');
+    $('now').innerHTML =
+      '<tr><td class="mut" style="width:34%">signed through</td><td class="num">' +
+        (d.signed_through < 0 ? 'nothing signed yet' : 'entry ' + num(d.signed_through)) + '</td></tr>' +
+      '<tr><td class="mut">entries in window</td><td class="num">' + num(d.entries || 0) + '</td></tr>' +
+      '<tr><td class="mut">checkpoints in window</td><td class="num">' + num(d.checkpoints || 0) + '</td></tr>' +
+      '<tr><td class="mut">process uptime</td><td class="mut">' +
+        (up === undefined ? 'unknown' : ago(up)) + ' &mdash; this process only. Nothing here survives a ' +
+        'restart, which is why it is not an uptime figure.</td></tr>';
+  } catch (e) {
+    $('lede').innerHTML = '<span class="no">Could not read this node&rsquo;s history: ' +
+      esc(String(e && e.message || e)) + '</span>';
+    $('verdict').textContent = '';
+  }
+  lastChecked();
+})();
+</script>
+</body>
+</html>

@@ -97,13 +97,15 @@ func selfTraffic(path string) bool {
 	// reader browsing the docs, or the directory browser, is the node talking
 	// about itself, the same as the explorer or the console.
 	if strings.HasPrefix(path, "/docs/") || path == "/browse" || path == "/browse/" ||
-		path == "/network" || path == "/network/" {
+		path == "/network" || path == "/network/" ||
+		path == "/status" || path == "/status/" {
 		return true
 	}
 	return path == "/" || path == "/docs" ||
 		path == "/admin" || path == "/admin/" ||
 		path == "/verify" || path == "/verify/" ||
-		path == "/dedi/stats" || path == "/dedi/network" || path == "/healthz" ||
+		path == "/dedi/stats" || path == "/dedi/network" || path == "/dedi/log/history" ||
+		path == "/healthz" ||
 		path == "/metrics" ||
 		strings.HasPrefix(path, "/static/")
 }

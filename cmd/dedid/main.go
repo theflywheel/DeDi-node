@@ -715,6 +715,10 @@ func serve() error {
 		WitnessTarget: witnessTargetOrigin, WitnessTargetURL: witnessTargetURL,
 		WitnessTargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 		DemoURL:          os.Getenv("DEDI_DEMO_URL"), WildcardNamespaces: wildcard,
+		// Who watches this node from outside. Empty unless the operator says,
+		// because /status can only report what this node signed and must not
+		// imply that somebody independent is checking it is up.
+		StatusURL:    os.Getenv("DEDI_EXTERNAL_STATUS_URL"),
 		AdminAuth:    adminAuth(keys != nil),
 		PublicURL:    publicURL,
 		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) },

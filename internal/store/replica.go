@@ -95,8 +95,11 @@ func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Chec
 	}
 	for _, c := range checkpoints {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO checkpoints (tree_size, root_hash, note_text) VALUES ($1,$2,$3)`,
-			c.TreeSize, c.RootHash, c.NoteText); err != nil {
+			// created_at explicitly: the column defaults to now(), which would
+			// restamp every restored checkpoint with the moment this replica
+			// joined and erase the signing history the snapshot carried.
+			`INSERT INTO checkpoints (tree_size, root_hash, note_text, created_at) VALUES ($1,$2,$3,$4)`,
+			c.TreeSize, c.RootHash, c.NoteText, c.CreatedAt); err != nil {
 			return fmt.Errorf("restore checkpoint %d: %w", c.TreeSize, err)
 		}
 	}

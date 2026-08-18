@@ -17,6 +17,9 @@ var overviewHTML []byte
 //go:embed static/network.html
 var networkPageHTML []byte
 
+//go:embed static/status.html
+var statusPageHTML []byte
+
 //go:embed static/docs.html
 var docsHTML []byte
 
@@ -82,6 +85,30 @@ func (s *Server) writePage(w http.ResponseWriter, page []byte, current string) {
 	page = bytes.Replace(page, []byte("{{NAV}}"), []byte(s.nav(current)), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
+}
+
+// replaceOnce substitutes a placeholder, returning a fresh slice so the
+// embedded page is never mutated.
+func replaceOnce(page []byte, token, with string) []byte {
+	return bytes.Replace(page, []byte(token), []byte(with), 1)
+}
+
+// externalStatusHref names the outside monitor that watches this node from
+// somewhere else.
+//
+// It has to be configurable and it has to default to nothing. Hardcoding the
+// flywheel demo's monitor would have every deployment of this binary assert
+// that an external monitor it does not run, and cannot see, is watching it —
+// on the one page whose thesis is that it can only report what it signed.
+func (s *Server) externalStatusHref() string {
+	if s.StatusURL == "" {
+		return ""
+	}
+	u, err := url.Parse(s.StatusURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	return html.EscapeString(s.StatusURL)
 }
 
 // demoURL is the target of the nav's "Demo" tab. Every node ships the same
