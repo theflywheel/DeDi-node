@@ -141,18 +141,39 @@ async function watchers(self, peers){
 function renderWatchers(r){
   const list = r.found;
   if (!list.length){
-    if (r.failed > 0 && r.failed === r.asked){
-      $('watchers').innerHTML = '<b>Could not find out.</b>' +
-        '<p class="mut" style="margin:.3em 0 0">None of the ' + r.asked + ' known peers answered, so this page ' +
-        'cannot tell whether anyone is witnessing this log. That is different from nobody watching it, and it ' +
-        'is not reported as such. <a href="/docs/witnessing">How witnessing works</a></p>';
-      return;
+    // "Nobody is watching this log" is a claim this page can never actually
+    // establish, and it took two rounds of review to see why. Even with every
+    // peer answering and none of them witnessing us, a node we have never heard
+    // of may be witnessing this log — witnessing needs our checkpoint and our
+    // key, both public, and needs no permission or announcement from us. Our
+    // peer list is who WE watch, not who watches us.
+    //
+    // So every branch below is scoped to what was actually asked, and none of
+    // them promotes silence into a fact. The counts are shown because the
+    // difference between "asked three, all answered" and "asked three, none
+    // answered" is the whole of how much the sentence is worth.
+    let head, body;
+    if (r.asked === 0){
+      head = 'This node knows of no peers to ask.';
+      body = 'It has no configured peers, so this page has nobody to put the question to. That is not the ' +
+        'same as nobody witnessing it.';
+    } else if (r.failed === r.asked){
+      head = 'Could not find out.';
+      body = 'None of the ' + r.asked + ' known peers answered, so this page cannot tell whether anyone is ' +
+        'witnessing this log.';
+    } else if (r.failed > 0){
+      head = 'No witness found, but the answer is incomplete.';
+      body = 'Of ' + r.asked + ' known peers, ' + (r.asked - r.failed) + ' answered and none reported ' +
+        'witnessing this log; ' + r.failed + ' did not answer and may be.';
+    } else {
+      head = 'None of the peers this node knows about is watching it.';
+      body = 'All ' + r.asked + ' answered, and none holds a verdict for this log.';
     }
-    $('watchers').innerHTML = '<b class="no">Nobody is watching this log.</b>' +
-      '<p class="mut" style="margin:.3em 0 0">Nothing here can prove this node has not rewritten its own ' +
-      'history &mdash; only an independent node holding a consistency proof can.' +
-      (r.failed ? ' (' + r.failed + ' of ' + r.asked + ' peers did not answer, so this may be incomplete.)' : '') +
-      ' <a href="/docs/witnessing">How witnessing works</a></p>';
+    $('watchers').innerHTML = '<b class="' + (r.failed || r.asked === 0 ? '' : 'no') + '">' + head + '</b>' +
+      '<p class="mut" style="margin:.3em 0 0">' + body + ' A node can witness this log without appearing ' +
+      'here at all &mdash; it needs only the public checkpoint and key, and no permission from us. ' +
+      'Nothing on this page can prove this log has not been rewritten; only an independent node holding a ' +
+      'consistency proof can. <a href="/docs/witnessing">How witnessing works</a></p>';
     return;
   }
   let out = '';
