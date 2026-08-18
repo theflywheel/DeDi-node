@@ -92,6 +92,19 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err.Error())
 		return
 	}
+	// This endpoint mints a DELEGATION, and only a child is delegated
+	// anything. Minting one for a standalone, mirror, witness or replica wrote
+	// a StateOffered record into this node's public _delegations registry
+	// claiming a namespace had been granted — a claim nothing can redeem,
+	// because none of those roles is given an enrolment token, so the row sat
+	// there for ever reading "expired, never enrolled". It also handed a
+	// "standalone registry", whose whole description is that nothing is above
+	// it, a namespace one level under this node's.
+	if !role.Delegated() {
+		badRequest(w, fmt.Sprintf("%s is not a delegated role; use POST /admin/node-config to render "+
+			"its configuration without minting a delegation", role))
+		return
+	}
 	provider, pOK := provision.Get(orDefault(req.Provider, "env"))
 	if !pOK {
 		badRequest(w, fmt.Sprintf("unknown provider %q; available: %s",

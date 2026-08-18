@@ -232,6 +232,10 @@ func (s *Server) Handler() http.Handler {
 		}
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
 		write("POST /admin/namespaces/{namespace}/children", s.createChild)
+		// Renders configuration for a node the operator stands up themselves.
+		// Separate from children because that one mints a delegation, and only a
+		// child is delegated anything.
+		write("POST /admin/node-config", s.nodeConfig)
 		write("POST /admin/namespaces/{namespace}/children/{child}/revoke", s.revokeChild)
 		// Namespace-to-domain binding (task #56, docs/spec-gaps.md G8). On the
 		// write plane rather than the read plane on purpose: the verdict is

@@ -21,6 +21,12 @@ import (
 // any of them.
 type Role string
 
+// Delegated reports whether this role is granted its namespace by another
+// node. Only a child is: the rest are nodes an operator stands up, and minting
+// a delegation offer for one writes a record into the parent's public log
+// claiming a delegation that nothing can ever redeem.
+func (r Role) Delegated() bool { return r == RoleChild || r == "" }
+
 const (
 	// RoleStandalone is a directory of its own: its own namespace, its own
 	// signing key, its own log. Nothing above it, nothing depending on it.
@@ -37,10 +43,15 @@ const (
 	// target cannot rewrite history without this node holding a proof of it.
 	RoleWitness Role = "witness"
 
-	// RoleReplica is another copy of an existing node: same identity, same
-	// key, same log, kept in step by Raft. Uptime, not trust — three replicas
+	// RoleReplica is one member of a replica set: same identity, same key,
+	// same log, kept in step by Raft. Uptime, not trust — three replicas
 	// agreeing is one party speaking three times, and must never be read as
 	// three parties verifying.
+	//
+	// Membership is fixed at bootstrap. internal/cluster calls
+	// BootstrapCluster and has no AddVoter, so there is no way to add a
+	// replica to a running cluster: the whole set is configured together, with
+	// DEDI_CLUSTER_BOOTSTRAP on exactly one member on its first start.
 	RoleReplica Role = "replica"
 
 	// RoleChild is a separate node holding one namespace another node
@@ -91,11 +102,15 @@ var roles = map[Role]roleInfo{
 	},
 	RoleReplica: {
 		Role: RoleReplica, Title: "Replica",
-		Summary:  "Another copy of an existing node. Uptime, not trust.",
-		Identity: "the node's key, shared", Log: "that node's log, copied",
+		Summary:  "One member of a replica set, configured together at bootstrap. Uptime, not trust.",
+		Identity: "the set's key, shared — you must supply it", Log: "one log, replicated",
 		Buys:   "survival of one machine failing",
 		Writes: "the leader accepts; followers redirect",
-		Needs:  []string{"database", "cluster"},
+		// identity and origin are not optional: the daemon refuses to start
+		// with DEDI_CLUSTER_ID and no shared key, and a replica signing under
+		// its own origin would break the cluster's one-origin invariant the
+		// moment leadership moved to it.
+		Needs: []string{"database", "cluster", "identity", "origin"},
 	},
 	RoleChild: {
 		Role: RoleChild, Title: "Child (delegated)",
@@ -140,4 +155,53 @@ func RoleCatalogue() []roleInfo {
 		out = append(out, roles[Role(name)])
 	}
 	return out
+}
+
+// Validate reports what a Spec is missing for its role.
+//
+// This exists because every missing input fails LATER and QUIETLY. A replica
+// with a blank cluster id does not error: openCluster sees an empty id, returns
+// nil, and the node comes up healthy as an ordinary unclustered node that
+// generates an identity of its own — which is precisely the "second node
+// claiming the first one's name" the replica note warns about, with nothing
+// anywhere reporting it. A mirror with no domains crawls nothing. A witness
+// with no target witnesses nobody and looks fine doing it.
+//
+// Rendering a config that cannot do the job it was asked for is worse than
+// refusing, because the operator finds out from behaviour rather than from an
+// error.
+func (s Spec) Validate() error {
+	r := s.Role
+	if r == "" {
+		r = RoleChild
+	}
+	var missing []string
+	need := func(cond bool, what string) {
+		if !cond {
+			missing = append(missing, what)
+		}
+	}
+	switch r {
+	case RoleChild:
+		need(strings.TrimSpace(s.Namespace) != "", "namespace")
+		need(strings.TrimSpace(s.EnrolToken) != "", "enrolment token")
+		need(strings.TrimSpace(s.ParentURL) != "", "parent URL")
+	case RoleReplica:
+		need(strings.TrimSpace(s.ClusterID) != "", "cluster id")
+		need(strings.TrimSpace(s.ClusterPeers) != "", "cluster peers")
+		// The two that make a replica a replica rather than a new node.
+		need(strings.TrimSpace(s.SharedKeyFile) != "", "the set's shared key file")
+		need(strings.TrimSpace(s.Origin) != "", "the set's origin")
+	case RoleMirror:
+		need(strings.TrimSpace(s.CrawlDomains) != "", "domains to mirror")
+	case RoleWitness:
+		need(strings.TrimSpace(s.WitnessTargetURL) != "", "witness target URL")
+		need(strings.TrimSpace(s.WitnessTargetKey) != "", "witness target verifier key")
+	case RoleStandalone:
+		need(strings.TrimSpace(s.Namespace) != "", "namespace")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("a %s needs %s", r, strings.Join(missing, ", "))
 }

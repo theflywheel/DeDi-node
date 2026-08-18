@@ -53,10 +53,17 @@ type Spec struct {
 	WitnessTargetKey    string
 	WitnessTargetOrigin string
 
-	// Replica only. The cluster this node joins.
-	ClusterID    string
-	ClusterPeers string
-	ClusterBind  string
+	// Replica only. The set this node is a member of.
+	//
+	// SharedKeyFile is where the set's ONE identity key lives. The daemon
+	// refuses to start with DEDI_CLUSTER_ID and no shared identity, so a
+	// replica rendered without this never boots.
+	ClusterID        string
+	ClusterPeers     string
+	ClusterBind      string
+	ClusterDataDir   string
+	ClusterBootstrap bool
+	SharedKeyFile    string
 
 	// Mirror only. Domains whose published files this node pulls.
 	CrawlDomains string
@@ -128,7 +135,8 @@ func commonNotes(s Spec) []string {
 		)
 	case RoleReplica:
 		notes = append(notes,
-			"A replica shares the identity it replicates. Give it the SAME DEDI_KEY_FILE contents as the node it joins — a replica that generates its own key is not a replica, it is a second node claiming the first one's name.",
+			"Every member of the set needs the SAME key file contents and the SAME DEDI_ORIGIN. A replica that generates its own key is not a replica, it is a second node claiming the first one's name — and one signing under its own origin breaks the cluster's single-origin invariant the moment leadership moves to it.",
+			"Membership is fixed at bootstrap. Set DEDI_CLUSTER_BOOTSTRAP=true on exactly one member, on its first start only, and configure the whole set together: this daemon bootstraps a configuration and has no way to add a member to a running cluster.",
 			"Its database must still be its own. Replicas agree through Raft, not through a shared table.",
 			"Replication buys uptime, not trust. Three replicas agreeing is one party speaking three times; it proves nothing about the log's history, which is what a witness is for.",
 		)
@@ -187,12 +195,22 @@ func envPairs(s Spec) [][2]string {
 		)
 	case RoleReplica:
 		// A replica shares the identity it replicates; it does not enrol and
-		// must not generate a key of its own.
+		// must not generate a key of its own. cmd/dedid refuses to start with
+		// DEDI_CLUSTER_ID and no DEDI_KEY/DEDI_KEY_FILE, so omitting this
+		// renders a config that cannot boot at all.
 		pairs = append(pairs,
+			[2]string{"DEDI_KEY_FILE", orDefault(s.SharedKeyFile, "/keys/cluster.key")},
 			[2]string{"DEDI_CLUSTER_ID", s.ClusterID},
 			[2]string{"DEDI_CLUSTER_PEERS", s.ClusterPeers},
 			[2]string{"DEDI_CLUSTER_BIND", orDefault(s.ClusterBind, "0.0.0.0:7000")},
+			[2]string{"DEDI_CLUSTER_DATA_DIR", orDefault(s.ClusterDataDir, "/data/raft")},
 		)
+		if s.ClusterBootstrap {
+			// Exactly one member, on its first start only. Without it on any
+			// member, Raft never establishes membership: no leader is elected
+			// and every write answers 503.
+			pairs = append(pairs, [2]string{"DEDI_CLUSTER_BOOTSTRAP", "true"})
+		}
 	case RoleMirror:
 		if s.CrawlDomains != "" {
 			pairs = append(pairs, [2]string{"DEDI_CRAWL_DOMAINS", s.CrawlDomains})

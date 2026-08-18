@@ -79,12 +79,72 @@ func TestWitnessingComposesWithEveryRole(t *testing.T) {
 // claiming the first one's name — and that is the one mistake here whose
 // symptom appears far from its cause.
 func TestReplicaIsWarnedAboutIdentity(t *testing.T) {
-	notes := strings.Join(commonNotes(Spec{Role: RoleReplica, NodeName: "n"}), " ")
-	if !strings.Contains(notes, "SAME DEDI_KEY_FILE") {
-		t.Error("a replica is not told it must share the identity it replicates")
+	notes := strings.ToLower(strings.Join(commonNotes(Spec{Role: RoleReplica, NodeName: "n"}), " "))
+	for _, must := range []string{
+		"same key file",    // or it is a second node claiming the first one's name
+		"same dedi_origin", // or the set breaks its single-origin invariant
+		"uptime, not trust",
+		"bootstrap", // membership is fixed there; there is no join path
+	} {
+		if !strings.Contains(notes, must) {
+			t.Errorf("a replica is not told about %q", must)
+		}
 	}
-	if !strings.Contains(strings.ToLower(notes), "uptime, not trust") {
-		t.Error("a replica is not told that replication proves nothing about history")
+}
+
+// The daemon refuses to start with DEDI_CLUSTER_ID and no shared identity, and
+// a replica with no cluster id comes up silently as an ordinary node that
+// generates an identity of its own — the worst outcome available, because
+// nothing reports it. Neither config should be renderable.
+func TestReplicaWithoutIdentityOrOriginIsRefused(t *testing.T) {
+	full := Spec{Role: RoleReplica, NodeName: "n", Origin: "set.example/log",
+		ClusterID: "ha-2", ClusterPeers: "ha-1@a:7000", SharedKeyFile: "/keys/cluster.key"}
+	if err := full.Validate(); err != nil {
+		t.Fatalf("a complete replica spec was refused: %v", err)
+	}
+	for _, drop := range []func(*Spec){
+		func(s *Spec) { s.SharedKeyFile = "" },
+		func(s *Spec) { s.Origin = "" },
+		func(s *Spec) { s.ClusterID = "" },
+		func(s *Spec) { s.ClusterPeers = "" },
+	} {
+		s := full
+		drop(&s)
+		if err := s.Validate(); err == nil {
+			t.Errorf("an incomplete replica spec was accepted: %+v", s)
+		}
+	}
+}
+
+// Every role refuses what it cannot do the job without, because each of these
+// omissions fails later and quietly rather than at render time.
+func TestEachRoleRefusesAConfigThatCannotDoItsJob(t *testing.T) {
+	for _, c := range []struct {
+		role Role
+		bad  Spec
+	}{
+		{RoleMirror, Spec{Role: RoleMirror}},
+		{RoleWitness, Spec{Role: RoleWitness}},
+		{RoleStandalone, Spec{Role: RoleStandalone}},
+		{RoleChild, Spec{Role: RoleChild}},
+	} {
+		if err := c.bad.Validate(); err == nil {
+			t.Errorf("%s: a config with none of its inputs was accepted", c.role)
+		}
+	}
+}
+
+// Only a child is delegated a namespace. The other four are nodes an operator
+// stands up, and minting a delegation for one writes a claim into the parent's
+// public log that nothing can ever redeem.
+func TestOnlyAChildIsDelegated(t *testing.T) {
+	if !RoleChild.Delegated() || !Role("").Delegated() {
+		t.Error("a child is not treated as delegated")
+	}
+	for _, r := range []Role{RoleStandalone, RoleMirror, RoleWitness, RoleReplica} {
+		if r.Delegated() {
+			t.Errorf("%s is treated as delegated, so creating one would mint an unredeemable offer", r)
+		}
 	}
 }
 

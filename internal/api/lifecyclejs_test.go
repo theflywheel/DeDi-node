@@ -104,3 +104,77 @@ console.log('OK');
 		t.Fatalf("unexpected output: %s", out)
 	}
 }
+
+// The role picker must render on page load. It did not: renderRoles() was
+// called only inside createChild()'s success branch, so /admin showed the
+// literal "loading roles…" for ever, no radio was emitted, and every
+// submission sent role:"child" — the taxonomy could not be exercised at all.
+//
+// The test that was supposed to cover this asserted the catalogue was present
+// in the served bytes, which it was. Being in the page and being rendered are
+// different facts, and only one of them is the feature.
+func TestRolePickerActuallyRenders(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	page, err := os.ReadFile(filepath.Join("static", "admin.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := string(page)
+	script := full[strings.Index(full, "<script>")+len("<script>"):]
+	script = script[:strings.Index(script, "</script>")]
+	for _, boot := range []string{
+		"setMode();", "show(location.hash.slice(1) || 'list');", "reload();",
+		"loadChildren();", "loadSubscriptions();",
+	} {
+		script = strings.Replace(script, boot, "", 1)
+	}
+
+	harness := `
+const els = new Map();
+const fakeEl = id => ({ id, innerHTML: '', textContent: '', value: '', hidden: false,
+  className: '', checked: false, addEventListener(){}, scrollIntoView(){},
+  querySelector(){ return fakeEl('legend'); }, querySelectorAll(){ return []; } });
+const CATALOGUE = JSON.stringify([
+  {role:'child', title:'Child', summary:'s', identity:'i', log:'l', buys:'b', writes:'w', needs:['database','enrolment']},
+  {role:'replica', title:'Replica', summary:'s', identity:'i', log:'l', buys:'b', writes:'w', needs:['database','cluster','identity','origin']}
+]);
+globalThis.document = {
+  getElementById: id => {
+    if(id === 'role-catalogue') return { textContent: CATALOGUE };
+    if(!els.has(id)) els.set(id, fakeEl(id));
+    return els.get(id);
+  },
+  querySelector: () => null, querySelectorAll: () => [],
+};
+globalThis.location = { hash: '', origin: 'http://node.example' };
+globalThis.addEventListener = () => {};
+globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: {} }) });
+`
+	check := `
+const picker = document.getElementById('role-picker');
+if (picker.innerHTML.includes('loading roles')) {
+  throw new Error('DEAD PICKER: the placeholder was never replaced');
+}
+if (!picker.innerHTML.includes('name="noderole"')) {
+  throw new Error('DEAD PICKER: no role option was rendered: ' + picker.innerHTML.slice(0, 120));
+}
+if (!picker.innerHTML.includes('value="replica"')) {
+  throw new Error('the catalogue was not used to build the options');
+}
+console.log('OK');
+`
+	dir := t.TempDir()
+	file := filepath.Join(dir, "picker.mjs")
+	if err := os.WriteFile(file, []byte(harness+script+check), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "OK") {
+		t.Fatalf("unexpected output: %s", out)
+	}
+}

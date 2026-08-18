@@ -177,7 +177,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
     replicated <i>and</i> witness a peer &mdash; so it is a field below rather than a sixth choice.</p>
   </fieldset>
 
-  <fieldset><legend>delegate a namespace</legend>
+  <fieldset id="delegate-fieldset"><legend>delegate a namespace</legend>
     <div class="grid">
       <div><label for="c-ns">child namespace</label><input id="c-ns" placeholder="beckn.mobility" spellcheck="false"></div>
       <div><label for="c-label">label <span class="mut">(for the console only)</span></label><input id="c-label" placeholder="Mobility registry" spellcheck="false"></div>
@@ -189,12 +189,21 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
         <input id="c-db" type="password" placeholder="postgres://user:pass@host:5432/child" spellcheck="false" autocomplete="off"></div>
 
       <div class="full" id="need-cluster" hidden>
-        <label for="c-cluster-id">replica id <span class="mut">(and the peers it joins)</span></label>
+        <label for="c-cluster-id">member id <span class="mut">(and every member of the set)</span></label>
         <input id="c-cluster-id" placeholder="ha-2" spellcheck="false">
         <input id="c-cluster-peers" placeholder="ha-1@10.0.0.1:7000,ha-3@10.0.0.3:7000" spellcheck="false" style="margin-top:.3em">
-        <p class="mut" style="margin:.3em 0 0">A replica shares the identity it replicates: give it the
-        <b>same</b> key file as the node it joins. One that generates its own key is not a replica, it is
-        a second node claiming the first one&rsquo;s name.</p>
+        <label for="c-keyfile" style="margin-top:.4em">the set&rsquo;s shared key file</label>
+        <input id="c-keyfile" placeholder="/keys/cluster.key" spellcheck="false">
+        <label for="c-origin" style="margin-top:.4em">the set&rsquo;s origin <span class="mut">(the same on every member)</span></label>
+        <input id="c-origin" placeholder="registry.example/log" spellcheck="false">
+        <label style="margin-top:.4em"><input type="checkbox" id="c-bootstrap"> bootstrap the set from this member</label>
+        <p class="mut" style="margin:.3em 0 0"><b>Membership is fixed at bootstrap.</b> Configure the whole
+        set together and tick the box on exactly one member, on its first start only &mdash; this daemon
+        bootstraps a configuration and has no way to add a member to a running cluster.</p>
+        <p class="mut" style="margin:.3em 0 0">Every member needs the <b>same</b> key file and the
+        <b>same</b> origin. One that generates its own key is not a replica but a second node claiming the
+        first one&rsquo;s name; one signing under its own origin breaks the set&rsquo;s single-origin
+        invariant the moment leadership moves to it.</p>
       </div>
 
       <div class="full" id="need-crawl" hidden>
@@ -210,9 +219,9 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
         the target over an unauthenticated channel proves the connection, not the target.</p>
       </div>
     </div>
-    <p class="mut" style="margin:.4em 0 0">The namespace must sit exactly one level under
+    <p class="mut" style="margin:.4em 0 0" id="delegate-note">The namespace must sit exactly one level under
     <code id="c-parent">this node's</code> — you can only delegate what you hold.</p>
-    <button onclick="createChild()">mint offer &amp; render config</button>
+    <button id="c-submit" onclick="createNode()">mint offer &amp; render config</button>
   </fieldset>
   <div id="out-children"></div>
 
@@ -748,16 +757,18 @@ const parentNS = () => ns();
 // their own provider, and would fail at submit rather than at selection.
 let PROVIDERS = ['env'];
 
-// The role catalogue comes from the node, for the same reason PROVIDERS does:
-// a list written into this page can offer a role the renderer does not
-// implement, or describe one differently from the configuration it emits.
-// Until the node answers, the picker offers the only role this endpoint could
-// provision before roles were named.
 let ROLES = (() => {
   try { return JSON.parse(document.getElementById('role-catalogue').textContent) || []; }
   catch(e){ return []; }
 })();
 let ROLE = 'child';
+
+// The role catalogue comes from the node, for the same reason PROVIDERS does:
+// a list written into this page can offer a role the renderer does not
+// implement, or describe one differently from the configuration it emits.
+// Until the node answers, the picker offers the only role this endpoint could
+// provision before roles were named.
+
 
 function renderRoles(){
   const box = $('role-picker');
@@ -791,6 +802,17 @@ function renderRoleDetail(){
   const needs = r.needs || [];
   $('need-cluster').hidden = !needs.includes('cluster');
   $('need-crawl').hidden   = !needs.includes('crawl');
+  // Only a child is delegated a namespace, so only a child gets an enrolment
+  // offer. The surrounding form says "delegate a namespace", which is true of
+  // exactly one of the five.
+  const delegated = (ROLE === 'child');
+  const fs = $('delegate-fieldset');
+  if(fs) fs.querySelector('legend').textContent =
+    delegated ? 'delegate a namespace' : 'configure this node';
+  const btn = $('c-submit');
+  if(btn) btn.textContent = delegated ? 'mint offer & render config' : 'render config';
+  const note = $('delegate-note');
+  if(note) note.hidden = !delegated;
   // Witnessing composes with every role, so its field is always available —
   // required for a witness, optional for everyone else.
   $('need-witness').hidden = false;
@@ -931,6 +953,58 @@ async function loadChildren(){
   }
 }
 
+// A child is delegated a namespace and gets an enrolment offer; the other four
+// are nodes the operator stands up, and minting a delegation for one would
+// write a claim into this node's public log that nothing can ever redeem.
+// The fields common to every role. Kept in one place because two endpoints
+// send them and a field added to only one is a field that silently does
+// nothing on the other.
+function nodeRequestBody(){
+  const v = id => { const el = $(id); return el ? String(el.value || '').trim() : ''; };
+  return {
+    provider: $('c-provider').value,
+    role: ROLE,
+    node_name: v('c-ns'),
+    namespace: v('c-ns'),
+    origin: v('c-origin'),
+    image: v('c-image'),
+    public_url: v('c-url'),
+    database_url: v('c-db'),
+    witness_target_url: v('c-wit-url'),
+    witness_target_key: v('c-wit-key'),
+    cluster_id: v('c-cluster-id'),
+    cluster_peers: v('c-cluster-peers'),
+    shared_key_file: v('c-keyfile'),
+    cluster_bootstrap: !!($('c-bootstrap') && $('c-bootstrap').checked),
+    crawl_domains: v('c-crawl'),
+  };
+}
+
+async function createNode(){
+  return (ROLE === 'child') ? createChild() : renderNodeConfig();
+}
+
+async function renderNodeConfig(){
+  const box = $('out-children');
+  if(!SIGNER){
+    return fail('out-children', ['Load a publisher key first — rendering a config is a signed request.']);
+  }
+  box.innerHTML = '<p class="mut">rendering...</p>';
+  const body = nodeRequestBody();
+  const r = await signedFetch('POST', '/admin/node-config', body);
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok){
+    return fail('out-children', [(j && (j.error || j.message)) || ('HTTP ' + r.status)]);
+  }
+  const art = j.data && j.data.artifact;
+  box.innerHTML = '<p class="ok">Configuration rendered. <b>Nothing was published</b> — no delegation, ' +
+    'no token, nothing appended to this log.</p>' +
+    (art ? '<h3>' + esc(art.filename) + '</h3><pre>' + esc(art.content) + '</pre>' +
+      ((art.notes || []).length
+        ? '<ul>' + art.notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>' : '')
+      : '');
+}
+
 async function createChild(){
   const box = $('out-children');
   if(!SIGNER){
@@ -944,20 +1018,13 @@ async function createChild(){
     return fail('out-children', ['"' + child + '" must sit one level under "' + parentNS() + '".']);
   }
   box.innerHTML = '<p class="mut">minting...</p>';
-  const body = {
+  const body = Object.assign(nodeRequestBody(), {
+    // Child-specific: the namespace being delegated, and the label this
+    // console shows for it.
     namespace: child,
     label: $('c-label').value.trim(),
-    provider: $('c-provider').value,
-    role: ROLE,
-    witness_target_url: $('c-wit-url').value.trim(),
-    witness_target_key: $('c-wit-key').value.trim(),
-    cluster_id: $('c-cluster-id').value.trim(),
-    cluster_peers: $('c-cluster-peers').value.trim(),
-    crawl_domains: $('c-crawl').value.trim(),
-    image: $('c-image').value.trim(),
     db_url: $('c-db').value,
-    public_url: $('c-url').value.trim(),
-  };
+  });
   try {
     const resp = await signedFetch('POST', '/admin/namespaces/' + p(parentNS()) + '/children', body);
     const j = await resp.json();
@@ -1226,6 +1293,12 @@ async function findByDomain(){
 function copyArtifact(){
   navigator.clipboard.writeText($('c-art').textContent);
 }
+// Render the picker once everything it needs exists. The bootstrap block above
+// runs before these declarations: function declarations hoist, but `let` does
+// not initialise until its line, so calling this up there threw — which the
+// child-panel test caught and my own parse check did not, because it strips
+// bootstrap lines and so was blind to exactly this.
+renderRoles();
 </script>
 </body>
 </html>
