@@ -15,7 +15,7 @@
   a { cursor: pointer; }
   .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
   #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   /* The network table can outgrow a phone; let it scroll rather than the page. */
   #network { overflow-x: auto; }
   table.net { border-collapse: collapse; font-size: .92em; }
@@ -28,8 +28,8 @@
 </head>
 <body>
 
-<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="{{DEMO_URL}}">Demo</a></nav>
-<h1>DeDi Node Explorer</h1>
+{{NAV}}
+<h1>Browse the directory</h1>
 <p id="node" class="mut">loading...</p>
 <p id="stats" class="mut">requests served: <span id="served">...</span></p>
 <p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the

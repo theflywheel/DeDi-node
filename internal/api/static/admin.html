@@ -6,7 +6,7 @@
 <title>DeDi Node · Operator console</title>
 <style>
   body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   h3 { font-size: .98em; margin: 1.1em 0 .3em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
@@ -33,7 +33,7 @@
 </head>
 <body>
 
-<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="/admin">Console</a></nav>
+{{NAV}}
 <h1>Operator console</h1>
 <p class="mut">Onboarding participants onto a Beckn network served by this node: who exists,
 what keys they present, and when they stop being valid. Onboarding is a governed act — every

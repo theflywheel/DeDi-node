@@ -92,11 +92,11 @@ func (s *Server) counted(h http.Handler) http.Handler {
 }
 
 func selfTraffic(path string) bool {
-	// Every documentation page, not just the index. The counter measures
-	// directory traffic — what this node is being asked about — and a reader
-	// browsing the docs is the node talking about itself, the same as the
-	// explorer or the console.
-	if strings.HasPrefix(path, "/docs/") {
+	// Every page this node serves about itself, not just the index. The counter
+	// measures directory traffic — what this node is being asked about — and a
+	// reader browsing the docs, or the directory browser, is the node talking
+	// about itself, the same as the explorer or the console.
+	if strings.HasPrefix(path, "/docs/") || path == "/browse" || path == "/browse/" {
 		return true
 	}
 	return path == "/" || path == "/docs" ||

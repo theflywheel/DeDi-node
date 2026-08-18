@@ -11,6 +11,9 @@ import (
 //go:embed static/index.html
 var explorerHTML []byte
 
+//go:embed static/overview.html
+var overviewHTML []byte
+
 //go:embed static/docs.html
 var docsHTML []byte
 
@@ -32,13 +35,37 @@ var verifyJS []byte
 // no DEDI_DEMO_URL of their own.
 const defaultDemoURL = "https://schemes.proto.theflywheel.in/"
 
-// explorer serves the embedded read-only registry browser at "/". The node's
-// verifier key (if configured) is injected so the page can check the
+// overview serves the front door at "/": what this node is, what it holds, and
+// whether anyone independent is checking it.
+//
+// It exists because "/" used to do three unrelated jobs at once — node identity,
+// the whole network and cluster panel, and the namespace/registry/record
+// browser. A stranger arriving at a directory node was greeted by a namespace
+// text box, which answers a question they had not yet worked out how to ask.
+// The browser now lives at /browse, where someone who already knows what they
+// are looking for goes.
+func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
+	page := bytes.Replace(overviewHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
+	s.writePage(w, page, "/")
+}
+
+// explorer serves the embedded read-only registry browser at "/browse". The
+// node's verifier key (if configured) is injected so the page can check the
 // checkpoint signature in-browser; absent it, the page still recomputes
 // inclusion proofs and simply reports the signature as unchecked.
 func (s *Server) explorer(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(explorerHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
+	s.writePage(w, page, "/browse")
+}
+
+// writePage substitutes the placeholders every page shares and sends it.
+//
+// The nav is generated here rather than written into each file (see nav.go):
+// four hardcoded copies had already drifted into four different navs, and the
+// page a reader most needs — /verify — was linked from nowhere but itself.
+func (s *Server) writePage(w http.ResponseWriter, page []byte, current string) {
 	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
+	page = bytes.Replace(page, []byte("{{NAV}}"), []byte(s.nav(current)), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
 }
@@ -67,9 +94,7 @@ func (s *Server) demoHref() string {
 // not establish that this node signed it.
 func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(verifyHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
-	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(page)
+	s.writePage(w, page, "/verify")
 }
 
 func (s *Server) verifyScript(w http.ResponseWriter, r *http.Request) {
@@ -79,13 +104,12 @@ func (s *Server) verifyScript(w http.ResponseWriter, r *http.Request) {
 
 // docs serves the embedded explainer page (sequence diagrams + test cases).
 func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
-	page := bytes.Replace(docsHTML, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
+	page := docsHTML
 	// The contents list is generated from what this build actually embeds, not
 	// written into the page. A hand-maintained index is a list of links that
 	// stops matching the documents the moment someone adds one.
 	page = bytes.Replace(page, []byte("{{DOC_INDEX}}"), []byte(s.docIndex()), 1)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(page)
+	s.writePage(w, page, "/docs")
 }
 
 // admin serves the operator console: participant onboarding, key rotation and
@@ -98,6 +122,5 @@ func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
 // worth stealing. See adminPageHeaders.
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	adminPageHeaders(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(adminHTML)
+	s.writePage(w, adminHTML, "/admin")
 }

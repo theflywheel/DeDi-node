@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeDi node</title>
+<style>
+  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.3em; margin: 0 0 .2em; }
+  h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; font-weight: normal; }
+  td.num { font-variant-numeric: tabular-nums; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  .cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 0 1.6em; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6em; }
+  .card { border: 1px solid #ccc; padding: .7em .8em; display: block; text-decoration: none; color: inherit; }
+  .card b { display: block; }
+  /* Witnessing is the one claim on this page that is not self-reported, so it
+     is the one thing given its own colour. See the note in the panel itself. */
+  .wit { border: 1px solid #1f4788; border-left-width: 3px; padding: .6em .8em; }
+  .wit b { color: #1f4788; }
+  /* Replication is drawn as a bounded box rather than as a relationship,
+     because replicas are copies of this node and prove nothing about it. */
+  .repl { border: 1px solid #999; background: repeating-linear-gradient(45deg,#f6f6f6,#f6f6f6 4px,#fff 4px,#fff 8px);
+          padding: .6em .8em; margin-top: .6em; }
+  .key { word-break: break-all; }
+  @media (max-width: 46em) { .cols, .cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+{{NAV}}
+
+<h1 id="title" class="mut">loading...</h1>
+<p class="mut">A public, read-only directory over a Merkle transparency log.
+<b>Nothing on this page is proof.</b> Everything under &ldquo;this node&rdquo; is this node's own report about
+itself, which is exactly what a dishonest node would also say. The claims you can actually check are one click
+away: <a href="/verify">recompute a proof yourself</a>, or read what an
+<a href="/docs/witnessing">independent node has verified</a>.</p>
+
+<div class="cols">
+  <div>
+    <h2>This node</h2>
+    <table>
+      <tr><td class="mut" style="width:34%">log origin</td><td id="origin">&hellip;</td></tr>
+      <tr><td class="mut">verifier key</td><td id="vkey" class="key">&hellip;</td></tr>
+      <tr><td class="mut">tree size</td><td id="size" class="num">&hellip;</td></tr>
+      <tr><td class="mut">last checkpoint</td><td id="cpage">&hellip;</td></tr>
+      <tr><td class="mut">requests served</td><td id="reqs" class="num">&hellip;</td></tr>
+    </table>
+    <p class="mut" style="margin:.4em 0 0">The verifier key is public by construction &mdash; it is what you
+    hand out so others can check you.</p>
+  </div>
+  <div>
+    <h2>Is anyone checking it?</h2>
+    <div id="watchers" class="wit"><span class="mut">asking the other nodes directly&hellip;</span></div>
+    <div id="cluster" class="repl"><span class="mut">&hellip;</span></div>
+  </div>
+</div>
+
+<h2>What you can do here</h2>
+<div class="cards">
+  <a class="card" href="/browse"><b>Browse the directory &rarr;</b>
+    <span class="mut" id="browse-sub">namespaces, registries and records</span></a>
+  <a class="card" href="/verify"><b>Check a record yourself &rarr;</b>
+    <span class="mut">recompute the proof in your browser</span></a>
+  <a class="card" href="/docs"><b>Read the documentation &rarr;</b>
+    <span class="mut">served by this binary, not the internet</span></a>
+</div>
+
+<h2>API</h2>
+<p class="mut">Everything on this page is public and unauthenticated.</p>
+<pre>/dedi/lookup   /dedi/query   /dedi/versions
+/dedi/log/checkpoint   /dedi/witness   /dedi/network   /dedi/stats</pre>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => Number(n).toLocaleString();
+
+function ago(sec){
+  sec = Math.round(sec);
+  if (sec < 90) return sec + ' seconds ago';
+  if (sec < 5400) return Math.round(sec/60) + ' minutes ago';
+  return Math.round(sec/3600) + ' hours ago';
+}
+
+async function j(url){
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ' -> ' + r.status);
+  return r.json();
+}
+
+// The checkpoint's age is not in the checkpoint: a signed note carries the
+// origin, size and root, and nothing about when it was signed. The node
+// publishes the age as a metric, which is where this reads it from.
+async function checkpointAge(){
+  const r = await fetch('/metrics');
+  if (!r.ok) return null;
+  // The exponent form is not optional to handle: metrics.go formats with %g,
+  // which switches to 1.0368e+06 past a million seconds — so a checkpoint that
+  // had not been signed for twelve days parsed as "1 second old" and painted
+  // itself green. Exactly the wrong direction for a staleness indicator to err.
+  const m = (await r.text()).match(/^dedi_checkpoint_age_seconds\s+(-?[\d.]+(?:[eE][+-]?\d+)?)/m);
+  return m ? Number(m[1]) : null;
+}
+
+// Who watches THIS node cannot be answered by this node: /dedi/witness reports
+// what we watch, not who watches us. So the page asks each peer directly and
+// keeps only the ones whose own log names our origin. The claim on this page is
+// therefore the peer's, fetched from the peer, and a visitor can repeat the
+// request themselves — which is the whole point of it being here.
+async function watchers(self, peers){
+  const found = [];
+  let asked = 0, failed = 0;
+  await Promise.all(peers.map(async p => {
+    if (!p.url) return;
+    asked++;
+    try {
+      const d = (await j(p.url.replace(/\/$/, '') + '/dedi/witness')).data;
+      for (const t of (d.targets || [])) {
+        if (t.origin === self) found.push({ node: p.name, url: p.url, t });
+      }
+    } catch (e) {
+      // Counted, not swallowed. A peer we could not reach — blocked as mixed
+      // content, CORS-refused, down, or too old to serve /dedi/witness — tells
+      // us nothing about whether it witnesses us, and reporting that as
+      // "nobody is watching" would state the strongest possible claim on the
+      // weakest possible evidence.
+      failed++;
+    }
+  }));
+  return { found, asked, failed };
+}
+
+function renderWatchers(r){
+  const list = r.found;
+  if (!list.length){
+    if (r.failed > 0 && r.failed === r.asked){
+      $('watchers').innerHTML = '<b>Could not find out.</b>' +
+        '<p class="mut" style="margin:.3em 0 0">None of the ' + r.asked + ' known peers answered, so this page ' +
+        'cannot tell whether anyone is witnessing this log. That is different from nobody watching it, and it ' +
+        'is not reported as such. <a href="/docs/witnessing">How witnessing works</a></p>';
+      return;
+    }
+    $('watchers').innerHTML = '<b class="no">Nobody is watching this log.</b>' +
+      '<p class="mut" style="margin:.3em 0 0">Nothing here can prove this node has not rewritten its own ' +
+      'history &mdash; only an independent node holding a consistency proof can.' +
+      (r.failed ? ' (' + r.failed + ' of ' + r.asked + ' peers did not answer, so this may be incomplete.)' : '') +
+      ' <a href="/docs/witnessing">How witnessing works</a></p>';
+    return;
+  }
+  let out = '';
+  for (const w of list){
+    const t = w.t;
+    const when = t.verdict_at ? ', ' + esc(t.verdict_at.slice(0,16).replace('T',' ')) : '';
+
+    // Three states, and they are deliberately three different sentences.
+    //
+    // The API distinguishes them and says why: a target that has never been
+    // verified carries no `consistency_ok` at all, so any reader who treats a
+    // missing field as a pass turns "never checked" into "checked and fine".
+    // An earlier draft of this page did precisely that and printed
+    // "last proved this log append-only at NaN entries".
+    if (t.consistency_ok === false){
+      out += '<p style="margin:0 0 .3em"><b class="no">✗ ' + esc(w.node) +
+        ' has caught this log changing under it.</b></p>' +
+        '<p class="no" style="margin:0 0 .4em">' +
+        (t.detail ? esc(t.detail) : 'Its consistency check failed' + when) +
+        '. This is the failure the whole design exists to make visible: do not trust this ' +
+        'directory until it is explained.</p>';
+    } else if (t.witnessed !== true || t.size === undefined){
+      out += '<p style="margin:0 0 .3em"><b>' + esc(w.node) + ' is set up to watch this log.</b></p>' +
+        '<p class="mut" style="margin:0 0 .4em">It has not successfully verified it yet, so there is no ' +
+        'verdict to read. Not the same as a clean one.</p>';
+    } else {
+      out += '<p style="margin:0 0 .3em"><b>' + esc(w.node) + ' watches this log.</b></p>' +
+        '<p class="mut" style="margin:0 0 .4em">It last proved this log append-only at <b>' +
+        num(t.size) + '</b> entries' + when + '. That verdict is in <i>its</i> log, not ours.</p>';
+    }
+  }
+  // Deliberately /docs/witnessing and not /network: the ring page does not
+  // exist yet (issue #37). A link that 404s is worse than no link, and worst of
+  // all on the panel whose entire job is to be checkable.
+  out += '<a href="/docs/witnessing">how to check this yourself &rarr;</a>';
+  $('watchers').innerHTML = out;
+}
+
+function renderCluster(c){
+  if (!c || !c.enabled){
+    $('cluster').innerHTML = '<span class="mut">Not replicated &mdash; a single instance. If it goes down ' +
+      'the directory stops answering.</span>';
+    return;
+  }
+  const n = (c.members || []).length;
+  $('cluster').innerHTML = '<b>' + n + ' replicas</b> <span class="mut">of this same node &mdash; one key, one ' +
+    'log, copied. They buy uptime and prove nothing about each other.</span>';
+}
+
+(async function(){
+  try {
+    const net = (await j('/dedi/network')).data;
+    const self = (net.nodes || []).find(n => n.self) || {};
+    document.title = (self.name || 'DeDi node') + ' · DeDi';
+    $('title').className = '';
+    $('title').textContent = self.name || 'DeDi node';
+    $('origin').textContent = self.origin || 'not set';
+    $('size').textContent = self.tree_size === undefined
+      ? 'no signed checkpoint yet' : num(self.tree_size) + ' entries';
+    const vk = '{{VERIFIER_KEY}}';
+    $('vkey').textContent = vk || 'not published by this node';
+    renderCluster(net.cluster);
+    renderWatchers(await watchers(self.origin, (net.nodes || []).filter(n => !n.self)));
+  } catch (e) {
+    $('title').className = 'no';
+    $('title').textContent = 'this node is not answering';
+  }
+  try {
+    const age = await checkpointAge();
+    $('cpage').innerHTML = age === null ? '<span class="mut">unknown</span>'
+      : age < 0 ? '<span class="no">never signed</span>'
+      : '<span class="' + (age > 3600 ? 'mut' : 'ok') + '">' + ago(age) + '</span>';
+  } catch (e) { $('cpage').textContent = 'unknown'; }
+  try {
+    const s = (await j('/dedi/stats')).data;
+    $('reqs').textContent = num(s.requests_served);
+  } catch (e) { $('reqs').textContent = '—'; }
+})();
+</script>
+</body>
+</html>
