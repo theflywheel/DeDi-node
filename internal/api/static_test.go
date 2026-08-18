@@ -115,7 +115,7 @@ func TestUnknownRouteStill404AfterExplorer(t *testing.T) {
 // pageRoutes are every HTML page this server serves. Kept here rather than
 // derived from the mux because the point of the test is to notice when the two
 // disagree.
-var pageRoutes = []string{"/", "/browse", "/verify", "/docs", "/admin"}
+var pageRoutes = []string{"/", "/browse", "/network", "/verify", "/docs", "/admin"}
 
 var navHref = regexp.MustCompile(`<nav>(.*?)</nav>`)
 
@@ -236,7 +236,8 @@ func TestBrowserServedAtBrowse(t *testing.T) {
 // it — for a while it did not, and every operator refresh inflated the figure
 // the overview publishes as "requests served".
 func TestNodesOwnPagesAreNotCountedAsDirectoryTraffic(t *testing.T) {
-	for _, p := range []string{"/", "/browse", "/browse/", "/docs", "/docs/witnessing",
+	for _, p := range []string{"/", "/browse", "/browse/", "/network", "/network/",
+		"/docs", "/docs/witnessing",
 		"/verify", "/admin", "/metrics", "/healthz", "/dedi/stats", "/dedi/network"} {
 		if !selfTraffic(p) {
 			t.Errorf("%s counts as public directory traffic, but it is this node talking about itself", p)
@@ -247,5 +248,78 @@ func TestNodesOwnPagesAreNotCountedAsDirectoryTraffic(t *testing.T) {
 		if selfTraffic(p) {
 			t.Errorf("%s is directory traffic and must be counted", p)
 		}
+	}
+}
+
+// The ring page must load the shared proof verifier rather than carrying its
+// own: it re-runs the consistency check in the reader's browser, and two copies
+// of that code would eventually disagree while both showed green ticks.
+func TestRingPageUsesTheSharedVerifier(t *testing.T) {
+	srv, _, _ := testServer(t)
+	resp, err := http.Get(srv.URL + "/network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `src="/static/verify.js"`) {
+		t.Error("/network does not load the shared verifier")
+	}
+	if strings.Contains(string(body), "async function proofRoot(") {
+		t.Error("/network carries its own copy of the proof verifier")
+	}
+	// The three primitives the re-check depends on. A rename in verify.js would
+	// otherwise leave the button throwing at runtime and nowhere else.
+	for _, fn := range []string{"verifyCheckpointSig", "parseCheckpointBody", "checkTree", "parseNote", "b64d"} {
+		if !strings.Contains(string(body), fn) {
+			t.Errorf("/network never calls %s — the in-browser check cannot work", fn)
+		}
+	}
+}
+
+// Whatever the ring page calls, verify.js must actually define.
+func TestSharedVerifierDefinesWhatTheRingPageCalls(t *testing.T) {
+	for _, fn := range []string{"verifyCheckpointSig", "parseCheckpointBody", "checkTree", "parseNote", "b64d"} {
+		if !strings.Contains(string(verifyJS), "function "+fn+"(") {
+			t.Errorf("verify.js does not define %s, which /network calls", fn)
+		}
+	}
+}
+
+// The ring page must refuse to offer its in-browser re-check on an edge the
+// witness has already caught. Equivocation is recorded with the NEW root
+// (internal/witness/witness.go), so a browser checking against it passes — and
+// would print a green tick beside the alarm. The browser never held the
+// pre-rewrite root and structurally cannot reproduce the catch.
+func TestRingPageRefusesToRecheckACaughtEdge(t *testing.T) {
+	page := string(networkPageHTML)
+	if !strings.Contains(page, "consistency_ok === false") {
+		t.Fatal("the ring page does not branch on a failed verdict at all")
+	}
+	// canCheck must exclude the caught case.
+	i := strings.Index(page, "const canCheck")
+	if i < 0 {
+		t.Fatal("canCheck is gone; the guard this test protects has been restructured")
+	}
+	guard := page[i : i+240]
+	if !strings.Contains(guard, "!caught") {
+		t.Errorf("canCheck does not exclude a caught edge, so the re-check would render a green tick "+
+			"beside the alarm:\n%s", guard)
+	}
+}
+
+// verifyCheckpointSig returns null when the browser cannot run the check at all
+// (no Ed25519, or an insecure origin) and false only when a signature genuinely
+// fails. Folding them together accuses every honest target of forgery.
+func TestRingPageSeparatesCannotCheckFromCheckFailed(t *testing.T) {
+	page := string(networkPageHTML)
+	if !strings.Contains(page, "sigOK === null") {
+		t.Error("the ring page does not distinguish 'could not check' from 'check failed'")
+	}
+	if !strings.Contains(page, "sigOK === false") {
+		t.Error("the ring page does not test for a genuine signature failure")
+	}
+	if strings.Contains(page, "sigOK !== true") {
+		t.Error("the ring page still folds null into the failure branch")
 	}
 }

@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The ring</title>
+<style>
+  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.3em; margin: 0 0 .2em; }
+  h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  h3 { font-size: .98em; margin: 1.1em 0 .3em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; font-weight: normal; }
+  td.num { font-variant-numeric: tabular-nums; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  .warn { color: #8a6d00; }
+  /* Witnessing is the only relationship on this page that is evidence, so it is
+     the only one given a colour. See the legend, which says so out loud. */
+  .wit { color: #1f4788; }
+  #stage { position: relative; border: 1px solid #ccc; background: #fcfcfc; overflow: hidden; }
+  #edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .node { position: absolute; transform: translate(-50%, -50%); width: 15em; box-sizing: border-box;
+          border: 1px solid #ccc; background: #fff; padding: .4em .6em; cursor: pointer; font-size: .92em; }
+  .node:hover { background: #f7f9fc; }
+  .node.sel { border: 2px solid #1f4788; }
+  /* A node that did not answer is drawn as an outline: we know it exists
+     because someone named it, and we know nothing else about it. */
+  .node.silent { border-style: dashed; color: #666; background: #fafafa; }
+  .node .nm { font-weight: bold; }
+  .badge { position: absolute; transform: translate(-50%, -50%); background: #fff; border: 1px solid #1f4788;
+           color: #1f4788; font-size: .8em; padding: 0 .35em; white-space: nowrap; cursor: pointer; }
+  .badge.bad { border-color: #b00; color: #b00; }
+  .badge.unk { border-color: #999; color: #666; }
+  .legend { display: flex; gap: 1.6em; flex-wrap: wrap; font-size: .9em; margin: .6em 0 1em; align-items: center; }
+  .legend span { display: flex; gap: .4em; align-items: center; }
+  /* Replication is drawn as a boundary, never as edges between peers: replicas
+     are copies of one node and prove nothing about one another. */
+  .repl { border: 1px solid #999; background: repeating-linear-gradient(45deg,#f6f6f6,#f6f6f6 4px,#fff 4px,#fff 8px);
+          padding: .6em .8em; }
+  .repl .inner { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: .5em; }
+  .repl .m { border: 1px solid #ccc; background: #fff; padding: .4em .6em; font-size: .92em; }
+  #detail { border: 1px solid #1f4788; border-top-width: 3px; padding: .7em .9em; margin-top: .8em; }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.4em; }
+  @media (max-width: 46em) { .cols2 { grid-template-columns: 1fr; } .node { width: 11em; font-size: .82em; } }
+</style>
+</head>
+<body>
+{{NAV}}
+
+<h1>The ring</h1>
+<p class="mut" id="lede">Who watches whom, and what each of them has actually proved.</p>
+
+<div class="legend">
+  <span><svg width="42" height="12" aria-hidden="true"><line x1="0" y1="6" x2="32" y2="6" stroke="#1f4788" stroke-width="2"/><path d="M32 2 L40 6 L32 10 Z" fill="#1f4788"/></svg>
+    <b class="wit">watches</b><span class="mut">&mdash; trust. Different operators, independent logs.</span></span>
+  <span><span style="width:42px;height:12px;border:1px solid #999;background:repeating-linear-gradient(45deg,#e8e8e8,#e8e8e8 3px,#fff 3px,#fff 6px)"></span>
+    <b>replicates</b><span class="mut">&mdash; uptime. One operator, one key.</span></span>
+</div>
+
+<div id="stage" style="height:26em"><svg id="edges" aria-hidden="true"></svg></div>
+<p class="mut" id="coverage" style="margin:.4em 0 0;font-size:.9em">&hellip;</p>
+
+<div id="detail"><span class="mut">Select a node or an arrow.</span></div>
+
+<h2>Replication <span class="mut" style="font-weight:normal">&mdash; a different thing entirely</span></h2>
+<p class="mut">Copies of <b>one</b> node, run by one operator, sharing one key and one log. They buy uptime.
+They prove nothing about each other, which is why they are drawn inside a boundary rather than joined by
+arrows: reading &ldquo;three replicas agree&rdquo; as &ldquo;three parties verified&rdquo; is precisely the
+wrong conclusion.</p>
+<div id="cluster" class="repl"><span class="mut">&hellip;</span></div>
+
+<script src="/static/verify.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => Number(n).toLocaleString();
+const SVGNS = 'http://www.w3.org/2000/svg';
+const TIMEOUT = 8000;
+
+let G = { nodes: [], edges: [] };
+let SEL = null;
+
+async function grab(url, ms){
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms || TIMEOUT);
+  try {
+    const r = await fetch(url, { signal: c.signal });
+    if (!r.ok) { const e = new Error('status ' + r.status); e.status = r.status; throw e; }
+    return r;
+  } finally { clearTimeout(t); }
+}
+const j = async (url, ms) => (await grab(url, ms)).json();
+const text = async (url, ms) => (await grab(url, ms)).text();
+
+// Every edge is fetched from the node that MAKES the claim, never relayed by
+// this one. An arrow saying "B watches C" is drawn because B said so, to your
+// browser, in a response you can fetch yourself.
+async function collect(){
+  const net = (await j('/dedi/network')).data;
+  const nodes = new Map();
+
+  // Keyed on origin OR url, because a peer that is down has no origin: the
+  // monitor only learns an origin from a checkpoint it managed to fetch. Keying
+  // on origin alone silently dropped every unreachable peer out of the graph,
+  // out of the counts, and out of the coverage sentence — silence rendered as
+  // absence, which is the one thing this page must never do.
+  const add = (key, patch) => {
+    if (!key) return null;
+    const n = nodes.get(key) || { key, origin: '', name: key, asked: false, answered: false, reason: '' };
+    for (const k in (patch || {})) if (patch[k] !== undefined) n[k] = patch[k];
+    if (!n.name) n.name = n.origin || n.key;
+    nodes.set(key, n);
+    return n;
+  };
+
+  let selfKey = null;
+  for (const n of (net.nodes || [])) {
+    const key = n.origin || n.url;
+    if (!key) continue;
+    if (n.self) selfKey = key;
+    add(key, { origin: n.origin || '', name: n.name || n.origin || n.url, self: !!n.self,
+               url: n.self ? '' : n.url, tree_size: n.tree_size, reachable: n.reachable });
+    if (!n.origin) {
+      nodes.get(key).reason = 'unreachable — no checkpoint seen, so its log origin is unknown';
+    }
+  }
+
+  const edges = [];
+  await Promise.all([...nodes.values()].map(async n => {
+    const base = n.self ? '' : (n.url || '').replace(/\/$/, '');
+    if (!n.self && !base) { n.reason = n.reason || 'no URL configured'; return; }
+    // A browser silently blocks an http:// fetch from an https:// page. Naming
+    // it is worth the lines: it is an operator's deployment fault, fixable in a
+    // minute, and otherwise indistinguishable from a dead peer.
+    if (!n.self && location.protocol === 'https:' && base.startsWith('http:')) {
+      n.reason = 'blocked — this page is https and its URL is http';
+      return;
+    }
+    n.asked = true;
+    n.src = base + '/dedi/witness';
+    try {
+      const d = (await j(n.src)).data;
+      n.answered = true;
+      n.targetCount = (d.targets || []).length;
+      for (const t of (d.targets || [])) {
+        // No name patch: an entry we already hold keeps the operator's display
+        // name rather than having it overwritten with the raw log origin.
+        add(t.origin, { origin: t.origin });
+        edges.push({ from: n.key, to: t.origin, t, src: n.src,
+                     verdictURL: n.src + '/' + encodeURIComponent(t.origin) });
+      }
+    } catch (e) {
+      // 404 is its own fact: the node is up and simply predates this endpoint,
+      // which is different from being unreachable.
+      n.reason = e.status === 404 ? 'no /dedi/witness — older build'
+               : e.name === 'AbortError' ? 'timed out'
+               : 'did not answer';
+    }
+  }));
+
+  const all = [...nodes.values()];
+  return { nodes: all, edges, cluster: net.cluster, selfKey,
+           asked: all.filter(n => n.asked).length,
+           answered: all.filter(n => n.answered).length };
+}
+
+// The stage grows with the node count instead of being a fixed height. At a
+// fixed 26em the cards overlapped from four nodes on and piled up beyond that,
+// which destroys the only thing a directed graph carries: which node an arrow
+// actually touches.
+function layout(nodes, w){
+  const cardW = Math.max(...nodes.map(n => n.halfW * 2), 160);
+  const cardH = Math.max(...nodes.map(n => n.halfH * 2), 48);
+  const gap = 26;
+  const n = nodes.length;
+  const cx = w / 2;
+  if (n === 1) { nodes[0].x = cx; nodes[0].y = cardH / 2 + 20; return cardH + 40; }
+  if (n === 2) {
+    const h = cardH * 2 + gap * 2 + 20;
+    nodes[0].x = cx; nodes[0].y = cardH / 2 + 16;
+    nodes[1].x = cx; nodes[1].y = h - cardH / 2 - 16;
+    return h;
+  }
+  // Chord between adjacent nodes must clear a card: 2R·sin(pi/n) >= cardW+gap.
+  const R = (cardW + gap) / (2 * Math.sin(Math.PI / n));
+  // Use the horizontal room the 68em body actually has; go taller when cramped
+  // rather than letting the cards collide.
+  const rx = Math.max(60, Math.min(R, (w - cardW) / 2 - 8));
+  const ry = R;
+  const h = 2 * ry + cardH + 32;
+  nodes.forEach((nd, i) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    nd.x = cx + rx * Math.cos(a);
+    nd.y = h / 2 + ry * Math.sin(a);
+  });
+  return h;
+}
+
+function trim(from, to){
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const scale = Math.min(from.halfW / (Math.abs(ux) || 1e-6), from.halfH / (Math.abs(uy) || 1e-6));
+  return { x: from.x + ux * scale, y: from.y + uy * scale };
+}
+
+// A verdict is only rewritten when the target's tree moves, so a witness that
+// has been failing for hours still shows a last verdict reading consistency_ok.
+// The health beside it is the only thing separating those, so a stale witness
+// never renders green however good its last verdict was.
+function stale(t){
+  const h = t && t.health;
+  if (!h || h.standby) return false;   // a follower is not witnessing on purpose
+  return h.stale === true || h.checking === false;
+}
+function edgeClass(t){
+  if (!t) return 'unk';
+  if (t.consistency_ok === false) return 'bad';
+  if (t.witnessed !== true) return 'unk';
+  if (stale(t)) return 'unk';
+  return '';
+}
+function edgeLabel(t){
+  if (!t) return '?';
+  if (t.consistency_ok === false) return '✗ caught';
+  if (t.witnessed !== true) return 'not yet verified';
+  if (stale(t)) return '⚠ ' + num(t.size) + ' — not rechecked';
+  return '✓ ' + num(t.size);
+}
+
+function draw(){
+  const stage = $('stage');
+  const svg = $('edges');
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  [...stage.querySelectorAll('.node,.badge')].forEach(e => e.remove());
+  if (!G.nodes.length) return;
+  const w = stage.clientWidth;
+
+  // Cards first, so their real size can be measured. The previous guess was
+  // about half the true half-width, which put every arrowhead underneath an
+  // opaque card where nobody could see which node it pointed at.
+  for (const n of G.nodes) {
+    const d = document.createElement('div');
+    d.className = 'node' + (n.answered ? '' : ' silent') +
+      (SEL && SEL.kind === 'node' && SEL.n.key === n.key ? ' sel' : '');
+    d.innerHTML = '<div class="nm">' + esc(n.name) + (n.self ? ' <span class="mut">(this node)</span>' : '') +
+      '</div><div class="mut" style="font-size:.9em">' +
+      (n.answered
+         ? (n.tree_size === undefined ? 'answered' : num(n.tree_size) + ' entries') +
+           (n.targetCount === 0 ? ' · witnesses nobody' : '')
+         : esc(n.reason || 'not asked')) + '</div>';
+    d.onclick = ev => { ev.stopPropagation(); select({ kind: 'node', n }); };
+    stage.appendChild(d);
+    n.el = d;
+  }
+  for (const n of G.nodes) { n.halfW = n.el.offsetWidth / 2; n.halfH = n.el.offsetHeight / 2; }
+
+  const h = layout(G.nodes, w);
+  stage.style.height = Math.max(h, 180) + 'px';
+  for (const n of G.nodes) { n.el.style.left = n.x + 'px'; n.el.style.top = n.y + 'px'; }
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + Math.max(h, 180));
+
+  const byKey = new Map(G.nodes.map(n => [n.key, n]));
+  for (const e of G.edges) {
+    const a = byKey.get(e.from), b = byKey.get(e.to);
+    if (!a || !b) continue;
+    const p1 = trim(a, b), p2 = trim(b, a);
+    const cls = edgeClass(e.t);
+    const stroke = cls === 'bad' ? '#b00' : cls === 'unk' ? '#999' : '#1f4788';
+    const line = document.createElementNS(SVGNS, 'line');
+    line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+    line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+    line.setAttribute('stroke', stroke); line.setAttribute('stroke-width', '2');
+    if (cls === 'unk') line.setAttribute('stroke-dasharray', '5 4');
+    svg.appendChild(line);
+    const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
+    const head = document.createElementNS(SVGNS, 'path');
+    head.setAttribute('d', 'M -9 -5 L 0 0 L -9 5 Z');
+    head.setAttribute('fill', stroke);
+    head.setAttribute('transform', 'translate(' + p2.x + ',' + p2.y + ') rotate(' + ang + ')');
+    svg.appendChild(head);
+
+    const badge = document.createElement('div');
+    badge.className = 'badge ' + cls;
+    badge.style.left = ((p1.x + p2.x) / 2) + 'px';
+    badge.style.top = ((p1.y + p2.y) / 2) + 'px';
+    badge.textContent = edgeLabel(e.t);
+    badge.title = a.name + ' watches ' + b.name;
+    badge.onclick = ev => { ev.stopPropagation(); select({ kind: 'edge', e }); };
+    stage.appendChild(badge);
+  }
+}
+
+function verdictTable(t){
+  if (!t) return '<p class="mut">No verdict.</p>';
+  if (t.consistency_ok === false) {
+    return '<p class="no"><b>✗ The consistency check failed.</b></p>' +
+      '<p class="no">' + esc(t.detail || 'This log changed in a way an append-only log cannot.') +
+      '</p><p class="mut">This is the failure the whole design exists to make visible.</p>';
+  }
+  if (t.witnessed !== true) {
+    return '<p><b>Set up, but never successfully verified.</b></p>' +
+      '<p class="mut">There is no verdict to read. That is not the same as a clean one.</p>';
+  }
+  return '<table>' +
+    '<tr><td class="mut" style="width:34%">append-only</td><td class="ok">verified</td></tr>' +
+    '<tr><td class="mut">tree size</td><td class="num">' + num(t.size) + '</td></tr>' +
+    '<tr><td class="mut">root</td><td style="word-break:break-all">' + esc(t.root || '') + '</td></tr>' +
+    (t.verdict_at ? '<tr><td class="mut">verdict</td><td>' + esc(t.verdict_at.slice(0,19).replace('T',' ')) + '</td></tr>' : '') +
+    '</table>';
+}
+
+function healthNote(t){
+  const h = t && t.health;
+  if (!h) return '';
+  if (h.standby) return '<p class="mut" style="margin:.4em 0 0">This replica is on standby &mdash; the ' +
+    'cluster leader does the witnessing and the verdict is replicated here.</p>';
+  if (h.checking === false) return '<p class="warn" style="margin:.4em 0 0">⚠ This witness is not running. ' +
+    'Its last verdict stands, but nothing has rechecked since.</p>';
+  if (h.stale === true) return '<p class="warn" style="margin:.4em 0 0">⚠ This witness has not completed a ' +
+    'check recently' + (h.seconds_since_success !== undefined ?
+      ' (' + num(h.seconds_since_success) + 's ago)' : '') + '. A verdict is only rewritten when the ' +
+    'target&rsquo;s tree moves, so a frozen witness keeps showing its last one.</p>';
+  return '';
+}
+
+// Reproduce the witness's job, with the witness out of the path.
+//
+// Establishes: the target signed a checkpoint at some size and root (checked
+// against the key the WITNESS published for it), and the target's log is
+// append-only between the root the witness reports and that checkpoint.
+//
+// Does NOT establish that the witness ever independently held the older root —
+// and the page says so rather than letting a green tick imply it.
+async function recheck(a, b, t){
+  const out = $('recheck-out');
+  const say = h => { out.innerHTML = h; };
+  say('<p class="mut">checking&hellip;</p>');
+  const base = (b.url || '').replace(/\/$/, '');   // '' when the target is this node: same-origin
+  try {
+    const cpText = await text(base + '/dedi/log/checkpoint');
+    const note = parseNote(cpText);
+    if (!note) throw new Error('the target did not return a signed checkpoint');
+    const sigOK = await verifyCheckpointSig(cpText, t.target_key);
+    // null and false are different answers. null means this browser could not
+    // run the check at all — no Ed25519 in WebCrypto, or an insecure origin so
+    // crypto.subtle is undefined. Folding it into the red branch accused every
+    // honest target of serving a checkpoint it never signed.
+    if (sigOK === null) {
+      say('<p class="warn"><b>Your browser could not run the signature check.</b> No Ed25519 in WebCrypto, ' +
+        'or this page is not on a secure origin. Nothing is established either way &mdash; this is a failure ' +
+        'to check, not a finding.</p>');
+      return;
+    }
+    if (sigOK === false) {
+      say('<p class="no"><b>✗ The target&rsquo;s checkpoint signature did not verify</b> against the key ' +
+        esc(a.name) + ' published for it. Either that key is wrong or the checkpoint is not the ' +
+        'target&rsquo;s.</p>');
+      return;
+    }
+    const cur = parseCheckpointBody(note.body);
+    if (t.size === 0) {
+      // A witness legitimately records a verdict against an empty target. There
+      // is no history to prove append-only over, and printing a green tick for
+      // that would be a tick for nothing.
+      say('<p class="warn"><b>Nothing to prove yet.</b> The target&rsquo;s log was empty when ' + esc(a.name) +
+        ' last witnessed it, so there is no history to check. Its checkpoint now says ' + num(cur.size) +
+        ' entries, signed by the key above.</p>');
+      return;
+    }
+    let consistent, note2;
+    if (cur.size === t.size) {
+      consistent = cur.rootB64 === t.root;
+      note2 = 'The target’s log has not moved since, so this is a root comparison rather than a proof.';
+    } else if (cur.size < t.size) {
+      say('<p class="no"><b>✗ The target&rsquo;s log has shrunk</b> &mdash; ' + num(cur.size) + ' entries now, ' +
+        num(t.size) + ' when ' + esc(a.name) + ' looked. An append-only log cannot do that.</p>');
+      return;
+    } else {
+      const pr = (await j(base + '/dedi/log/proof/consistency?old=' + t.size + '&new=' + cur.size)).data;
+      if (!pr || !pr.proof) throw new Error('the target would not supply a consistency proof from ' +
+        t.size + ' to ' + cur.size);
+      consistent = await checkTree(pr.proof.map(b64d), cur.size, cur.root, t.size, b64d(t.root));
+      note2 = 'Recomputed across ' + num(cur.size - t.size) + ' entries added since.';
+    }
+    say(consistent
+      ? '<p class="ok" style="margin:.6em 0 .2em"><b>✓ You verified it.</b></p>' +
+        '<p class="mut" style="margin:0 0 .4em">The target signed a checkpoint at <b>' + num(cur.size) +
+        '</b> entries, and its log is append-only from the root ' + esc(a.name) + ' reports to that point. ' +
+        note2 + '</p>' +
+        '<p class="mut" style="margin:0"><b>What this does not show.</b> That ' + esc(a.name) +
+        ' ever independently held the older root. A witness colluding with the target could hand you a pair ' +
+        'that verifies exactly like this. Witnessing is worth something because an independent party kept ' +
+        'yesterday&rsquo;s checkpoint &mdash; your browser kept nothing. To close that, keep a checkpoint ' +
+        'yourself and come back.</p>'
+      : '<p class="no"><b>✗ The consistency proof did not check out.</b> The target&rsquo;s log at ' +
+        num(cur.size) + ' entries is not an extension of the root ' + esc(a.name) + ' reports. That is ' +
+        'either a rewritten history or a witness reporting a root the target never had.</p>');
+  } catch (e) {
+    const why = (e && e.name === 'AbortError') ? 'the target did not respond within 8s'
+              : String(e && e.message || e);
+    say('<p class="warn">Could not complete the check: ' + esc(why) +
+      '. That is a failure to establish the claim, not a refutation of it.</p>');
+  }
+}
+
+function select(sel){
+  SEL = sel;
+  const el = $('detail');
+  if (sel.kind === 'edge') {
+    const a = G.nodes.find(n => n.key === sel.e.from), b = G.nodes.find(n => n.key === sel.e.to);
+    const t = sel.e.t;
+    // A caught edge must NOT offer a re-check. Equivocation is recorded with
+    // the NEW root, so a browser checking against it passes — and would print a
+    // green tick beside the alarm. The browser never held the pre-rewrite root
+    // and structurally cannot reproduce the catch.
+    const caught = !!(t && t.consistency_ok === false);
+    const canCheck = !!(t && !caught && t.witnessed === true && t.size !== undefined &&
+                        t.target_key && (b.url || b.self));
+    let why = '';
+    if (!canCheck) {
+      why = caught
+        ? esc(a.name) + ' caught this target rewriting history. Your browser never held the root from ' +
+          'before the rewrite, so it cannot reproduce that catch — and a check against the rewritten ' +
+          'root would pass while proving nothing.'
+        : (!t || t.witnessed !== true) ? 'There is no verdict to re-check.'
+        : !t.target_key ? esc(a.name) + ' does not publish the target’s verifier key, so your browser ' +
+          'has nothing to check the target’s signature against.'
+        : 'This page has no URL for the target, so your browser cannot fetch its checkpoint.';
+    }
+    el.innerHTML = '<h3 style="margin-top:0">' + esc(a.name) + ' <span class="wit">watches</span> ' + esc(b.name) + '</h3>' +
+      '<p class="mut" style="margin:0 0 .5em">This edge is drawn because <b>' + esc(a.name) + '</b> said so. ' +
+      'Your browser fetched it from <code>' + esc(sel.e.src || '') + '</code>, not from this node. The same ' +
+      'verdict with ' + esc(a.name) + '&rsquo;s own inclusion proof for it is at <code>' +
+      esc(sel.e.verdictURL || '') + '</code>.</p>' +
+      '<div class="cols2"><div><h3 style="margin-top:0">' + esc(a.name) + ' claims</h3>' + verdictTable(t) +
+      healthNote(t) + '</div><div><h3 style="margin-top:0">You check</h3>' +
+      (canCheck
+        ? '<p class="mut" style="margin:0 0 .5em">Fetch the target&rsquo;s own checkpoint, verify its ' +
+          'signature against the key ' + esc(a.name) + ' published, and recompute the consistency proof ' +
+          'between the root it reports and the target&rsquo;s log right now. None of it goes through ' +
+          esc(a.name) + '.</p><button id="recheck">check it in my browser</button>'
+        : '<p class="mut" style="margin:0">' + why + '</p>') +
+      '<div id="recheck-out"></div></div></div>';
+    if (canCheck) $('recheck').onclick = () => recheck(a, b, t);
+  } else {
+    const n = sel.n;
+    const watches = G.edges.filter(e => e.from === n.key);
+    const watchedBy = G.edges.filter(e => e.to === n.key);
+    let out = '<h3 style="margin-top:0">' + esc(n.name) + (n.self ? ' <span class="mut">(this node)</span>' : '') + '</h3>';
+    out += '<table><tr><td class="mut" style="width:34%">log origin</td><td>' +
+      (n.origin ? esc(n.origin) : '<span class="warn">unknown &mdash; no checkpoint seen</span>') + '</td></tr>' +
+      (n.url ? '<tr><td class="mut">url</td><td>' + esc(n.url) + '</td></tr>' : '') +
+      '<tr><td class="mut">answered</td><td>' + (n.answered ? '<span class="ok">yes</span>'
+        : '<span class="warn">no &mdash; ' + esc(n.reason || 'not asked') + '</span>') + '</td></tr></table>';
+    out += '<p style="margin:.6em 0 .2em"><b>Watches</b> ' + (watches.length ? '' :
+      (n.answered ? '<span class="mut">nothing. It answered, and reported no targets.</span>' :
+       '<span class="warn">unknown &mdash; it did not answer, so this is a gap, not a zero.</span>')) + '</p>';
+    if (watches.length) out += '<ul>' + watches.map(e =>
+      '<li>' + esc(e.to) + ' &mdash; ' + esc(edgeLabel(e.t)) + '</li>').join('') + '</ul>';
+    out += '<p style="margin:.6em 0 .2em"><b>Watched by</b> ' + (watchedBy.length ? '' :
+      '<span class="mut">nobody that answered us. A node can witness this log without appearing here at ' +
+      'all &mdash; it needs only the public checkpoint and key.</span>') + '</p>';
+    if (watchedBy.length) out += '<ul>' + watchedBy.map(e =>
+      '<li>' + esc(e.from) + ' &mdash; ' + esc(edgeLabel(e.t)) + '</li>').join('') + '</ul>';
+    el.innerHTML = out;
+  }
+  draw();
+}
+
+function renderCluster(c){
+  if (!c || !c.enabled){
+    $('cluster').innerHTML = '<span class="mut">This node is a single instance &mdash; no replicas, nothing ' +
+      'to agree with. If it goes down the directory stops answering.</span>';
+    return;
+  }
+  const ms = c.members || [];
+  let out = '<div class="mut" style="font-size:.85em;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4em">' +
+    'one identity &middot; one log &middot; ' + ms.length + ' copies</div><div class="inner">';
+  for (const m of ms) {
+    out += '<div class="m"><b>' + esc(m.id) + '</b>' + (m.self ? ' <span class="mut">(this)</span>' : '') +
+      '<div class="mut" style="font-size:.9em">' + (m.leader ? 'leader &mdash; accepts writes'
+        : 'follower &mdash; serves reads') + '</div></div>';
+  }
+  out += '</div>';
+  const q = Math.floor(ms.length / 2) + 1;
+  out += '<p class="mut" style="margin:.5em 0 0">A majority (' + q + ' of ' + ms.length + ') must agree before ' +
+    'a write is accepted, so ' + Math.floor((ms.length - 1) / 2) + ' can fail without the directory stopping. ' +
+    'Lag and last-contact are on <a href="/status">status</a>.</p>';
+  $('cluster').innerHTML = out;
+}
+
+// The counts must come from one population, or the sentence contradicts its own
+// arithmetic. "Asked" is the set we actually attempted; nodes we learned about
+// only because a peer named them were never contacted and are their own clause.
+function coverage(r){
+  const silent = r.nodes.filter(n => n.asked && !n.answered);
+  const never = r.nodes.filter(n => !n.asked && !n.self);
+  let msg = 'Asked ' + r.asked + ' node' + (r.asked === 1 ? '' : 's') + '; ' + r.answered + ' answered.';
+  if (silent.length) {
+    msg += ' ' + silent.length + ' did not (' +
+      silent.map(n => esc(n.name) + ': ' + esc(n.reason || 'no reason recorded')).join('; ') +
+      '), so any arrow they would have drawn is missing from this picture rather than absent from the world.';
+  }
+  if (never.length) {
+    msg += ' ' + never.length + ' more ' + (never.length === 1 ? 'is' : 'are') + ' named by a peer but not ' +
+      'asked by this page (' + never.map(n => esc(n.name)).join('; ') + '), so nothing they would say is here.';
+  }
+  msg += ' This is every node this one knows of; a node can witness any log here without appearing at all.';
+  $('coverage').innerHTML = msg;
+}
+
+(async function(){
+  try {
+    const r = await collect();
+    G = { nodes: r.nodes, edges: r.edges };
+    renderCluster(r.cluster);
+    coverage(r);
+    draw();
+    const self = r.nodes.find(n => n.key === r.selfKey);
+    if (self) select({ kind: 'node', n: self });
+  } catch (e) {
+    $('stage').innerHTML = '<p class="no" style="padding:1em">Could not read this node&rsquo;s network view: ' +
+      esc(String(e && e.message || e)) + '</p>';
+    $('coverage').textContent = '';
+  }
+})();
+addEventListener('resize', () => { if (G.nodes.length) draw(); });
+</script>
+</body>
+</html>

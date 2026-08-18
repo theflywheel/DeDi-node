@@ -14,6 +14,9 @@ var explorerHTML []byte
 //go:embed static/overview.html
 var overviewHTML []byte
 
+//go:embed static/network.html
+var networkPageHTML []byte
+
 //go:embed static/docs.html
 var docsHTML []byte
 
@@ -56,6 +59,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) explorer(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(explorerHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
 	s.writePage(w, page, "/browse")
+}
+
+// networkPage serves the ring: who watches whom across this deployment, and
+// what each of them has actually proved.
+//
+// It takes the verifier key for the same reason the other pages do — with it a
+// reader's browser can check a checkpoint signature rather than accepting this
+// node's summary of one.
+func (s *Server) networkPage(w http.ResponseWriter, r *http.Request) {
+	page := bytes.Replace(networkPageHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
+	s.writePage(w, page, "/network")
 }
 
 // writePage substitutes the placeholders every page shares and sends it.

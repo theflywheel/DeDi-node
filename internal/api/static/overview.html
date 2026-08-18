@@ -205,10 +205,7 @@ function renderWatchers(r){
         num(t.size) + '</b> entries' + when + '. That verdict is in <i>its</i> log, not ours.</p>';
     }
   }
-  // Deliberately /docs/witnessing and not /network: the ring page does not
-  // exist yet (issue #37). A link that 404s is worse than no link, and worst of
-  // all on the panel whose entire job is to be checkable.
-  out += '<a href="/docs/witnessing">how to check this yourself &rarr;</a>';
+  out += '<a href="/network">see the ring, and check it yourself &rarr;</a>';
   $('watchers').innerHTML = out;
 }
 
