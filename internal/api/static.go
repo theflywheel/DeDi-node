@@ -3,9 +3,12 @@ package api
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"html"
 	"net/http"
 	"net/url"
+
+	"github.com/theflywheel/DeDi-node/internal/provision"
 )
 
 //go:embed static/index.html
@@ -163,5 +166,18 @@ func (s *Server) docs(w http.ResponseWriter, r *http.Request) {
 // worth stealing. See adminPageHeaders.
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	adminPageHeaders(w)
-	s.writePage(w, adminHTML, "/admin")
+	// The role catalogue is rendered into the page rather than fetched,
+	// because the picker needs it before anything has been created — it was
+	// previously only in the response to creating a child, so the picker would
+	// have been empty on the page where you choose what to create.
+	//
+	// It goes into a non-executing <script type="application/json"> block, not
+	// a JavaScript string literal. encoding/json escapes <, > and & in strings,
+	// so nothing in a role description can close that block.
+	cat, err := json.Marshal(provision.RoleCatalogue())
+	if err != nil {
+		internal(w, err)
+		return
+	}
+	s.writePage(w, replaceOnce(adminHTML, "{{ROLE_CATALOGUE}}", string(cat)), "/admin")
 }

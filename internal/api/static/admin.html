@@ -169,6 +169,14 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
     child's log would then prove nothing you had not already asserted yourself.
   </div>
 
+  <fieldset><legend>what kind of node?</legend>
+    <div id="role-picker" class="grid"><span class="mut">loading roles&hellip;</span></div>
+    <div id="role-detail" class="mut" style="margin-top:.6em">&hellip;</div>
+    <p class="mut" style="margin:.5em 0 0">Roles are not exclusive. Witnessing composes with any of
+    them &mdash; a child is normally witnessed by its parent, and a standalone registry can be
+    replicated <i>and</i> witness a peer &mdash; so it is a field below rather than a sixth choice.</p>
+  </fieldset>
+
   <fieldset><legend>delegate a namespace</legend>
     <div class="grid">
       <div><label for="c-ns">child namespace</label><input id="c-ns" placeholder="beckn.mobility" spellcheck="false"></div>
@@ -179,6 +187,28 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
         <input id="c-url" placeholder="https://mobility.example.org" spellcheck="false"></div>
       <div class="full"><label for="c-db">child database URL <span class="mut">(must be a database no other node writes to)</span></label>
         <input id="c-db" type="password" placeholder="postgres://user:pass@host:5432/child" spellcheck="false" autocomplete="off"></div>
+
+      <div class="full" id="need-cluster" hidden>
+        <label for="c-cluster-id">replica id <span class="mut">(and the peers it joins)</span></label>
+        <input id="c-cluster-id" placeholder="ha-2" spellcheck="false">
+        <input id="c-cluster-peers" placeholder="ha-1@10.0.0.1:7000,ha-3@10.0.0.3:7000" spellcheck="false" style="margin-top:.3em">
+        <p class="mut" style="margin:.3em 0 0">A replica shares the identity it replicates: give it the
+        <b>same</b> key file as the node it joins. One that generates its own key is not a replica, it is
+        a second node claiming the first one&rsquo;s name.</p>
+      </div>
+
+      <div class="full" id="need-crawl" hidden>
+        <label for="c-crawl">domains to mirror <span class="mut">(comma-separated)</span></label>
+        <input id="c-crawl" placeholder="a.example,b.example" spellcheck="false">
+      </div>
+
+      <div class="full" id="need-witness" hidden>
+        <label for="c-wit-url">witness target <span class="mut">(its /dedi base URL, and its verifier key)</span></label>
+        <input id="c-wit-url" placeholder="https://b.example/dedi" spellcheck="false">
+        <input id="c-wit-key" placeholder="b.example/log+7f3a1c9d+Aa4b…" spellcheck="false" style="margin-top:.3em">
+        <p class="mut" style="margin:.3em 0 0">The verifier key is public by construction. Getting it from
+        the target over an unauthenticated channel proves the connection, not the target.</p>
+      </div>
     </div>
     <p class="mut" style="margin:.4em 0 0">The namespace must sit exactly one level under
     <code id="c-parent">this node's</code> — you can only delegate what you hold.</p>
@@ -236,6 +266,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="domain-list"></div>
 </div>
 
+<script type="application/json" id="role-catalogue">{{ROLE_CATALOGUE}}</script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -717,6 +748,54 @@ const parentNS = () => ns();
 // their own provider, and would fail at submit rather than at selection.
 let PROVIDERS = ['env'];
 
+// The role catalogue comes from the node, for the same reason PROVIDERS does:
+// a list written into this page can offer a role the renderer does not
+// implement, or describe one differently from the configuration it emits.
+// Until the node answers, the picker offers the only role this endpoint could
+// provision before roles were named.
+let ROLES = (() => {
+  try { return JSON.parse(document.getElementById('role-catalogue').textContent) || []; }
+  catch(e){ return []; }
+})();
+let ROLE = 'child';
+
+function renderRoles(){
+  const box = $('role-picker');
+  if(!box) return;
+  if(!ROLES.length){ box.innerHTML = '<span class="mut">no roles offered by this node</span>'; return; }
+  box.innerHTML = ROLES.map(r =>
+    '<div><label style="display:block;cursor:pointer">' +
+      '<input type="radio" name="noderole" value="' + esc(r.role) + '"' +
+      (r.role === ROLE ? ' checked' : '') + '> <b>' + esc(r.title) + '</b>' +
+      '<span class="mut" style="display:block;font-size:.9em">' + esc(r.summary) + '</span>' +
+    '</label></div>').join('');
+  box.querySelectorAll('input[name=noderole]').forEach(el => {
+    el.addEventListener('change', () => { ROLE = el.value; renderRoleDetail(); });
+  });
+  renderRoleDetail();
+}
+
+function renderRoleDetail(){
+  const r = ROLES.find(x => x.role === ROLE);
+  const box = $('role-detail');
+  if(!box) return;
+  if(!r){ box.innerHTML = ''; return; }
+  box.innerHTML = '<table style="width:auto"><tr><td class="mut">identity</td><td>' + esc(r.identity) +
+    '</td></tr><tr><td class="mut">log</td><td>' + esc(r.log) +
+    '</td></tr><tr><td class="mut">buys you</td><td>' + esc(r.buys) +
+    '</td></tr><tr><td class="mut">write plane</td><td>' + esc(r.writes) + '</td></tr></table>';
+
+  // Only the fields this role actually needs. The list comes from the node
+  // alongside the description, so a role cannot ask for something the renderer
+  // will ignore.
+  const needs = r.needs || [];
+  $('need-cluster').hidden = !needs.includes('cluster');
+  $('need-crawl').hidden   = !needs.includes('crawl');
+  // Witnessing composes with every role, so its field is always available —
+  // required for a witness, optional for everyone else.
+  $('need-witness').hidden = false;
+}
+
 function renderProviders(){
   const sel = $('c-provider');
   sel.innerHTML = PROVIDERS.map(n => '<option>' + esc(n) + '</option>').join('');
@@ -869,6 +948,12 @@ async function createChild(){
     namespace: child,
     label: $('c-label').value.trim(),
     provider: $('c-provider').value,
+    role: ROLE,
+    witness_target_url: $('c-wit-url').value.trim(),
+    witness_target_key: $('c-wit-key').value.trim(),
+    cluster_id: $('c-cluster-id').value.trim(),
+    cluster_peers: $('c-cluster-peers').value.trim(),
+    crawl_domains: $('c-crawl').value.trim(),
     image: $('c-image').value.trim(),
     db_url: $('c-db').value,
     public_url: $('c-url').value.trim(),
@@ -880,6 +965,7 @@ async function createChild(){
     const d = j.data || {};
     const art = d.artifact || {};
     if(d.providers){ PROVIDERS = d.providers; renderProviders(); }
+    if(d.roles){ ROLES = d.roles; renderRoles(); }
     box.innerHTML =
       '<div class="banner"><b>Offer minted for ' + esc(d.namespace) + '.</b> ' +
       'It expires at <code>' + esc(d.expires_at) + '</code> and is shown <b>once</b> — the log ' +

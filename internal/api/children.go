@@ -36,9 +36,25 @@ type createChildRequest struct {
 	Namespace string `json:"namespace"` // full child namespace, e.g. beckn.mobility
 	Label     string `json:"label"`
 	Provider  string `json:"provider"`
-	Image     string `json:"image"`
-	DBURL     string `json:"db_url"`
-	PublicURL string `json:"public_url"`
+	// Role is what the new node will be. Empty means child — the only thing
+	// this endpoint could provision before roles were named.
+	Role string `json:"role"`
+
+	// Composes with any role: this node witnessing another.
+	WitnessTargetURL    string `json:"witness_target_url"`
+	WitnessTargetKey    string `json:"witness_target_key"`
+	WitnessTargetOrigin string `json:"witness_target_origin"`
+
+	// Replica only.
+	ClusterID    string `json:"cluster_id"`
+	ClusterPeers string `json:"cluster_peers"`
+	ClusterBind  string `json:"cluster_bind"`
+
+	// Mirror only.
+	CrawlDomains string `json:"crawl_domains"`
+	Image        string `json:"image"`
+	DBURL        string `json:"db_url"`
+	PublicURL    string `json:"public_url"`
 }
 
 // defaultImage is used when the caller does not name one. It is a placeholder
@@ -69,6 +85,11 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 	var req createChildRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		badRequest(w, "body must be JSON of the form {\"namespace\": \"parent.child\", ...}")
+		return
+	}
+	role, err := provision.ParseRole(req.Role)
+	if err != nil {
+		badRequest(w, err.Error())
 		return
 	}
 	provider, pOK := provision.Get(orDefault(req.Provider, "env"))
@@ -122,6 +143,17 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		EnrolToken:  offer.Token,
 		PublicURL:   strings.TrimRight(req.PublicURL, "/"),
 		DatabaseURL: req.DBURL,
+
+		Role: role,
+		// Witnessing composes with every role, so it is passed regardless of
+		// which one was picked.
+		WitnessTargetURL:    strings.TrimRight(req.WitnessTargetURL, "/"),
+		WitnessTargetKey:    req.WitnessTargetKey,
+		WitnessTargetOrigin: req.WitnessTargetOrigin,
+		ClusterID:           req.ClusterID,
+		ClusterPeers:        req.ClusterPeers,
+		ClusterBind:         req.ClusterBind,
+		CrawlDomains:        req.CrawlDomains,
 	})
 	if err != nil {
 		internal(w, err)
@@ -139,6 +171,10 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 			"expires_at": offer.ExpiresAt.Format(time.RFC3339),
 			"artifact":   art,
 			"providers":  provision.Names(),
+			// The console renders its role picker from this rather than from a
+			// list of its own, so it cannot offer a role the renderer does not
+			// implement, or describe one differently from the config it emits.
+			"roles": provision.RoleCatalogue(),
 		},
 	})
 }

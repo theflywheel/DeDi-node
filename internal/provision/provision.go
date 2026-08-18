@@ -41,6 +41,25 @@ type Spec struct {
 	EnrolToken  string // one-time secret; see delegation.TokenTTL
 	PublicURL   string // where the child will be reachable, once known
 	DatabaseURL string // optional; blank leaves a placeholder for the operator
+
+	// Role is what this node will be to the others. Empty means child, which
+	// is what every caller predating roles was provisioning. See role.go.
+	Role Role
+
+	// WitnessTarget composes with ANY role: a child is normally witnessed by
+	// its parent, and a standalone registry may witness a peer. Blank means
+	// this node witnesses nobody.
+	WitnessTargetURL    string
+	WitnessTargetKey    string
+	WitnessTargetOrigin string
+
+	// Replica only. The cluster this node joins.
+	ClusterID    string
+	ClusterPeers string
+	ClusterBind  string
+
+	// Mirror only. Domains whose published files this node pulls.
+	CrawlDomains string
 }
 
 // Artifact is rendered output ready to be applied.
@@ -93,12 +112,49 @@ func init() {
 // commonNotes are true regardless of provider, and each is a mistake seen in
 // practice rather than a generic caution.
 func commonNotes(s Spec) []string {
-	return []string{
-		"The enrolment token is single use and expires within the hour. If the child boots after that, mint a fresh offer — the child will otherwise come up healthy and unenrolled, which looks like success.",
-		"The child generates its own identity key on first boot and keeps it on its volume. Do not copy a key in from the parent: a parent that has held the child's private key can forge the child's checkpoints, and the child's log then proves nothing.",
+	// Every role shares these two. A shared database is immediate corruption
+	// rather than slow degradation, and a write plane that opens itself is a
+	// door nobody chose to install.
+	notes := []string{
 		"DEDI_DB_URL must point at a database no other node writes to. Two nodes sharing one is immediate corruption, not a slow degradation.",
-		"No publisher key is included, deliberately: the child's write plane stays shut until its own operator opens it. Generate one there with `dedid pubkeygen -kid <id> -namespace " + s.Namespace + "` and set DEDI_PUBLISHER_KEYS. Until then the child serves reads and accepts no writes.",
 	}
+
+	switch role(s) {
+	case RoleChild:
+		notes = append(notes,
+			"The enrolment token is single use and expires within the hour. If the child boots after that, mint a fresh offer — the child will otherwise come up healthy and unenrolled, which looks like success.",
+			"The child generates its own identity key on first boot and keeps it on its volume. Do not copy a key in from the parent: a parent that has held the child's private key can forge the child's checkpoints, and the child's log then proves nothing.",
+			"No publisher key is included, deliberately: the child's write plane stays shut until its own operator opens it. Generate one there with `dedid pubkeygen -kid <id> -namespace "+s.Namespace+"` and set DEDI_PUBLISHER_KEYS. Until then the child serves reads and accepts no writes.",
+		)
+	case RoleReplica:
+		notes = append(notes,
+			"A replica shares the identity it replicates. Give it the SAME DEDI_KEY_FILE contents as the node it joins — a replica that generates its own key is not a replica, it is a second node claiming the first one's name.",
+			"Its database must still be its own. Replicas agree through Raft, not through a shared table.",
+			"Replication buys uptime, not trust. Three replicas agreeing is one party speaking three times; it proves nothing about the log's history, which is what a witness is for.",
+		)
+	case RoleWitness:
+		notes = append(notes,
+			"DEDI_WITNESS_TARGET_KEY is the target's public verifier key, published so this node can check the target's checkpoint signatures itself. Getting it from the target over an unauthenticated channel proves the connection, not the target — obtain it the way you would any other trust anchor.",
+			"A witness needs a publisher key of its own: a verdict is a log entry, and an unsigned node records nothing. Generate one with `dedid pubkeygen` and set DEDI_PUBLISHER_KEYS.",
+		)
+	case RoleMirror:
+		notes = append(notes,
+			"No publisher key, deliberately. Without one the write plane is not merely refused — it is never routed, so /admin answers 404 rather than 401 and the node does not advertise a door it lacks.",
+			"A mirror serves what it has crawled. It cannot be more current than its last crawl, and everything it serves is still checkable against the origin's own checkpoint — which is the point of mirroring a transparency log rather than a database.",
+		)
+	case RoleStandalone:
+		notes = append(notes,
+			"Generate a publisher key before the first write: `dedid pubkeygen -kid <id> -namespace "+s.Namespace+"`, then set DEDI_PUBLISHER_KEYS. Until then the node serves reads and /admin is not routed at all.",
+			"Nothing witnesses this node yet, so nothing can prove it has not rewritten its own history. Point a witness at it, or arrange for a peer to — a directory nobody checks is a database with extra steps.",
+		)
+	}
+
+	if s.WitnessTargetURL != "" && role(s) != RoleWitness {
+		notes = append(notes,
+			"This node also witnesses "+s.WitnessTargetURL+". That is independent of its role: witnessing needs only the target's public checkpoint and key, and no permission from it.",
+		)
+	}
+	return notes
 }
 
 // env vars every provider sets identically, so a child deployed by one method
@@ -113,20 +169,67 @@ func envPairs(s Spec) [][2]string {
 		{"DEDI_ORIGIN", s.Origin},
 		{"DEDI_LISTEN", ":8080"},
 		{"DEDI_DB_URL", db},
-		// The child answers Beckn wildcard lookups only for what it was
-		// delegated. Leaving this unset is refused at boot by the guard added
-		// with the wildcard work, which is the behaviour we want here too.
-		{"DEDI_WILDCARD_NAMESPACES", s.Namespace},
-		// Enrolment: where to claim the delegation, and with what.
-		{"DEDI_PARENT_URL", s.ParentURL},
-		{"DEDI_PARENT_KEY", s.ParentKey},
-		{"DEDI_ENROL_NAMESPACE", s.Namespace},
-		{"DEDI_ENROL_TOKEN", s.EnrolToken},
 	}
+	if s.Namespace != "" {
+		// A node answers Beckn wildcard lookups only for what it holds.
+		// Leaving this unset is refused at boot by the wildcard guard.
+		pairs = append(pairs, [2]string{"DEDI_WILDCARD_NAMESPACES", s.Namespace})
+	}
+
+	switch role(s) {
+	case RoleChild:
+		// Enrolment: where to claim the delegation, and with what.
+		pairs = append(pairs,
+			[2]string{"DEDI_PARENT_URL", s.ParentURL},
+			[2]string{"DEDI_PARENT_KEY", s.ParentKey},
+			[2]string{"DEDI_ENROL_NAMESPACE", s.Namespace},
+			[2]string{"DEDI_ENROL_TOKEN", s.EnrolToken},
+		)
+	case RoleReplica:
+		// A replica shares the identity it replicates; it does not enrol and
+		// must not generate a key of its own.
+		pairs = append(pairs,
+			[2]string{"DEDI_CLUSTER_ID", s.ClusterID},
+			[2]string{"DEDI_CLUSTER_PEERS", s.ClusterPeers},
+			[2]string{"DEDI_CLUSTER_BIND", orDefault(s.ClusterBind, "0.0.0.0:7000")},
+		)
+	case RoleMirror:
+		if s.CrawlDomains != "" {
+			pairs = append(pairs, [2]string{"DEDI_CRAWL_DOMAINS", s.CrawlDomains})
+		}
+	}
+
+	// Witnessing composes with every role, so it is added after the switch
+	// rather than inside it.
+	if s.WitnessTargetURL != "" {
+		pairs = append(pairs,
+			[2]string{"DEDI_WITNESS_TARGET_URL", s.WitnessTargetURL},
+			[2]string{"DEDI_WITNESS_TARGET_KEY", s.WitnessTargetKey},
+		)
+		if s.WitnessTargetOrigin != "" {
+			pairs = append(pairs, [2]string{"DEDI_WITNESS_TARGET_ORIGIN", s.WitnessTargetOrigin})
+		}
+	}
+
 	if s.PublicURL != "" {
 		pairs = append(pairs, [2]string{"DEDI_PUBLIC_URL", s.PublicURL})
 	}
 	return pairs
+}
+
+// role resolves a Spec's role, defaulting to child.
+func role(s Spec) Role {
+	if s.Role == "" {
+		return RoleChild
+	}
+	return s.Role
+}
+
+func orDefault(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
 }
 
 type envProvider struct{}
