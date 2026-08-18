@@ -14,6 +14,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
@@ -51,6 +52,11 @@ type command struct {
 	TreeSize int64  `json:"tree_size,omitempty"`
 	RootHash []byte `json:"root_hash,omitempty"`
 	NoteText string `json:"note_text,omitempty"`
+	// SignedAt is when the LEADER signed, stamped once at proposal. Without it
+	// each replica records the moment it happened to apply the command, so the
+	// same checkpoint carries a different time on every node and /status shows
+	// a different signing history depending on which replica you ask.
+	SignedAt time.Time `json:"signed_at,omitempty"`
 
 	// Webhook
 	Webhook *store.WebhookCommand `json:"webhook,omitempty"`

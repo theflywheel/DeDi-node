@@ -229,6 +229,8 @@ func (n *Node) Append(ctx context.Context, in store.AppendInput) (store.Entry, e
 func (n *Node) SignCheckpoint(ctx context.Context, size int64, root []byte, note string) error {
 	res, err := n.propose(ctx, command{
 		Kind: cmdSignCheckpoint, TreeSize: size, RootHash: root, NoteText: note,
+		// Stamped once, here, so every replica records the same signing time.
+		SignedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return err
