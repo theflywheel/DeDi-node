@@ -6,7 +6,7 @@
 <title>DeDi Node · What this is</title>
 <style>
   body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
   th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
@@ -19,7 +19,7 @@
 </style>
 </head>
 <body>
-<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="{{DEMO_URL}}">Demo</a></nav>
+{{NAV}}
 
 <h1>DeDi Node</h1>
 <p>A self-hostable, tamper-evident public registry backed by a Merkle transparency log
@@ -68,7 +68,7 @@ sequenceDiagram
 </table>
 
 <p class="mut" style="margin-top:1.2em">Witnessed checkpoints are browsable in the
-<a href="/">Explorer</a> under the <code>_witness</code> namespace.</p>
+<a href="/browse">directory browser</a> under the <code>_witness</code> namespace.</p>
 
 <h2>API</h2>
 <p>All read endpoints, relative to this node. Everything is a plain <code>GET</code>; no auth.</p>

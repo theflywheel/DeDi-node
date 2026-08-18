@@ -274,6 +274,7 @@ func (s *Server) docLayout(title, body string) string {
 <style>
   body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
   nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.8em 0 .4em; }
   h3 { font-size: .98em; margin: 1.4em 0 .3em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; margin: .6em 0; }
@@ -291,7 +292,7 @@ func (s *Server) docLayout(title, body string) string {
 </style>
 </head>
 <body>
-<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="` + s.demoHref() + `">Demo</a></nav>
+` + s.nav("/docs") + `
 ` + body + `
 <p class="back"><a href="/docs">← All documentation</a></p>
 ` + mermaidRuntime(body) + `</body>

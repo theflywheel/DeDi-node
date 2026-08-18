@@ -14,7 +14,7 @@
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
          max-width: 78em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.35em; margin-bottom: .2em; }
   h2 { font-size: 1.05em; margin: 2em 0 .5em; border-bottom: 1px solid var(--line); padding-bottom: .25em; }
   h3 { font-size: .95em; font-weight: normal; color: var(--mut); margin: 1.2em 0 .4em; }
@@ -69,7 +69,7 @@
 </head>
 <body>
 
-<nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="/verify">Evidence</a> <a href="{{DEMO_URL}}">Demo</a></nav>
+{{NAV}}
 
 <h1>Witness evidence</h1>
 <p>Every claim this node makes about the node it witnesses, and the bytes each one rests on.

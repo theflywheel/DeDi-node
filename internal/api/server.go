@@ -175,7 +175,13 @@ func (s *Server) Handler() http.Handler {
 	// behind pages someone instead of waiting to be noticed on a dashboard
 	// (task #30).
 	mux.HandleFunc("GET /metrics", s.metrics)
-	mux.HandleFunc("GET /{$}", s.explorer)
+	mux.HandleFunc("GET /{$}", s.overview)
+	// The directory browser. It used to be "/" and shared that page with the
+	// node's identity and the whole network panel; splitting them is what stops
+	// each page doing three jobs. Nothing deep-links into it — browsing state
+	// was never in the URL — so the move costs no redirects.
+	mux.HandleFunc("GET /browse", s.explorer)
+	mux.HandleFunc("GET /browse/{$}", s.explorer)
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)

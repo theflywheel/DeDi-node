@@ -67,7 +67,9 @@ func TestVerificationCodeIsServedOnceForBothPages(t *testing.T) {
 	// Both pages must pull the same file. If either ever carries its own copy of
 	// the proof-checking code, the two can drift and the wrong one still renders
 	// green ticks.
-	for _, page := range []string{"/", "/verify"} {
+	// /browse, not / — the browser moved there when / became the overview. The
+	// pair that must agree is the two pages that actually check proofs.
+	for _, page := range []string{"/browse", "/verify"} {
 		resp, err := http.Get(srv.URL + page)
 		if err != nil {
 			t.Fatalf("%s: %v", page, err)
