@@ -293,6 +293,10 @@ async function loadKey(){
   } catch(e){
     SIGNER = null;
     $('k-state').innerHTML = '<span class="no">' + esc(e.message) + '</span>';
+    // Every path that changes SIGNER repaints the banner. Missing this one
+    // meant a failed re-import left it asserting the PREVIOUS key was loaded
+    // and publishing — which is the lie the banner was added to stop telling.
+    setMode();
   }
 }
 function clearKey(){
@@ -431,6 +435,7 @@ const p   = s => encodeURIComponent(s);
 function reload(){
   const box = $('participants');
   $('detail').innerHTML = '';
+  hideLifecycle();   // the selection the panel was opened from is gone
   box.innerHTML = '<p class="mut">loading...</p>';
   queryAllRecords().then(async recs => {
     if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
@@ -486,6 +491,14 @@ function expiry(until){
 
 function detail(rec){
   const box = $('detail');
+  // Selecting a different participant closes any open rotate/revoke panel.
+  // Without this the panel stayed open beneath the NEW participant's detail
+  // while still bound to the old one, and a rotation filled in there would be
+  // signed against the record the operator had stopped looking at — with a
+  // valid signature and a correct precondition. Before the restructure the
+  // form was a full view, so no other participant was clickable while it was
+  // open; making it a panel in place is what created the gap.
+  hideLifecycle();
   box.innerHTML = '<h3>' + esc(rec) + '</h3><p class="mut">loading...</p>';
   const base = recordLookup(ns(), reg(), rec);
   Promise.all([
@@ -518,12 +531,21 @@ function detail(rec){
     box.innerHTML = out;
   });
 }
+// The form is emptied on every open. Reusing it in place across participants
+// is now the normal path, and a panel headed "rotating B" while its fields
+// still hold A's signing key and A's validity window would publish A's key
+// onto B — with a valid signature and a correct precondition, so nothing
+// downstream would question it.
 function prefill(rec){
+  ['r-sign','r-from','r-until'].forEach(id => { $(id).value = ''; });
+  $('out-key').innerHTML = '';
   $('r-rec').value = rec;
   $('r-rec-name').textContent = rec;
   openLifecycle('key');
 }
 function prefillRevoke(rec){
+  ['v-sub','v-reason'].forEach(id => { $(id).value = ''; });
+  $('out-revoke').innerHTML = '';
   $('v-rec').value = rec;
   $('v-rec-name').textContent = rec;
   openLifecycle('revoke');

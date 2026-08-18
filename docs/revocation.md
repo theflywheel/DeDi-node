@@ -1,6 +1,6 @@
 # Revocation
 
-Withdrawing a binding: the console's *Revoke a participant* tab, what "revoked"
+Withdrawing a binding: the console's *Revoke a participant* panel, which opens against the participant selected in the Participants table, what "revoked"
 means to everyone downstream, and how long it takes to bite.
 
 Revocation is the operation the whole design is judged on. Admitting someone is

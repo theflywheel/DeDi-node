@@ -1,7 +1,7 @@
 # Key rotation
 
 Replacing the key a participant signs with, without removing the participant.
-The console's *Rotate a key* tab, and the reasoning about time that makes a
+The console's *Rotate a key* panel, which opens against the participant selected in the Participants table, and the reasoning about time that makes a
 rotation safe rather than an outage.
 
 ## Rotation is two events, not one
