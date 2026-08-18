@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -97,3 +98,50 @@ func TestStatusPageDoesNotClaimUptime(t *testing.T) {
 }
 
 var _ = store.HistoryBucket{}
+
+// The external monitor URL is operator-supplied and must never reach a context
+// where it can be parsed as markup or as code. It rides in an HTML attribute —
+// which is what html.EscapeString is actually for — and the anchor is built
+// with DOM calls, so the value is never concatenated into innerHTML or pasted
+// into a JavaScript string literal.
+func TestExternalStatusURLIsNotEmbeddedInScript(t *testing.T) {
+	page := string(statusPageHTML)
+	if strings.Contains(page, "const ext = '{{STATUS_URL}}'") {
+		t.Error("the URL is pasted into a JS string literal, which is safe only by accident")
+	}
+	if !strings.Contains(page, `<meta name="dedi-external-status" content="{{STATUS_URL}}">`) {
+		t.Error("the URL is no longer carried in an attribute")
+	}
+	// Nothing hostile survives into a script or an attribute delimiter.
+	for _, hostile := range []string{
+		`https://m.example/' ; alert(1);//`,
+		`https://m.example/" onmouseover="alert(1)`,
+		`https://m.example/</script><script>alert(1)</script>`,
+	} {
+		s := &Server{StatusURL: hostile}
+		w := httptest.NewRecorder()
+		s.statusPage(w, httptest.NewRequest("GET", "/status", nil))
+		body := w.Body.String()
+		if strings.Contains(body, "<script>alert(1)") {
+			t.Errorf("%q produced a script tag in the page", hostile)
+		}
+		if strings.Contains(body, `onmouseover="alert(1)"`) {
+			t.Errorf("%q produced a live event handler", hostile)
+		}
+	}
+}
+
+// A malformed or non-http URL must not be published at all: the page would
+// otherwise claim an external monitor exists and hand the reader a dead link.
+func TestExternalStatusURLIsValidatedOrOmitted(t *testing.T) {
+	for _, bad := range []string{"javascript:alert(1)", "not a url", "ftp://x/y", ""} {
+		s := &Server{StatusURL: bad}
+		if got := s.externalStatusHref(); got != "" {
+			t.Errorf("StatusURL %q was published as %q", bad, got)
+		}
+	}
+	s := &Server{StatusURL: "https://status.example/"}
+	if s.externalStatusHref() != "https://status.example/" {
+		t.Errorf("a good URL was rejected: %q", s.externalStatusHref())
+	}
+}

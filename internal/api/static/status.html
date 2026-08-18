@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Status</title>
+<meta name="dedi-external-status" content="{{STATUS_URL}}">
 <style>
   body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
   h1 { font-size: 1.3em; margin: 0 0 .2em; }
@@ -266,12 +267,28 @@ function card(label, value, cls){
   // The external monitor is named only when this deployment's operator has said
   // who it is. Hardcoding one would have every node running this binary assert
   // that something it does not run, and cannot see, is watching it.
-  const ext = '{{STATUS_URL}}';
-  $('ext').innerHTML = ext
-    ? ' <a href="' + ext + '">The external monitor</a> does that, and neither of us can answer the ' +
-      'other&rsquo;s question.'
-    : ' No external monitor is configured for this node, so nothing here or anywhere else on it can tell ' +
-      'you whether it was reachable.';
+  // Read from a meta attribute rather than pasted into a JS string literal.
+  // The value is operator-supplied, and escaping it for HTML and then embedding
+  // it in JavaScript is a category error: it happens to be inert here only
+  // because entities are not decoded inside <script>, which is safety by
+  // accident. An attribute is a context html.EscapeString is actually for, and
+  // the anchor below is built with DOM calls so the URL is never parsed as
+  // markup at all.
+  const meta = document.querySelector('meta[name="dedi-external-status"]');
+  const ext = (meta && meta.content) || '';
+  const slot = $('ext');
+  if (ext) {
+    slot.appendChild(document.createTextNode(' '));
+    const a = document.createElement('a');
+    a.href = ext;
+    a.textContent = 'The external monitor';
+    slot.appendChild(a);
+    slot.appendChild(document.createTextNode(
+      ' does that, and neither of us can answer the other\u2019s question.'));
+  } else {
+    slot.textContent = ' No external monitor is configured for this node, so nothing here or anywhere ' +
+      'else on it can tell you whether it was reachable.';
+  }
 
   try {
     const d = (await j('/dedi/log/history?buckets=' + BUCKETS + '&bucket_seconds=' + BUCKET_SECONDS)).data;
