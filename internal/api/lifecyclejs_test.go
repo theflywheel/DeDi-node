@@ -178,3 +178,64 @@ console.log('OK');
 		t.Fatalf("unexpected output: %s", out)
 	}
 }
+
+// The whole bootstrap must run without an unhandled rejection.
+//
+// It used to sit above the declarations it touches. Function declarations
+// hoist, so most of it worked — but `const parentNS` and `let PROVIDERS` do
+// not initialise until their line, so loadChildren() rejected with "Cannot
+// access 'parentNS' before initialization" and the child-node list silently
+// never populated. That predated the role picker; it surfaced only because
+// renderRoles() failed the same way and louder.
+//
+// A rejection inside an async bootstrap is invisible: nothing renders, nothing
+// errors on screen, and the page looks merely empty.
+func TestBootstrapRunsWithoutUnhandledRejection(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	page, err := os.ReadFile(filepath.Join("static", "admin.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := string(page)
+	// Deliberately NOT stripping the bootstrap lines: they are the subject.
+	script := full[strings.Index(full, "<script>")+len("<script>"):]
+	script = script[:strings.Index(script, "</script>")]
+
+	harness := `
+const els = new Map();
+const CAT = JSON.stringify([{role:'child',title:'C',summary:'s',identity:'i',log:'l',buys:'b',writes:'w',needs:['database']}]);
+const fake = id => ({ id, innerHTML: '', textContent: '', value: '', hidden: false, className: '',
+  checked: false, addEventListener(){}, scrollIntoView(){},
+  querySelector(){ return fake('legend'); }, querySelectorAll(){ return []; } });
+globalThis.document = {
+  getElementById: id => {
+    if (id === 'role-catalogue') return { textContent: CAT };
+    if (!els.has(id)) els.set(id, fake(id));
+    return els.get(id);
+  },
+  querySelector: () => null, querySelectorAll: () => [],
+};
+globalThis.location = { hash: '', origin: 'http://node.example' };
+globalThis.addEventListener = () => {};
+globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: {} }) });
+let failure = null;
+process.on('unhandledRejection', e => { failure = e && e.message; });
+`
+	check := `
+setTimeout(() => {
+  if (failure) { console.log('REJECTED: ' + failure); process.exit(1); }
+  console.log('OK');
+}, 250);
+`
+	dir := t.TempDir()
+	file := filepath.Join(dir, "boot.mjs")
+	if err := os.WriteFile(file, []byte(harness+script+check), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", file).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "OK") {
+		t.Fatalf("the console's bootstrap does not run cleanly: %v\n%s", err, out)
+	}
+}

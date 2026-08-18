@@ -8,6 +8,21 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/provision"
 )
 
+// originFor decides a node's log origin.
+//
+// A replica's belongs to the SET, and there is no sensible default: every
+// member must sign under the same one. Defaulting it fed Spec.Validate a
+// non-empty value and defeated the very check meant to catch a missing set
+// origin, rendering exactly the split-origin replica this endpoint refuses —
+// and because only the leader signs, that config looks fine until leadership
+// moves to the odd member.
+func originFor(role provision.Role, supplied, name string) string {
+	if role == provision.RoleReplica {
+		return supplied
+	}
+	return orDefault(supplied, name+"/log")
+}
+
 // nodeConfig renders the configuration for a node this operator is standing up
 // themselves — a standalone registry, a mirror, a witness, or a member of a
 // replica set.
@@ -68,10 +83,14 @@ func (s *Server) nodeConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := orDefault(req.NodeName, string(role))
-	origin := req.Origin
-	if role != provision.RoleReplica {
-		origin = orDefault(origin, name+"/log")
-	}
+	// A replica's origin is the SET's, and there is no sensible default for
+	// it: every member must sign under the same one. Defaulting it here fed
+	// Validate a non-empty value and defeated the very check meant to catch a
+	// missing set origin — rendering exactly the split-origin replica this
+	// endpoint exists to refuse. So the raw value is passed through for a
+	// replica and only defaulted where a node genuinely has an origin of its
+	// own.
+	origin := originFor(role, req.Origin, name)
 	spec := provision.Spec{
 		Role:      role,
 		NodeName:  name,

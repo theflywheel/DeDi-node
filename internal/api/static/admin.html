@@ -739,9 +739,6 @@ onAction($('detail'), 'revoke', prefillRevoke);
 onAction($('children-list'), 'unchild', revokeChild);
 onAction($('children-list'), 'chain', showDescendants);
 
-setMode();
-show(location.hash.slice(1) || 'list');
-reload();
 
 // ---------- child nodes ----------
 //
@@ -1137,9 +1134,6 @@ async function showDescendants(child){
   }
 }
 
-renderRoles();
-loadChildren();
-loadSubscriptions();
 
 // ---------- push notification ----------
 //
@@ -1295,6 +1289,26 @@ async function findByDomain(){
 function copyArtifact(){
   navigator.clipboard.writeText($('c-art').textContent);
 }
+
+// Bootstrap last, once every declaration it touches exists.
+//
+// It used to sit near the top. Function declarations hoist, so most of it
+// worked; `const parentNS` and `let PROVIDERS` do not initialise until their
+// line, so loadChildren() rejected with "Cannot access 'parentNS' before
+// initialization" and the child node list silently never populated on page
+// load. Reproduced against main, so it predates the role picker — which
+// surfaced it only by failing the same way and louder.
+//
+// A rejection inside an async bootstrap is invisible: nothing renders, nothing
+// errors on screen, and the page looks merely empty. Keeping the whole block
+// here, below everything, is what makes that class of bug impossible rather
+// than merely absent today.
+setMode();
+show(location.hash.slice(1) || 'list');
+reload();
+loadChildren();
+loadSubscriptions();
+renderRoles();
 </script>
 </body>
 </html>
