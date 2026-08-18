@@ -132,20 +132,14 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.ensureDelegationRegistry(r.Context(), parentNS); err != nil {
-		s.writeFailure(w, r, err)
-		return
-	}
-	payload, _ := json.Marshal(offer.Payload())
-	in := store.AppendInput{
-		EntryType: "record", Namespace: parentNS, Registry: delegation.Registry,
-		RecordName: offer.Namespace, PayloadRaw: payload,
-	}
-	if _, err := s.writerAppend(r, key.KID, in); err != nil {
-		s.writeFailure(w, r, err)
-		return
-	}
-
+	// Built and checked BEFORE anything is appended.
+	//
+	// This validation used to run after the offer was written, so a request
+	// with, say, a witness target and no verifier key returned 400 while the
+	// public _delegations registry already held a StateOffered record whose
+	// token was never handed back — leaving exactly the unredeemable offer
+	// this endpoint was changed to stop creating. A log is append-only: a
+	// refusal that has already written is not a refusal.
 	spec := provision.Spec{
 		NodeName:    nodeNameFor(offer.Namespace),
 		Origin:      offer.Namespace + "/log",
@@ -175,6 +169,21 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err.Error())
 		return
 	}
+
+	if err := s.ensureDelegationRegistry(r.Context(), parentNS); err != nil {
+		s.writeFailure(w, r, err)
+		return
+	}
+	payload, _ := json.Marshal(offer.Payload())
+	in := store.AppendInput{
+		EntryType: "record", Namespace: parentNS, Registry: delegation.Registry,
+		RecordName: offer.Namespace, PayloadRaw: payload,
+	}
+	if _, err := s.writerAppend(r, key.KID, in); err != nil {
+		s.writeFailure(w, r, err)
+		return
+	}
+
 	art, err := provider.Render(spec)
 	if err != nil {
 		internal(w, err)
