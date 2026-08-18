@@ -96,7 +96,8 @@ func selfTraffic(path string) bool {
 	// measures directory traffic — what this node is being asked about — and a
 	// reader browsing the docs, or the directory browser, is the node talking
 	// about itself, the same as the explorer or the console.
-	if strings.HasPrefix(path, "/docs/") || path == "/browse" || path == "/browse/" {
+	if strings.HasPrefix(path, "/docs/") || path == "/browse" || path == "/browse/" ||
+		path == "/network" || path == "/network/" {
 		return true
 	}
 	return path == "/" || path == "/docs" ||

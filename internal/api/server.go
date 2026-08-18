@@ -182,6 +182,11 @@ func (s *Server) Handler() http.Handler {
 	// was never in the URL — so the move costs no redirects.
 	mux.HandleFunc("GET /browse", s.explorer)
 	mux.HandleFunc("GET /browse/{$}", s.explorer)
+	// Who watches whom, and what each of them has actually proved. Distinct
+	// from /dedi/network, which is the JSON this page reads: one is the data,
+	// the other is the argument the data supports.
+	mux.HandleFunc("GET /network", s.networkPage)
+	mux.HandleFunc("GET /network/{$}", s.networkPage)
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)
