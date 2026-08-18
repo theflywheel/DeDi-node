@@ -294,6 +294,36 @@ func (s *Server) docLayout(title, body string) string {
 <nav><a href="/">Explorer</a> <a href="/docs">Docs</a> <a href="` + s.demoHref() + `">Demo</a></nav>
 ` + body + `
 <p class="back"><a href="/docs">← All documentation</a></p>
-</body>
+` + mermaidRuntime(body) + `</body>
 </html>`
+}
+
+// mermaidRuntime returns the loader for pages that actually contain a diagram.
+//
+// Rewriting a ```mermaid fence into <pre class="mermaid"> is only half the job:
+// without something to draw it, the block renders as raw diagram source, which
+// looks like a broken page rather than a missing script. That is exactly what
+// /docs/witnessing shipped as, and the test meant to cover it only asserted the
+// fence had been rewritten — it checked the mechanism, not the outcome, so it
+// passed while the page was wrong.
+//
+// Emitted only when there is a diagram, so every other page stays
+// dependency-free.
+//
+// The runtime comes from a CDN, matching the explorer's docs page. That is a
+// real dent in this binary's ability to explain itself offline (see embed.go),
+// and it is a considered trade rather than an oversight: the prose, which is
+// the substance, is embedded and renders with no network at all, and a diagram
+// that fails to load degrades to its own source text — readable, being a
+// sequence description in something close to English. Vendoring the library
+// into every node binary to improve on that is not a trade worth making.
+func mermaidRuntime(body string) string {
+	if !strings.Contains(body, `<pre class="mermaid">`) {
+		return ""
+	}
+	return `<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });
+</script>
+`
 }

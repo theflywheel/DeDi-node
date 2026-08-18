@@ -106,16 +106,47 @@ func TestMermaidFencesBecomeDiagrams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadDocs: %v", err)
 	}
-	var found bool
+	var withDiagram []string
 	for slug, d := range docs {
 		if strings.Contains(d.Body, `language-mermaid`) {
 			t.Errorf("%s: a mermaid fence was left as a code block", slug)
 		}
 		if strings.Contains(d.Body, `<pre class="mermaid">`) {
-			found = true
+			withDiagram = append(withDiagram, slug)
 		}
 	}
-	if !found {
+	if len(withDiagram) == 0 {
 		t.Skip("no document currently contains a mermaid diagram")
+	}
+
+	// The half this test used to miss. Rewriting the fence is not rendering:
+	// without a runtime the block displays as raw diagram source, which reads as
+	// a broken page. /docs/witnessing shipped that way while this test passed,
+	// because it asserted the mechanism and never the outcome.
+	srv := &Server{}
+	for _, slug := range withDiagram {
+		page := srv.docLayout(docs[slug].Title, docs[slug].Body)
+		if !strings.Contains(page, "mermaid.esm.min.mjs") {
+			t.Errorf("%s contains a diagram but the page loads no mermaid runtime, "+
+				"so it renders as source", slug)
+		}
+	}
+}
+
+// The converse: a page with no diagram should not pull in a third-party module
+// it has no use for.
+func TestPagesWithoutDiagramsLoadNoRuntime(t *testing.T) {
+	docs, err := loadDocs()
+	if err != nil {
+		t.Fatalf("loadDocs: %v", err)
+	}
+	srv := &Server{}
+	for slug, d := range docs {
+		if strings.Contains(d.Body, `<pre class="mermaid">`) {
+			continue
+		}
+		if strings.Contains(srv.docLayout(d.Title, d.Body), "mermaid.esm.min.mjs") {
+			t.Errorf("%s has no diagram but still loads the mermaid runtime", slug)
+		}
 	}
 }
