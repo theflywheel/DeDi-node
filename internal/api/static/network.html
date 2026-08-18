@@ -337,13 +337,31 @@ function healthNote(t){
 //
 // Does NOT establish that the witness ever independently held the older root —
 // and the page says so rather than letting a green tick imply it.
+// Where a target's log endpoints hang off, from whichever source names it.
+//
+// The two sources use different shapes and concatenating them naively yields
+// /dedi/dedi/log/checkpoint: /dedi/network publishes a node URL with no path,
+// while a verdict's target_url already includes /dedi (internal/witness sets
+// TargetURL to the base "including /dedi"). Everything below builds on the
+// value this returns, so the difference is handled once.
+function apiBase(node, t){
+  if (node && node.self) return '/dedi';
+  if (node && node.url) return node.url.replace(/\/$/, '') + '/dedi';
+  // A node discovered only through someone else's verdict — a delegated child,
+  // say — is not in our peer list at all, and this is the only URL we have for
+  // it. Refusing to check those edges would disable the check on exactly the
+  // nodes the fan-out exists to reach.
+  if (t && t.target_url) return t.target_url.replace(/\/$/, '');
+  return null;
+}
+
 async function recheck(a, b, t){
   const out = $('recheck-out');
   const say = h => { out.innerHTML = h; };
   say('<p class="mut">checking&hellip;</p>');
-  const base = (b.url || '').replace(/\/$/, '');   // '' when the target is this node: same-origin
+  const base = apiBase(b, t);
   try {
-    const cpText = await text(base + '/dedi/log/checkpoint');
+    const cpText = await text(base + '/log/checkpoint');
     const note = parseNote(cpText);
     if (!note) throw new Error('the target did not return a signed checkpoint');
     const sigOK = await verifyCheckpointSig(cpText, t.target_key);
@@ -382,7 +400,7 @@ async function recheck(a, b, t){
         num(t.size) + ' when ' + esc(a.name) + ' looked. An append-only log cannot do that.</p>');
       return;
     } else {
-      const pr = (await j(base + '/dedi/log/proof/consistency?old=' + t.size + '&new=' + cur.size)).data;
+      const pr = (await j(base + '/log/proof/consistency?old=' + t.size + '&new=' + cur.size)).data;
       if (!pr || !pr.proof) throw new Error('the target would not supply a consistency proof from ' +
         t.size + ' to ' + cur.size);
       consistent = await checkTree(pr.proof.map(b64d), cur.size, cur.root, t.size, b64d(t.root));
@@ -420,8 +438,9 @@ function select(sel){
     // green tick beside the alarm. The browser never held the pre-rewrite root
     // and structurally cannot reproduce the catch.
     const caught = !!(t && t.consistency_ok === false);
+    const target = apiBase(b, t);
     const canCheck = !!(t && !caught && t.witnessed === true && t.size !== undefined &&
-                        t.target_key && (b.url || b.self));
+                        t.target_key && target);
     let why = '';
     if (!canCheck) {
       why = caught
@@ -431,7 +450,8 @@ function select(sel){
         : (!t || t.witnessed !== true) ? 'There is no verdict to re-check.'
         : !t.target_key ? esc(a.name) + ' does not publish the target’s verifier key, so your browser ' +
           'has nothing to check the target’s signature against.'
-        : 'This page has no URL for the target, so your browser cannot fetch its checkpoint.';
+        : 'Neither this node nor ' + esc(a.name) + ' publishes a URL for the target, so your browser has ' +
+          'nowhere to fetch its checkpoint from.';
     }
     el.innerHTML = '<h3 style="margin-top:0">' + esc(a.name) + ' <span class="wit">watches</span> ' + esc(b.name) + '</h3>' +
       '<p class="mut" style="margin:0 0 .5em">This edge is drawn because <b>' + esc(a.name) + '</b> said so. ' +
@@ -444,7 +464,8 @@ function select(sel){
         ? '<p class="mut" style="margin:0 0 .5em">Fetch the target&rsquo;s own checkpoint, verify its ' +
           'signature against the key ' + esc(a.name) + ' published, and recompute the consistency proof ' +
           'between the root it reports and the target&rsquo;s log right now. None of it goes through ' +
-          esc(a.name) + '.</p><button id="recheck">check it in my browser</button>'
+          esc(a.name) + '.</p><p class="mut" style="margin:0 0 .5em">Fetching from <code>' +
+          esc(target) + '</code>.</p><button id="recheck">check it in my browser</button>'
         : '<p class="mut" style="margin:0">' + why + '</p>') +
       '<div id="recheck-out"></div></div></div>';
     if (canCheck) $('recheck').onclick = () => recheck(a, b, t);

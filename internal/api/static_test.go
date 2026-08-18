@@ -370,3 +370,27 @@ func TestEveryInternalLinkInEveryPageResolves(t *testing.T) {
 		}
 	}
 }
+
+// The two sources of a target's URL have different shapes and must not be
+// concatenated the same way: /dedi/network publishes a node URL with no path,
+// while a verdict's target_url already ends in /dedi (internal/witness sets
+// TargetURL to the base "including /dedi"). Getting this wrong produces
+// /dedi/dedi/log/checkpoint, which 404s only at runtime, in the browser, on the
+// one button whose whole point is to work without trusting anyone.
+func TestRingPageNormalisesTheTargetBase(t *testing.T) {
+	page := string(networkPageHTML)
+	if !strings.Contains(page, "function apiBase(") {
+		t.Fatal("the ring page no longer routes target URLs through one place")
+	}
+	if !strings.Contains(page, "t.target_url") {
+		t.Error("the ring page ignores the verdict's target_url, so an edge to a node discovered only " +
+			"through a witness (a delegated child) cannot be checked")
+	}
+	// The bug this guards: building log paths with an extra /dedi.
+	for _, bad := range []string{`'/dedi/log/checkpoint'`, `"/dedi/log/checkpoint"`,
+		`'/dedi/log/proof/consistency`, `"/dedi/log/proof/consistency`} {
+		if strings.Contains(page, "base + "+bad) {
+			t.Errorf("the ring page appends %s to an already-/dedi base", bad)
+		}
+	}
+}
