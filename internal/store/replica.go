@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Support for running the log as a replicated state machine. A replica's
@@ -94,6 +95,15 @@ func (s *Store) Restore(ctx context.Context, entries []Entry, checkpoints []Chec
 		}
 	}
 	for _, c := range checkpoints {
+		// A snapshot taken before Checkpoint carried CreatedAt decodes with the
+		// zero time, and writing that would date every restored checkpoint to
+		// year 1 — so a rolling upgrade, or a restore from an older snapshot,
+		// would leave /status and the checkpoint-age metric reporting a history
+		// that never happened. Falling back to now() is the pre-existing
+		// behaviour: wrong by the restore delay, and still correctly ordered.
+		if c.CreatedAt.IsZero() {
+			c.CreatedAt = time.Now().UTC()
+		}
 		if _, err := tx.Exec(ctx,
 			// created_at explicitly: the column defaults to now(), which would
 			// restamp every restored checkpoint with the moment this replica

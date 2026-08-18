@@ -109,3 +109,30 @@ func TestSnapshotRestoreKeepsSigningTimes(t *testing.T) {
 		t.Errorf("restore restamped the signing time by %v — the history was rewritten", d)
 	}
 }
+
+// A snapshot taken before Checkpoint carried CreatedAt decodes with the zero
+// time. Writing that verbatim would date every restored checkpoint to year 1,
+// so a rolling upgrade would leave /status and the checkpoint-age metric
+// reporting a history that never happened.
+func TestRestoreOfAPreTimestampSnapshot(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	old := []Checkpoint{{TreeSize: 1, RootHash: make([]byte, 32), NoteText: "note"}} // zero CreatedAt
+	if err := s.Restore(ctx, nil, old, 0); err != nil {
+		t.Fatal(err)
+	}
+	back, err := s.AllCheckpoints(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back) != 1 {
+		t.Fatalf("got %d checkpoints, want 1", len(back))
+	}
+	if back[0].CreatedAt.Year() < 2000 {
+		t.Errorf("restored checkpoint dated %v — a snapshot with no timestamp was written verbatim",
+			back[0].CreatedAt)
+	}
+	if time.Since(back[0].CreatedAt) > time.Minute {
+		t.Errorf("restored checkpoint dated %v, want about now", back[0].CreatedAt)
+	}
+}
