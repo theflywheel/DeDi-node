@@ -233,3 +233,35 @@ func TestAWitnessTargetWithoutItsKeyIsRefusedForEveryRole(t *testing.T) {
 		}
 	}
 }
+
+// A replica config must be refused for the same reasons the daemon would refuse
+// it, not merely for being blank. cmd/dedid.openCluster parses the peer list and
+// cluster.Open rejects an id that is not in it, so both of these rendered a
+// plausible artifact that died on first boot.
+func TestReplicaPeerListIsValidatedWithTheDaemonsParser(t *testing.T) {
+	base := Spec{Role: RoleReplica, NodeName: "n", Origin: "set.example/log",
+		SharedKeyFile: "/keys/cluster.key"}
+
+	cases := []struct {
+		name, id, peers string
+		wantErr         bool
+	}{
+		{"well formed and a member", "n2", "n1=127.0.0.1:7000,n2=127.0.0.1:7001", false},
+		{"with http urls", "n1", "n1=10.0.0.1:7000=https://a.example,n2=10.0.0.2:7000=https://b.example", false},
+		{"unparseable", "n1", "not-a-peer", true},
+		{"the @ form the console used to suggest", "n1", "n1@127.0.0.1:7000", true},
+		{"id absent from its own set", "n2", "n1=127.0.0.1:7000", true},
+		{"no port", "n1", "n1=127.0.0.1", true},
+	}
+	for _, c := range cases {
+		s := base
+		s.ClusterID, s.ClusterPeers = c.id, c.peers
+		err := s.Validate()
+		if c.wantErr && err == nil {
+			t.Errorf("%s: accepted %q, which the daemon refuses at boot", c.name, c.peers)
+		}
+		if !c.wantErr && err != nil {
+			t.Errorf("%s: refused a valid set: %v", c.name, err)
+		}
+	}
+}

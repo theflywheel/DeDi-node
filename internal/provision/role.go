@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 )
 
 // A node's role is what it is to the other nodes — and until now it existed
@@ -194,6 +196,31 @@ func (s Spec) Validate() error {
 	case RoleReplica:
 		need(strings.TrimSpace(s.ClusterID) != "", "cluster id")
 		need(strings.TrimSpace(s.ClusterPeers) != "", "cluster peers")
+		// Parsed with the daemon's own parser, not merely checked for
+		// non-emptiness. cmd/dedid.openCluster calls cluster.ParsePeers and
+		// cluster.Open then refuses an id absent from the parsed list, so
+		// "not-a-peer", or a member id naming nobody in its own set, rendered
+		// a perfectly plausible artifact that died on first boot. A second
+		// opinion about the format would be a second thing to keep in step;
+		// this asks the code that will actually read it.
+		if spec := strings.TrimSpace(s.ClusterPeers); spec != "" {
+			peers, err := cluster.ParsePeers(spec)
+			if err != nil {
+				missing = append(missing, "a parseable peer list ("+err.Error()+")")
+			} else if id := strings.TrimSpace(s.ClusterID); id != "" {
+				found := false
+				for _, p := range peers {
+					if p.ID == id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					missing = append(missing, "its own id "+id+" in the peer list — a member "+
+						"absent from its own set is refused at boot")
+				}
+			}
+		}
 		// The two that make a replica a replica rather than a new node.
 		need(strings.TrimSpace(s.SharedKeyFile) != "", "the set's shared key file")
 		need(strings.TrimSpace(s.Origin) != "", "the set's origin")
