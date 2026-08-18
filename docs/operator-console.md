@@ -1,22 +1,32 @@
 # The operator console
 
-The write plane's user interface, at `/admin`. Seven tabs, each of which
-produces signed entries in the node's log: onboarding, key rotation, revocation,
-child nodes, push subscriptions, and a domain lookup that reads rather than
-writes.
+The write plane's user interface, at `/admin`. Four sections, each producing
+signed entries in the node's log — except the last, which only reads.
 
-This page explains what the console *is* and why it is built the way it is. Each
-tab has its own page:
+It used to be seven tabs, and that was the wrong count. Onboarding, key rotation
+and revocation are not three tasks: they are one participant at three points in
+its life, and the console already knew it — the participants table offered
+"rotate key" and "revoke" on every row, and clicking one threw away the
+selection, switched tab, and asked you to retype the record name the table had
+just shown you.
 
-| Tab | Page |
-|---|---|
-| Participants | this page, [below](#the-participants-tab) |
-| Onboard a participant | [onboarding](/docs/onboarding) |
-| Rotate a key | [key rotation](/docs/key-rotation) |
-| Revoke a participant | [revocation](/docs/revocation) |
-| Child nodes | [delegation](/docs/delegation) |
-| Push notification | [push](/docs/push) |
-| Who serves a domain | [discovery](/docs/discovery) |
+| Section | What it is | Page |
+|---|---|---|
+| Participants | the table, and everything you do to a participant: onboard, rotate, revoke | [onboarding](/docs/onboarding), [key rotation](/docs/key-rotation), [revocation](/docs/revocation) |
+| Child nodes | a namespace delegated to a node someone else runs | [delegation](/docs/delegation) |
+| Push | consumers notified when a record changes | [push](/docs/push) |
+| Who serves | a read, not a write: who serves a domain | [discovery](/docs/discovery) |
+
+Rotate and revoke now open against the participant already selected, showing
+its name rather than asking for it, and only one opens at a time — they are two
+things to do to the same record, and offering both invites filling in one and
+submitting the other.
+
+**"Who serves" searches every namespace this node will answer for**, not only
+the one selected, and narrows by registry name. That is what discovery means: a
+caller asking who serves a domain has no namespace in mind. The console shows
+the namespace each result came from, because for a while it did not, and a
+cross-namespace answer read as a same-namespace one.
 
 ## It holds no privilege of its own
 
@@ -79,7 +89,7 @@ someone to go looking for the credential. A one-click node is read-only by
 design, and a read-only node should not advertise a door it does not have. See
 [one-click deploy](/docs/railway-template) for how to open it.
 
-## The participants tab
+## The participants section
 
 The default view: every record in the namespace, with its state, current version
 and the actions available on it.
