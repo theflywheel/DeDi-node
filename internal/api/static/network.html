@@ -522,7 +522,7 @@ function renderCluster(c){
   const q = Math.floor(ms.length / 2) + 1;
   out += '<p class="mut" style="margin:.5em 0 0">A majority (' + q + ' of ' + ms.length + ') must agree before ' +
     'a write is accepted, so ' + Math.floor((ms.length - 1) / 2) + ' can fail without the directory stopping. ' +
-    'Lag and last-contact are published as metrics at <a href="/metrics">/metrics</a>.</p>';
+    'Lag and last-contact are on <a href="/status">status</a>.</p>';
   $('cluster').innerHTML = out;
 }
 

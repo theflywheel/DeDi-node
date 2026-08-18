@@ -43,6 +43,12 @@ type Checkpoint struct {
 	TreeSize int64
 	RootHash []byte
 	NoteText string
+	// CreatedAt is when the checkpoint was SIGNED, not when this database row
+	// happened to be written. The column defaults to now(), so a replica
+	// restoring a snapshot used to stamp every checkpoint it had ever received
+	// with the instant it joined — collapsing a node's whole signing history
+	// into one moment, and making the status page read it as an outage.
+	CreatedAt time.Time
 }
 
 // AllCheckpoints returns every checkpoint in tree order. Used to capture
@@ -50,7 +56,7 @@ type Checkpoint struct {
 // snapshot must carry them rather than expect a restoring replica to re-sign.
 func (s *Store) AllCheckpoints(ctx context.Context) ([]Checkpoint, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT tree_size, root_hash, note_text FROM checkpoints ORDER BY tree_size ASC`)
+		`SELECT tree_size, root_hash, note_text, created_at FROM checkpoints ORDER BY tree_size ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -58,10 +64,82 @@ func (s *Store) AllCheckpoints(ctx context.Context) ([]Checkpoint, error) {
 	var out []Checkpoint
 	for rows.Next() {
 		var c Checkpoint
-		if err := rows.Scan(&c.TreeSize, &c.RootHash, &c.NoteText); err != nil {
+		if err := rows.Scan(&c.TreeSize, &c.RootHash, &c.NoteText, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// HistoryBucket is one slice of this node's past: how much was written, how
+// much was signed, and — the part that matters — the highest log position
+// reached inside it.
+//
+// MaxSeq is what makes a fault decidable without trusting clocks. A checkpoint
+// covers a PREFIX of the log, so any entry at or below the latest checkpoint's
+// tree size is signed, whenever either happened. Deciding "these writes went
+// unsigned" by whether a checkpoint landed in the same time bucket compares two
+// clocks and a bucket boundary, and gets it wrong routinely: steady-state
+// signing is one tick after the write it covers, which is often the next
+// bucket. Position answers the question exactly.
+type HistoryBucket struct {
+	At          time.Time
+	Checkpoints int64
+	Entries     int64
+	MaxSeq      int64
+}
+
+// History returns the last n buckets ending now, newest last.
+//
+// Both series are aggregated here, on one grid, in one query, because the page
+// that reads them must line them up and any second grid is a source of
+// disagreement. An earlier version bucketed entries in SQL and checkpoints in
+// the browser: the two grids were offset by however far into a bucket the
+// request happened to arrive, so a write and the checkpoint that signed it
+// landed in different cells about a third of the time, and a perfectly healthy
+// node was painted with the one colour this page uses for a genuine fault.
+//
+// Counts rather than rows, so there is no row cap to truncate and no way for a
+// busy node to report a quiet one.
+func (s *Store) History(ctx context.Context, buckets int, bucket time.Duration) ([]HistoryBucket, error) {
+	if buckets <= 0 || buckets > 500 {
+		buckets = 48
+	}
+	if bucket < time.Minute {
+		bucket = 30 * time.Minute
+	}
+	secs := int64(bucket.Seconds())
+	rows, err := s.pool.Query(ctx, `
+WITH grid AS (
+  SELECT to_timestamp((floor(extract(epoch FROM now()) / $1) - g) * $1) AS at
+    FROM generate_series(0, $2 - 1) AS g
+), e AS (
+  SELECT to_timestamp(floor(extract(epoch FROM created_at) / $1) * $1) AS at,
+         count(*) AS n, max(seq) AS max_seq
+    FROM log_entries
+   WHERE created_at >= (SELECT min(at) FROM grid)
+   GROUP BY 1
+), c AS (
+  SELECT to_timestamp(floor(extract(epoch FROM created_at) / $1) * $1) AS at, count(*) AS n
+    FROM checkpoints
+   WHERE created_at >= (SELECT min(at) FROM grid)
+   GROUP BY 1
+)
+SELECT grid.at, COALESCE(c.n, 0), COALESCE(e.n, 0), COALESCE(e.max_seq, -1)
+  FROM grid LEFT JOIN e ON e.at = grid.at LEFT JOIN c ON c.at = grid.at
+ ORDER BY grid.at ASC`, secs, buckets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]HistoryBucket, 0, buckets)
+	for rows.Next() {
+		var b HistoryBucket
+		if err := rows.Scan(&b.At, &b.Checkpoints, &b.Entries, &b.MaxSeq); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }

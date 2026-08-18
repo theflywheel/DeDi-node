@@ -75,15 +75,29 @@ groups:
 
       # A node that has never signed reports -1, which is a different fault from
       # a stale checkpoint and is excluded here rather than folded in. The
-      # threshold is deliberately loose: the checkpointer writes nothing while
-      # the tree is unchanged, so on a quiet registry an old checkpoint is
-      # correct, and only a very old one suggests the signer itself is stuck.
-      - alert: DediCheckpointStale
-        expr: dedi_checkpoint_age_seconds > 3600
+      # Conditioned on there being something to sign.
+      #
+      # Age alone cannot tell a stalled signer from a quiet log: the
+      # checkpointer deliberately writes nothing while the tree is unchanged, so
+      # on an idle registry an old checkpoint is CORRECT. The previous rule
+      # alerted on age alone, and its own comment conceded the miss and alerted
+      # anyway — it then fired continuously for days on a healthy idle cluster,
+      # which is how a monitor teaches people to ignore it.
+      #
+      # dedi_log_entries > dedi_checkpoint_tree_size is the missing half: it is
+      # true exactly when writes exist that no signature covers. An idle log has
+      # them equal, however old the checkpoint is, and stays quiet.
+      - alert: DediWritesUnsigned
+        expr: dedi_checkpoint_age_seconds > 3600 and dedi_log_entries > dedi_checkpoint_tree_size
         for: 15m
         labels: {severity: warning}
         annotations:
-          summary: "{{ $labels.node }} has not signed a checkpoint in an hour"
+          summary: "{{ $labels.node }} has entries no checkpoint covers"
+          description: >-
+            The log has grown past the newest signed checkpoint and nothing has
+            signed it for over an hour. Those entries cannot be proved to a
+            reader until a checkpoint covers them. An idle log does not trigger
+            this: see /status on the node, which draws the same two series.
 
       - alert: DediNodeNeverSignedACheckpoint
         expr: dedi_checkpoint_age_seconds == -1

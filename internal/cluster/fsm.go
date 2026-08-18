@@ -73,7 +73,8 @@ func (f *fsm) Apply(l *raft.Log) any {
 		return entry
 
 	case cmdSignCheckpoint:
-		skipped, err := f.store.SaveCheckpointReplicated(ctx, int64(l.Index), cmd.TreeSize, cmd.RootHash, cmd.NoteText)
+		skipped, err := f.store.SaveCheckpointReplicated(ctx, int64(l.Index), cmd.TreeSize, cmd.RootHash,
+			cmd.NoteText, cmd.SignedAt)
 		if skipped {
 			return nil
 		}

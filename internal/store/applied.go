@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -105,7 +106,7 @@ func (s *Store) ApplyReplicated(ctx context.Context, index uint64, in AppendInpu
 }
 
 // SaveCheckpointReplicated persists a signed tree head exactly once.
-func (s *Store) SaveCheckpointReplicated(ctx context.Context, index int64, size int64, root []byte, noteText string) (bool, error) {
+func (s *Store) SaveCheckpointReplicated(ctx context.Context, index int64, size int64, root []byte, noteText string, signedAt time.Time) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -122,11 +123,23 @@ func (s *Store) SaveCheckpointReplicated(ctx context.Context, index int64, size 
 	if done {
 		return true, nil
 	}
+	// A command written before this field existed replays with a zero time.
+	// Writing that would date the checkpoint to year 1; falling back to now()
+	// is the old behaviour, which is wrong only by the replay delay and stays
+	// ordered correctly.
+	if signedAt.IsZero() {
+		signedAt = time.Now().UTC()
+	}
 	var existing []byte
 	err = tx.QueryRow(ctx,
-		`INSERT INTO checkpoints (tree_size, root_hash, note_text) VALUES ($1,$2,$3)
+		// created_at is the LEADER's signing time, carried in the command. The
+		// column defaults to now(), which would record when this replica
+		// happened to apply the entry — so the same checkpoint would carry a
+		// different time on every node, and /status would show a different
+		// signing history depending on which replica you asked.
+		`INSERT INTO checkpoints (tree_size, root_hash, note_text, created_at) VALUES ($1,$2,$3,$4)
 		 ON CONFLICT (tree_size) DO UPDATE SET tree_size = checkpoints.tree_size
-		 RETURNING root_hash`, size, root, noteText).Scan(&existing)
+		 RETURNING root_hash`, size, root, noteText, signedAt).Scan(&existing)
 	if err != nil {
 		return false, err
 	}

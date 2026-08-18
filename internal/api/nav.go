@@ -40,6 +40,7 @@ func (s *Server) navPages() []navItem {
 		{Href: "/", Label: "Overview"},
 		{Href: "/browse", Label: "Browse"},
 		{Href: "/network", Label: "Network"},
+		{Href: "/status", Label: "Status"},
 		{Href: "/verify", Label: "Verify"},
 		{Href: "/docs", Label: "Docs"},
 	}
