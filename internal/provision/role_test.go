@@ -21,7 +21,7 @@ func envOf(t *testing.T, s Spec) map[string]string {
 func TestEachRoleRendersOnlyItsOwnConfiguration(t *testing.T) {
 	base := Spec{NodeName: "n", Origin: "n.example/log", Namespace: "ns",
 		ParentURL: "https://parent.example", ParentKey: "parent+key", EnrolToken: "tok",
-		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", CrawlDomains: "a.example"}
+		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000,ha-2=10.0.0.2:7000", CrawlDomains: "a.example"}
 
 	cases := []struct {
 		role    Role
@@ -98,7 +98,7 @@ func TestReplicaIsWarnedAboutIdentity(t *testing.T) {
 // nothing reports it. Neither config should be renderable.
 func TestReplicaWithoutIdentityOrOriginIsRefused(t *testing.T) {
 	full := Spec{Role: RoleReplica, NodeName: "n", Origin: "set.example/log",
-		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", SharedKeyFile: "/keys/cluster.key"}
+		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000,ha-2=10.0.0.2:7000", SharedKeyFile: "/keys/cluster.key"}
 	if err := full.Validate(); err != nil {
 		t.Fatalf("a complete replica spec was refused: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestNoRoleEmitsPublisherKeysWithoutWildcardNamespaces(t *testing.T) {
 func TestAWitnessTargetWithoutItsKeyIsRefusedForEveryRole(t *testing.T) {
 	for _, r := range []Role{RoleStandalone, RoleMirror, RoleReplica, RoleChild, RoleWitness} {
 		s := Spec{Role: r, NodeName: "n", Origin: "o", Namespace: "ns",
-			ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", SharedKeyFile: "/k",
+			ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000,ha-2=10.0.0.2:7000", SharedKeyFile: "/k",
 			CrawlDomains: "a.example", ParentURL: "https://p", EnrolToken: "t",
 			WitnessTargetURL: "https://b.example/dedi", // and no key
 		}
