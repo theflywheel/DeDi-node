@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/provision"
 )
 
@@ -144,5 +145,25 @@ func TestTheJSONBlockDoesNotCaptureTheScriptExtractor(t *testing.T) {
 	}
 	if strings.Contains(extracted, "{{ROLE_CATALOGUE}}") {
 		t.Error("the extractor captured the JSON block instead of the script")
+	}
+}
+
+// The console's peer example must be one the daemon actually parses. It used
+// to show id@host:port; cluster.ParsePeers wants id=host:port[=http-url], so an
+// operator copying the placeholder got a startup parse error — a poor way to
+// find out the UI was wrong.
+func TestPeerPlaceholderParses(t *testing.T) {
+	page := string(adminHTML)
+	i := strings.Index(page, `id="c-cluster-peers"`)
+	if i < 0 {
+		t.Fatal("the peers field is gone; this test needs rewriting")
+	}
+	seg := page[i:min(i+400, len(page))]
+	m := regexp.MustCompile(`placeholder="([^"]*)"`).FindStringSubmatch(seg)
+	if m == nil {
+		t.Fatal("no placeholder on the peers field")
+	}
+	if _, err := cluster.ParsePeers(m[1]); err != nil {
+		t.Errorf("the console suggests %q, which the daemon rejects: %v", m[1], err)
 	}
 }

@@ -146,7 +146,7 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	art, err := provider.Render(provision.Spec{
+	spec := provision.Spec{
 		NodeName:    nodeNameFor(offer.Namespace),
 		Origin:      offer.Namespace + "/log",
 		Namespace:   offer.Namespace,
@@ -167,7 +167,15 @@ func (s *Server) createChild(w http.ResponseWriter, r *http.Request) {
 		ClusterPeers:        req.ClusterPeers,
 		ClusterBind:         req.ClusterBind,
 		CrawlDomains:        req.CrawlDomains,
-	})
+	}
+	// The child path rendered without validating, so a witness target supplied
+	// here with no verifier key produced a child that starts a witness loop
+	// failing on every run — healthy-looking, and verifying nothing.
+	if err := spec.Validate(); err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	art, err := provider.Render(spec)
 	if err != nil {
 		internal(w, err)
 		return

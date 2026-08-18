@@ -21,7 +21,7 @@ func envOf(t *testing.T, s Spec) map[string]string {
 func TestEachRoleRendersOnlyItsOwnConfiguration(t *testing.T) {
 	base := Spec{NodeName: "n", Origin: "n.example/log", Namespace: "ns",
 		ParentURL: "https://parent.example", ParentKey: "parent+key", EnrolToken: "tok",
-		ClusterID: "ha-2", ClusterPeers: "ha-1@a:7000", CrawlDomains: "a.example"}
+		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", CrawlDomains: "a.example"}
 
 	cases := []struct {
 		role    Role
@@ -98,7 +98,7 @@ func TestReplicaIsWarnedAboutIdentity(t *testing.T) {
 // nothing reports it. Neither config should be renderable.
 func TestReplicaWithoutIdentityOrOriginIsRefused(t *testing.T) {
 	full := Spec{Role: RoleReplica, NodeName: "n", Origin: "set.example/log",
-		ClusterID: "ha-2", ClusterPeers: "ha-1@a:7000", SharedKeyFile: "/keys/cluster.key"}
+		ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", SharedKeyFile: "/keys/cluster.key"}
 	if err := full.Validate(); err != nil {
 		t.Fatalf("a complete replica spec was refused: %v", err)
 	}
@@ -208,6 +208,28 @@ func TestNoRoleEmitsPublisherKeysWithoutWildcardNamespaces(t *testing.T) {
 			if _, hasWild := env["DEDI_WILDCARD_NAMESPACES"]; !hasWild {
 				t.Errorf("%s emits publisher keys with no wildcard namespaces; the node refuses to start", r)
 			}
+		}
+	}
+}
+
+// Witnessing composes with every role, so half a witness tuple can be rendered
+// for any of them. The daemon starts the witness loop whenever the URL is set,
+// and note.NewVerifier("") then fails on every run — the node comes up healthy,
+// reports a witness loop, and silently verifies nothing. That is worse than not
+// witnessing at all, because a stalled witness still looks like coverage.
+func TestAWitnessTargetWithoutItsKeyIsRefusedForEveryRole(t *testing.T) {
+	for _, r := range []Role{RoleStandalone, RoleMirror, RoleReplica, RoleChild, RoleWitness} {
+		s := Spec{Role: r, NodeName: "n", Origin: "o", Namespace: "ns",
+			ClusterID: "ha-2", ClusterPeers: "ha-1=10.0.0.1:7000", SharedKeyFile: "/k",
+			CrawlDomains: "a.example", ParentURL: "https://p", EnrolToken: "t",
+			WitnessTargetURL: "https://b.example/dedi", // and no key
+		}
+		if err := s.Validate(); err == nil {
+			t.Errorf("%s: a witness target with no verifier key was accepted", r)
+		}
+		s.WitnessTargetKey = "b.example/log+7f3a+Aa"
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s: a complete witness tuple was refused: %v", r, err)
 		}
 	}
 }

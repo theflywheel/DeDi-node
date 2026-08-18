@@ -205,6 +205,16 @@ func (s Spec) Validate() error {
 	case RoleStandalone:
 		need(strings.TrimSpace(s.Namespace) != "", "namespace")
 	}
+	// Role-independent, because witnessing composes with every role. The
+	// daemon starts the witness loop whenever the URL is set, and then
+	// note.NewVerifier("") fails on every single run — so the node comes up
+	// healthy, reports a witness loop, and silently never verifies anything.
+	// Half a witness tuple is worse than none.
+	if strings.TrimSpace(s.WitnessTargetURL) != "" && strings.TrimSpace(s.WitnessTargetKey) == "" {
+		missing = append(missing, "the witness target's verifier key (a target URL without it starts "+
+			"a loop that fails every run)")
+	}
+
 	if len(missing) == 0 {
 		return nil
 	}
