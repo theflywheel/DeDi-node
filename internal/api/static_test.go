@@ -323,3 +323,50 @@ func TestRingPageSeparatesCannotCheckFromCheckFailed(t *testing.T) {
 		t.Error("the ring page still folds null into the failure branch")
 	}
 }
+
+var anyHref = regexp.MustCompile(`href="(/[^"{}]*)"`)
+
+// Every internal link in every served page must resolve — not just the ones in
+// the nav. This exists because the same mistake was made twice in two days: a
+// link to /network written before that page existed, then a link to /status
+// written before that one did. Both shipped through review as valid HTML
+// pointing at a 404, and both were on pages whose whole purpose is to be
+// checkable.
+func TestEveryInternalLinkInEveryPageResolves(t *testing.T) {
+	srv, _, _ := writeServer(t, "flywheel")
+
+	// Pages are fetched through the running server so generated markup (the
+	// nav, the doc index) is included exactly as a reader receives it.
+	pages := append([]string{}, pageRoutes...)
+	pages = append(pages, "/docs/witnessing", "/docs/replication")
+
+	seen := map[string]bool{}
+	for _, from := range pages {
+		resp, err := http.Get(srv.URL + from)
+		if err != nil {
+			t.Fatalf("GET %s: %v", from, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		for _, m := range anyHref.FindAllSubmatch(body, -1) {
+			href := string(m[1])
+			// Fragment-only and query-only links go nowhere new.
+			if i := strings.IndexAny(href, "#?"); i > 0 {
+				href = href[:i]
+			}
+			if href == "" || seen[from+" "+href] {
+				continue
+			}
+			seen[from+" "+href] = true
+			r2, err := http.Get(srv.URL + href)
+			if err != nil {
+				t.Fatalf("GET %s (linked from %s): %v", href, from, err)
+			}
+			r2.Body.Close()
+			if r2.StatusCode != http.StatusOK {
+				t.Errorf("%s links to %s, which answers %d", from, href, r2.StatusCode)
+			}
+		}
+	}
+}
