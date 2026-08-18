@@ -68,10 +68,14 @@ func (s *Server) nodeConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := orDefault(req.NodeName, string(role))
+	origin := req.Origin
+	if role != provision.RoleReplica {
+		origin = orDefault(origin, name+"/log")
+	}
 	spec := provision.Spec{
 		Role:      role,
 		NodeName:  name,
-		Origin:    orDefault(req.Origin, name+"/log"),
+		Origin:    origin,
 		Namespace: req.Namespace,
 		Image:     orDefault(req.Image, defaultImage),
 		PublicURL: strings.TrimRight(req.PublicURL, "/"),

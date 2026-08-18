@@ -742,8 +742,6 @@ onAction($('children-list'), 'chain', showDescendants);
 setMode();
 show(location.hash.slice(1) || 'list');
 reload();
-loadChildren();
-loadSubscriptions();
 
 // ---------- child nodes ----------
 //
@@ -1139,6 +1137,10 @@ async function showDescendants(child){
   }
 }
 
+renderRoles();
+loadChildren();
+loadSubscriptions();
+
 // ---------- push notification ----------
 //
 // The loop's health and each subscription's counters are rendered as two
@@ -1293,12 +1295,6 @@ async function findByDomain(){
 function copyArtifact(){
   navigator.clipboard.writeText($('c-art').textContent);
 }
-// Render the picker once everything it needs exists. The bootstrap block above
-// runs before these declarations: function declarations hoist, but `let` does
-// not initialise until its line, so calling this up there threw — which the
-// child-panel test caught and my own parse check did not, because it strips
-// bootstrap lines and so was blind to exactly this.
-renderRoles();
 </script>
 </body>
 </html>
