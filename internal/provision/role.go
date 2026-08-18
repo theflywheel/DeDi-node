@@ -96,8 +96,13 @@ var roles = map[Role]roleInfo{
 		Role: RoleWitness, Title: "Witness",
 		Summary:  "Proves another node's log is append-only, and records each verdict.",
 		Identity: "its own key", Log: "its own, holding verdicts",
-		Buys:   "tamper evidence for a log you do not run",
-		Writes: "open — a verdict is a log entry",
+		Buys: "tamper evidence for a log you do not run",
+		// The HTTP write plane is CLOSED on a witness: it holds no publisher
+		// keys. Its verdicts reach the log by a different road entirely — the
+		// witness loop appends to the store directly — so saying "open" here
+		// described a door that is not there and invited an operator to open
+		// one the node then refuses to start without more configuration.
+		Writes: "none — verdicts bypass the write plane entirely",
 		Needs:  []string{"database", "witness_target"},
 	},
 	RoleReplica: {

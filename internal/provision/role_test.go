@@ -173,3 +173,41 @@ func TestCatalogueCoversEveryRole(t *testing.T) {
 		}
 	}
 }
+
+// A witness records verdicts by appending to its own log directly; nothing in
+// that path goes through the HTTP write plane, so a publisher key authorises
+// nothing for it.
+//
+// This is asserted because the note here previously said the opposite, and the
+// advice was not merely wrong but harmful: cmd/dedid refuses to start when
+// DEDI_PUBLISHER_KEYS is set without DEDI_WILDCARD_NAMESPACES, and a witness
+// has no namespace for the renderer to fill in — so an operator following it
+// turned a working config into one that would not boot.
+func TestWitnessIsNotToldToSetAPublisherKey(t *testing.T) {
+	notes := strings.Join(commonNotes(Spec{Role: RoleWitness, NodeName: "w"}), " ")
+	if strings.Contains(notes, "set DEDI_PUBLISHER_KEYS") {
+		t.Error("a witness is told to set publisher keys, which authorises nothing for it and " +
+			"prevents the node from starting without DEDI_WILDCARD_NAMESPACES")
+	}
+	if !strings.Contains(notes, "NO publisher key") {
+		t.Error("a witness is not told it needs no publisher key")
+	}
+}
+
+// The renderer must not emit a config that cannot boot: publisher keys without
+// wildcard namespaces is refused by cmd/dedid, so no role may emit the first
+// without the second.
+func TestNoRoleEmitsPublisherKeysWithoutWildcardNamespaces(t *testing.T) {
+	for _, r := range []Role{RoleStandalone, RoleMirror, RoleWitness, RoleReplica, RoleChild} {
+		env := map[string]string{}
+		for _, kv := range envPairs(Spec{Role: r, NodeName: "n", Origin: "o", Namespace: "ns",
+			ClusterID: "c", ClusterPeers: "p", CrawlDomains: "d", ParentURL: "u", EnrolToken: "t"}) {
+			env[kv[0]] = kv[1]
+		}
+		if _, hasKeys := env["DEDI_PUBLISHER_KEYS"]; hasKeys {
+			if _, hasWild := env["DEDI_WILDCARD_NAMESPACES"]; !hasWild {
+				t.Errorf("%s emits publisher keys with no wildcard namespaces; the node refuses to start", r)
+			}
+		}
+	}
+}

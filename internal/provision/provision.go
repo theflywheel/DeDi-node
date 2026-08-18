@@ -143,7 +143,7 @@ func commonNotes(s Spec) []string {
 	case RoleWitness:
 		notes = append(notes,
 			"DEDI_WITNESS_TARGET_KEY is the target's public verifier key, published so this node can check the target's checkpoint signatures itself. Getting it from the target over an unauthenticated channel proves the connection, not the target — obtain it the way you would any other trust anchor.",
-			"A witness needs a publisher key of its own: a verdict is a log entry, and an unsigned node records nothing. Generate one with `dedid pubkeygen` and set DEDI_PUBLISHER_KEYS.",
+			"A witness needs NO publisher key. Its verdicts are appended to its own log directly by the witness loop (internal/witness), not through the HTTP write plane, so there is nothing here for a publisher key to authorise. Setting one would also require DEDI_WILDCARD_NAMESPACES — which a witness has no namespace to fill in — and the node would refuse to start.",
 		)
 	case RoleMirror:
 		notes = append(notes,
