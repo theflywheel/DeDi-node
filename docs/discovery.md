@@ -1,7 +1,7 @@
 # Discovery: who serves a domain
 
 Answering "who serves domain X" rather than only "what key does this known
-subscriber use". The console's *Who serves a domain* tab, and the `?domain=`
+subscriber use". The console's *Who serves* section, and the `?domain=`
 filter behind it.
 
 Status: implemented. This was

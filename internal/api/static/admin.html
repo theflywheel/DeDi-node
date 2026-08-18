@@ -39,12 +39,7 @@
 what keys they present, and when they stop being valid. Onboarding is a governed act — every
 action here is an <b>append</b> to the transparency log, never an edit or a delete.</p>
 
-<div class="banner" id="mode">
-  <b>Unlocked by a publisher key.</b> Writes are signed, not session-authenticated
-  (<a href="https://github.com/theflywheel/DeDi-node/blob/main/docs/governance.md">governance</a>).
-  Without a key loaded, the forms generate the record and the command to apply it. Load a key and
-  they publish directly.
-</div>
+<div class="banner" id="mode"><span class="mut">Checking for a publisher key&hellip;</span></div>
 
 <fieldset>
   <legend>publisher key</legend>
@@ -71,9 +66,6 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 
 <p class="tabs" style="margin-top:1.4em">
   <a id="tab-list" class="sel" onclick="show('list')">Participants</a>
-  <a id="tab-new" onclick="show('new')">Onboard</a>
-  <a id="tab-key" onclick="show('key')">Rotate key</a>
-  <a id="tab-revoke" onclick="show('revoke')">Revoke</a>
   <a id="tab-children" onclick="show('children')">Child nodes</a>
   <a id="tab-push" onclick="show('push')">Push</a>
   <a id="tab-domain" onclick="show('domain')">Who serves</a>
@@ -83,10 +75,43 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 <div id="view-list">
   <div id="participants"><p class="mut">loading...</p></div>
   <div id="detail"></div>
-</div>
 
-<!-- ---------- onboard ---------- -->
-<div id="view-new" hidden>
+  <!-- Rotate and revoke act on a participant, so they live where one is
+       selected. Reaching them used to mean leaving the table for a tab and
+       retyping the record name the table had just shown. -->
+  <div id="view-key" hidden>
+  <h2>Rotate a key</h2>
+  <p class="mut">Rotation is a new version, not a replacement: the old key stays resolvable via
+  <code>?as_on=</code> so signatures on older messages still verify. Publish the new key
+  <i>before</i> the old one expires so the windows overlap.</p>
+  <div class="grid">
+    <div class="full" id="r-rec-row" hidden><label for="r-rec">record</label><input id="r-rec" spellcheck="false"></div>
+    <div class="full"><span class="mut">rotating</span> <b id="r-rec-name">—</b></div>
+    <div class="full"><label for="r-sign">new signing public key</label><input id="r-sign" spellcheck="false"></div>
+    <div><label for="r-from">valid from</label><input id="r-from" placeholder="2026-06-01T00:00:00Z" spellcheck="false"></div>
+    <div><label for="r-until">valid until</label><input id="r-until" placeholder="2027-06-01T00:00:00Z" spellcheck="false"></div>
+  </div>
+  <button onclick="genRotate()">generate new version</button>
+  <div id="out-key"></div>
+  </div>
+  <div id="view-revoke" hidden>
+  <h2>Revoke a participant</h2>
+  <p class="mut">A revocation is a new version with <code>state: revoked</code>, never a deletion —
+  history stays provable. Beckn wildcard lookups return live records only, so a revoked
+  participant then 404s and ONIX rejects its messages with 401.</p>
+  <div class="grid">
+    <div class="full" id="v-rec-row" hidden><label for="v-rec">record</label><input id="v-rec" spellcheck="false"></div>
+    <div class="full"><span class="mut">revoking</span> <b id="v-rec-name">—</b></div>
+    <div class="full"><label for="v-sub">subscriber_id <span class="mut">(only used when generating a command without a key; a signed revoke carries the record forward as published)</span></label><input id="v-sub" spellcheck="false"></div>
+    <div class="full"><label for="v-reason">reason <span class="mut">(recorded in the log)</span></label><input id="v-reason" placeholder="key compromise" spellcheck="false"></div>
+  </div>
+  <button onclick="genRevoke()">generate revocation</button>
+  <div id="out-revoke"></div>
+  </div>
+
+  <details id="onboard-wrap" style="margin-top:1.4em">
+    <summary><b>Onboard a participant</b> <span class="mut">— add someone new to this registry</span></summary>
+    <div id="view-new">
   <h2>Onboard a participant</h2>
   <p class="mut">The <b>key id</b> becomes the record name — that is what ONIX asks for on every
   message (<code>/lookup/{subscriber_id}/{registry}/{key_id}</code>).</p>
@@ -117,38 +142,12 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   </fieldset>
   <button onclick="genOnboard()">publish / generate</button>
   <div id="out-new"></div>
+    </div>
+  </details>
 </div>
 
-<!-- ---------- rotate ---------- -->
-<div id="view-key" hidden>
-  <h2>Rotate a key</h2>
-  <p class="mut">Rotation is a new version, not a replacement: the old key stays resolvable via
-  <code>?as_on=</code> so signatures on older messages still verify. Publish the new key
-  <i>before</i> the old one expires so the windows overlap.</p>
-  <div class="grid">
-    <div class="full"><label for="r-rec">record <span class="mut">(existing key id)</span></label><input id="r-rec" spellcheck="false"></div>
-    <div class="full"><label for="r-sign">new signing public key</label><input id="r-sign" spellcheck="false"></div>
-    <div><label for="r-from">valid from</label><input id="r-from" placeholder="2026-06-01T00:00:00Z" spellcheck="false"></div>
-    <div><label for="r-until">valid until</label><input id="r-until" placeholder="2027-06-01T00:00:00Z" spellcheck="false"></div>
-  </div>
-  <button onclick="genRotate()">generate new version</button>
-  <div id="out-key"></div>
-</div>
 
-<!-- ---------- revoke ---------- -->
-<div id="view-revoke" hidden>
-  <h2>Revoke a participant</h2>
-  <p class="mut">A revocation is a new version with <code>state: revoked</code>, never a deletion —
-  history stays provable. Beckn wildcard lookups return live records only, so a revoked
-  participant then 404s and ONIX rejects its messages with 401.</p>
-  <div class="grid">
-    <div class="full"><label for="v-rec">record <span class="mut">(key id)</span></label><input id="v-rec" spellcheck="false"></div>
-    <div class="full"><label for="v-sub">subscriber_id <span class="mut">(defaults to the record name)</span></label><input id="v-sub" spellcheck="false"></div>
-    <div class="full"><label for="v-reason">reason <span class="mut">(recorded in the log)</span></label><input id="v-reason" placeholder="key compromise" spellcheck="false"></div>
-  </div>
-  <button onclick="genRevoke()">generate revocation</button>
-  <div id="out-revoke"></div>
-</div>
+
 
 <!-- ---------- child nodes ---------- -->
 <div id="view-children" hidden>
@@ -218,11 +217,14 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 </div>
 
 <div id="view-domain" hidden>
-  <h2>Who serves a domain</h2>
-  <p class="mut">The directory can now answer discovery, not only trust: not just
+  <h2>Who serves</h2>
+  <p class="mut">The directory can answer discovery, not only trust: not just
   <em>what key does this subscriber use</em>, but <em>who serves retail</em>. Revocation
   therefore has a second meaning here — a revoked participant stops being returned as
   somewhere to send business, not merely as somewhere whose signature verifies.</p>
+  <p class="mut">This searches <b>every namespace this node will answer for</b>, not only the one
+  selected above, and narrows by registry name. That is what discovery means — a caller asking who
+  serves a domain has no namespace in mind — so the namespace each result came from is in the table.</p>
   <fieldset>
     <legend>Search</legend>
     <div class="grid">
@@ -252,7 +254,10 @@ function onAction(root, action, fn){
 }
 const actionLink = (action, rec, label) =>
   '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
-const VIEWS = ['list','new','key','revoke','children','push','domain'];
+// The sections the tab strip switches between. rotate/revoke are no longer
+// among them: they are panels inside the participants section, revealed by
+// selecting a participant, because that is where the operator already is.
+const VIEWS = ['list','children','push','domain'];
 
 // ---- request signing ----
 // Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
@@ -283,16 +288,35 @@ async function loadKey(){
     SIGNER = { kid, key: await importEd25519(priv) };
     $('k-priv').value = '';   // do not leave it sitting in the DOM
     $('k-state').innerHTML = '<span class="ok">key ' + esc(kid) + ' loaded — writes will publish directly</span>';
+    setMode();
     loadSubscriptions();   // the push list needs the key, so it could not load before now
   } catch(e){
     SIGNER = null;
     $('k-state').innerHTML = '<span class="no">' + esc(e.message) + '</span>';
+    // Every path that changes SIGNER repaints the banner. Missing this one
+    // meant a failed re-import left it asserting the PREVIOUS key was loaded
+    // and publishing — which is the lie the banner was added to stop telling.
+    setMode();
   }
 }
 function clearKey(){
   SIGNER = null;
   $('k-priv').value = '';
   $('k-state').innerHTML = '<span class="mut">no key loaded</span>';
+  setMode();
+}
+
+// The banner used to be static markup asserting the console was "unlocked by a
+// publisher key" whether or not one had been loaded — the one sentence on the
+// page a reader would use to decide whether their next click writes anything.
+function setMode(){
+  const el = $('mode');
+  if(!el) return;
+  el.innerHTML = SIGNER
+    ? '<b>Key ' + esc(SIGNER.kid) + ' is loaded.</b> Writes are signed in this tab and published directly. ' +
+      'The key is held non-extractably and closing the tab discards it.'
+    : '<b>No key is loaded.</b> Nothing here can write. Forms generate a signed command for you to run ' +
+      'elsewhere; load a key above to publish directly.';
 }
 
 // recordLookup builds the read URL for a record.
@@ -379,7 +403,22 @@ const recordPath = (ns, reg, rec) =>
 function show(v){
   if(!VIEWS.includes(v)) v = 'list';
   VIEWS.forEach(x => { $('view-'+x).hidden = (x !== v); $('tab-'+x).className = (x === v ? 'sel' : ''); });
-  if(location.hash.slice(1) !== v) location.hash = v;   // tabs are linkable
+  if(v !== 'list') hideLifecycle();   // leaving the table abandons the selection
+  if(location.hash.slice(1) !== v) location.hash = v;   // sections are linkable
+}
+
+// Rotate and revoke open against the participant already selected, and only one
+// at a time: they are two things to do to the same record, and showing both
+// invites filling in one and submitting the other.
+function hideLifecycle(){
+  $('view-key').hidden = true;
+  $('view-revoke').hidden = true;
+}
+function openLifecycle(which){
+  $('view-key').hidden = (which !== 'key');
+  $('view-revoke').hidden = (which !== 'revoke');
+  const el = $('view-' + which);
+  if(el && el.scrollIntoView) el.scrollIntoView({block: 'nearest'});
 }
 addEventListener('hashchange', () => show(location.hash.slice(1) || 'list'));
 
@@ -396,6 +435,7 @@ const p   = s => encodeURIComponent(s);
 function reload(){
   const box = $('participants');
   $('detail').innerHTML = '';
+  hideLifecycle();   // the selection the panel was opened from is gone
   box.innerHTML = '<p class="mut">loading...</p>';
   queryAllRecords().then(async recs => {
     if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
@@ -451,6 +491,14 @@ function expiry(until){
 
 function detail(rec){
   const box = $('detail');
+  // Selecting a different participant closes any open rotate/revoke panel.
+  // Without this the panel stayed open beneath the NEW participant's detail
+  // while still bound to the old one, and a rotation filled in there would be
+  // signed against the record the operator had stopped looking at — with a
+  // valid signature and a correct precondition. Before the restructure the
+  // form was a full view, so no other participant was clickable while it was
+  // open; making it a panel in place is what created the gap.
+  hideLifecycle();
   box.innerHTML = '<h3>' + esc(rec) + '</h3><p class="mut">loading...</p>';
   const base = recordLookup(ns(), reg(), rec);
   Promise.all([
@@ -483,8 +531,25 @@ function detail(rec){
     box.innerHTML = out;
   });
 }
-function prefill(rec){ $('r-rec').value = rec; show('key'); }
-function prefillRevoke(rec){ $('v-rec').value = rec; show('revoke'); }
+// The form is emptied on every open. Reusing it in place across participants
+// is now the normal path, and a panel headed "rotating B" while its fields
+// still hold A's signing key and A's validity window would publish A's key
+// onto B — with a valid signature and a correct precondition, so nothing
+// downstream would question it.
+function prefill(rec){
+  ['r-sign','r-from','r-until'].forEach(id => { $(id).value = ''; });
+  $('out-key').innerHTML = '';
+  $('r-rec').value = rec;
+  $('r-rec-name').textContent = rec;
+  openLifecycle('key');
+}
+function prefillRevoke(rec){
+  ['v-sub','v-reason'].forEach(id => { $(id).value = ''; });
+  $('out-revoke').innerHTML = '';
+  $('v-rec').value = rec;
+  $('v-rec-name').textContent = rec;
+  openLifecycle('revoke');
+}
 
 // ---- generators ----
 const b64re = /^[A-Za-z0-9+/]{43}=$/;   // 32 raw bytes in std base64
@@ -634,6 +699,7 @@ onAction($('detail'), 'revoke', prefillRevoke);
 onAction($('children-list'), 'unchild', revokeChild);
 onAction($('children-list'), 'chain', showDescendants);
 
+setMode();
 show(location.hash.slice(1) || 'list');
 reload();
 loadChildren();
@@ -994,6 +1060,13 @@ async function loadSubscriptions(){
 async function createSubscription(){
   const reg = $('w-reg').value.trim(), url = $('w-url').value.trim();
   const el = $('out-push');
+  // The same guard createChild has. Without it signedFetch dereferences a null
+  // SIGNER and the page reports "Cannot read properties of null" — an internal
+  // error message standing in for "you have not loaded your key".
+  if(!SIGNER){
+    el.innerHTML = '<p class="no">Load a publisher key first — subscribing is a signed write.</p>';
+    return;
+  }
   if(!reg || !url){ el.innerHTML = '<p class="no">registry and target URL are both required</p>'; return; }
   el.innerHTML = '<p class="mut">subscribing...</p>';
   try {
@@ -1011,6 +1084,10 @@ async function createSubscription(){
 }
 
 async function unsubscribe(id){
+  if(!SIGNER){
+    $('out-push').innerHTML = '<p class="no">Load a publisher key first — unsubscribing is a signed write.</p>';
+    return;
+  }
   if(!confirm('Stop notifying this consumer?\n\nIt keeps whatever it has already cached, and ' +
               'will go back to noticing revocations only when those caches expire.')) return;
   const r = await signedFetch('DELETE', '/admin/namespaces/' + p(ns()) + '/subscriptions/' + p(id));
@@ -1036,11 +1113,11 @@ async function findByDomain(){
     const j = await jget('/dedi/query/' + p(ns()) + '/' + p(reg) + '?domain=' + encodeURIComponent(domain));
     const list = (j.data && j.data.participants) || [];
     if(!list.length){
-      box.innerHTML = '<p class="mut">Nobody live serves ' + esc(domain) + ' in ' +
-        esc(ns()) + '/' + esc(reg) + '.</p>';
+      box.innerHTML = '<p class="mut">Nobody live serves ' + esc(domain) + ' in any registry named ' +
+        esc(reg) + ' that this node will answer for.</p>';
       return;
     }
-    box.innerHTML = '<table><tr><th>subscriber</th><th>type</th><th>url</th><th>record</th></tr>' +
+    box.innerHTML = '<table><tr><th>subscriber</th><th>namespace</th><th>type</th><th>url</th><th>record</th></tr>' +
       list.map(x => {
         // Escaping does not make an href safe: a participant chooses its own
         // url, and javascript: survives esc() intact.
@@ -1049,6 +1126,7 @@ async function findByDomain(){
           : safe ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.url) + '</a>'
           : esc(x.url) + ' <span class="no">(unusable URL)</span>';
         return '<tr><td>' + esc(x.subscriber_id || '—') + '</td>' +
+          '<td class="mut">' + esc(x.namespace_id || '—') + '</td>' +
           '<td class="mut">' + esc(x.type || '—') + '</td><td>' + url + '</td>' +
           '<td><a href="' + esc(x.lookup_url) + '" target="_blank" rel="noopener">verify</a></td></tr>';
       }).join('') + '</table>' +

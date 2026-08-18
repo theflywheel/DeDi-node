@@ -1,6 +1,6 @@
 # Onboarding a participant
 
-Admitting an identity to a registry: the console's *Onboard a participant* tab,
+Admitting an identity to a registry: the Participants section's *Onboard a participant* disclosure in the console,
 and the signed write behind it. This is the operation that decides who the
 network will believe, so it is operator-gated and there is no self-service path.
 
