@@ -22,7 +22,7 @@ import (
 //     it scrolls in its own box, the way pre blocks already did.
 func TestPagesDoNotForceHorizontalScroll(t *testing.T) {
 	srv, _, _ := writeServer(t, "flywheel")
-	pages := []string{"/", "/browse", "/network", "/status", "/verify", "/docs", "/admin",
+	pages := []string{"/", "/browse", "/network", "/status", "/check", "/verify", "/docs", "/admin",
 		"/docs/witnessing", "/docs/replication"}
 
 	for _, p := range pages {

@@ -56,6 +56,16 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	// The two handler bindings need elements that exist; the harness supplies them.
 	good, _ := json.Marshal(env)
 
+	// Splice: a genuine leaf and proof beside somebody else's record. This is
+	// the attack the fold cannot see, because everything it checks is true —
+	// of a different entry.
+	var spliced map[string]any
+	json.Unmarshal(body, &spliced)
+	sd := spliced["data"].(map[string]any)
+	sd["record_name"] = "attacker.example"
+	sd["digest"] = strings.Repeat("f", 64)
+	splicedJSON, _ := json.Marshal(spliced)
+
 	// Tamper: flip the leaf's digest. The record still parses, and the path is
 	// untouched — only the leaf hash changes, so the fold must stop matching.
 	var bad map[string]any
@@ -74,6 +84,9 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "bad.json"), badJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spliced.json"), splicedJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -96,7 +109,8 @@ if (!globalThis.crypto) {
 globalThis.fetch = async () => ({ ok: true, text: async () => '' });
 const GOOD = fs.readFileSync(process.argv[2], 'utf8');
 const BAD  = fs.readFileSync(process.argv[3], 'utf8');
-const VKEY = process.argv[4];
+const SPLICED = fs.readFileSync(process.argv[4], 'utf8');
+const VKEY = process.argv[5];
 `
 	check := `
 const out = document.getElementById('out');
@@ -132,7 +146,18 @@ if (!noKey.includes('Partly checked')) {
   throw new Error('no-key case does not say what is missing: ' + noKey.slice(0, 300));
 }
 
+// A real proof beside the wrong record must not verify it.
 document.getElementById('vkey').value = VKEY;
+document.getElementById('doc').value = SPLICED;
+await check();
+const sp = out.innerHTML;
+if (sp.includes('\u2713 This record is in the log')) {
+  throw new Error('a proof about a DIFFERENT record verified the one displayed: ' + sp.slice(0, 300));
+}
+if (!sp.includes('not about this record')) {
+  throw new Error('the splice was not reported: ' + sp.slice(0, 300));
+}
+
 document.getElementById('doc').value = BAD;
 await check();
 const badHTML = out.innerHTML;
@@ -148,7 +173,8 @@ console.log('OK');
 		t.Fatal(err)
 	}
 	out, err := exec.Command("node", file,
-		filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json"), vkey).CombinedOutput()
+		filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json"),
+		filepath.Join(dir, "spliced.json"), vkey).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "OK") {
 		t.Fatalf("checker: %v\n%s", err, out)
 	}

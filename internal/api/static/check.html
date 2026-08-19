@@ -83,6 +83,11 @@ it.</p>
 </div>
 
 <h2>What this cannot tell you</h2>
+<p class="mut">That the <b>content shown is the content that was hashed</b>. The leaf commits to a
+digest of the record&rsquo;s payload, and this page checks that the digest beside the record matches
+the one in the leaf — but a lookup response carries the payload as parsed fields, not as the bytes
+the digest was taken over, so your browser cannot recompute it. Someone who altered both the content
+and the digest together would pass this check.</p>
 <p class="mut">That the log is <b>append-only</b>. An inclusion proof says this record is in the tree
 the checkpoint describes; it says nothing about whether that tree is an extension of the one the node
 published yesterday. Only a party who kept yesterday's checkpoint can establish that, which is what
@@ -123,7 +128,39 @@ async function check(){
   }
 
   let html = '';
+  let bound = true;   // does the record shown match the leaf that was proved?
   try {
+    // 0. Bind the displayed record to the leaf BEFORE proving anything about
+    //    the leaf.
+    //
+    //    Everything below proves things about p.leaf. Nothing about that says
+    //    the `data` block beside it is the same record — and a response is a
+    //    single blob a reader pastes, so one containing somebody else's genuine
+    //    leaf and proof next to a record of your choosing would verify
+    //    perfectly and display the wrong thing. The proof would be real, the
+    //    fold real, the signature real, and the answer a lie.
+    const mismatched = [];
+    const bind = (label, a, b) => {
+      if (a !== undefined && b !== undefined && String(a) !== String(b)) {
+        mismatched.push(label + ' (' + esc(String(a)) + ' vs ' + esc(String(b)) + ')');
+      }
+    };
+    if (d) {
+      bind('record name', d.record_name, p.leaf.record_name);
+      bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
+      bind('registry', d.registry_name || d.registry, p.leaf.registry);
+      // The one that matters: the leaf commits to the payload's digest.
+      bind('digest', d.digest, p.leaf.digest);
+    }
+    bound = mismatched.length === 0;
+    html += step(bound ? 'pass' : 'fail',
+      bound ? 'The record shown is the one the proof covers'
+            : 'The record shown is NOT the one the proof covers',
+      bound
+        ? 'Name, namespace, registry and payload digest all match the proved leaf.'
+        : 'Mismatched: ' + mismatched.join('; ') + '. Everything below proves something about the ' +
+          'leaf, not about the record displayed beside it.');
+
     // 1. the leaf, rebuilt from the record's own fields
     const leaf = await leafHash(leafBytes(p.leaf));
     html += step('pass', 'The leaf hashes to what the proof assumes',
@@ -173,7 +210,11 @@ async function check(){
     // checkpoint nobody signed is not evidence: anyone can write a root that a
     // matching path folds to, which is the whole reason the key is asked for.
     let cls, head, sub;
-    if (!rootsMatch) {
+    if (!bound) {
+      cls = 'fail';
+      head = '<b class="no">✗ That proof is not about this record.</b>';
+      sub = 'Whatever the proof establishes, it establishes about a different entry.';
+    } else if (!rootsMatch) {
       cls = 'fail';
       head = '<b class="no">✗ This record is not in that log.</b>';
       sub = 'The path does not fold to the root the checkpoint states.';

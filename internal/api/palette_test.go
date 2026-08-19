@@ -31,6 +31,7 @@ func TestEverySurfaceSharesTheTypeAndPalette(t *testing.T) {
 		"network.html":  string(networkPageHTML),
 		"status.html":   string(statusPageHTML),
 		"verify.html":   string(verifyHTML),
+		"check.html":    string(checkPageHTML),
 		"docs.html":     string(docsHTML),
 		"admin.html":    string(adminHTML),
 	}
