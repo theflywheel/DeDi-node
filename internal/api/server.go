@@ -200,6 +200,8 @@ func (s *Server) Handler() http.Handler {
 	// availability. The distinction is the page's whole thesis.
 	mux.HandleFunc("GET /status", s.statusPage)
 	mux.HandleFunc("GET /status/{$}", s.statusPage)
+	mux.HandleFunc("GET /check", s.checkPage)
+	mux.HandleFunc("GET /check/{$}", s.checkPage)
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)

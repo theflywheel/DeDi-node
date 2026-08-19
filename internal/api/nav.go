@@ -41,7 +41,8 @@ func (s *Server) navPages() []navItem {
 		{Href: "/browse", Label: "Browse"},
 		{Href: "/network", Label: "Network"},
 		{Href: "/status", Label: "Status"},
-		{Href: "/verify", Label: "Verify"},
+		{Href: "/check", Label: "Check a record"},
+		{Href: "/verify", Label: "Witness evidence"},
 		{Href: "/docs", Label: "Docs"},
 	}
 	// The console is listed only where it is served. On a read-only node /admin

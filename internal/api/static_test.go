@@ -115,7 +115,7 @@ func TestUnknownRouteStill404AfterExplorer(t *testing.T) {
 // pageRoutes are every HTML page this server serves. Kept here rather than
 // derived from the mux because the point of the test is to notice when the two
 // disagree.
-var pageRoutes = []string{"/", "/browse", "/network", "/status", "/verify", "/docs", "/admin"}
+var pageRoutes = []string{"/", "/browse", "/network", "/status", "/check", "/verify", "/docs", "/admin"}
 
 var navHref = regexp.MustCompile(`<nav>(.*?)</nav>`)
 
@@ -236,7 +236,7 @@ func TestBrowserServedAtBrowse(t *testing.T) {
 // it — for a while it did not, and every operator refresh inflated the figure
 // the overview publishes as "requests served".
 func TestNodesOwnPagesAreNotCountedAsDirectoryTraffic(t *testing.T) {
-	for _, p := range []string{"/", "/browse", "/browse/", "/network", "/network/", "/status", "/status/",
+	for _, p := range []string{"/", "/browse", "/browse/", "/network", "/network/", "/status", "/status/", "/check", "/check/",
 		"/docs", "/docs/witnessing",
 		"/verify", "/admin", "/metrics", "/healthz", "/dedi/stats", "/dedi/network", "/dedi/log/history"} {
 		if !selfTraffic(p) {
