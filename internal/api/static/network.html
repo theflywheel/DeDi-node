@@ -545,12 +545,23 @@ function renderCluster(c){
   const lag = c.lag_entries, contact = c.last_contact_seconds;
   if (lag !== undefined || contact !== undefined) {
     const behind = (lag || 0) > 0;
+    // -1 is "never heard from a leader" (internal/cluster sets it when
+    // LastContact is zero), which is the WORST contact state, not the best. A
+    // numeric threshold reads it as -1 < 30 and renders the partition or
+    // failed-startup case in the calm colour, with the text "last heard from
+    // the leader -1s ago".
+    const never = contact !== undefined && contact < 0;
     const outOfTouch = contact !== undefined && contact > 30;
-    out += '<p class="' + (behind || outOfTouch ? 'warn' : 'mut') + '" style="margin:.4em 0 0">' +
+    let contactText = '';
+    if (never) {
+      contactText = '; <b>has never heard from a leader</b>';
+    } else if (contact !== undefined && contact > 0) {
+      contactText = '; last heard from the leader ' + num(Math.round(contact)) + 's ago';
+    }
+    out += '<p class="' + (behind || outOfTouch || never ? 'warn' : 'mut') + '" style="margin:.4em 0 0">' +
       'This replica has applied ' + num(c.applied_index || 0) + ' of ' + num(c.commit_index || 0) +
       ' committed entries' + (behind ? ' — <b>' + num(lag) + ' behind</b>' : '') +
-      (contact !== undefined ? '; last heard from the leader ' + num(Math.round(contact)) + 's ago' : '') +
-      '.</p>';
+      contactText + '.</p>';
   }
 
   out += '<p class="mut" style="margin:.4em 0 0">These figures are each replica&rsquo;s own report. ' +

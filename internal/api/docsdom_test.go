@@ -89,7 +89,6 @@ func TestDocPageStructureIsWhatTheStylesheetAssumes(t *testing.T) {
 		doc := parsePage(t, srv.URL+"/docs/"+slug)
 
 		var inToc, mains, mainsInDoc int
-		var strayLinks []string
 		walk(doc, func(n *html.Node) {
 			if n.Type != html.ElementNode {
 				return
@@ -102,8 +101,6 @@ func TestDocPageStructureIsWhatTheStylesheetAssumes(t *testing.T) {
 				}
 				if ancestorWith(n, "toc") {
 					inToc++
-				} else if !ancestorWith(n, "pn") && !strings.Contains(href, "#") {
-					strayLinks = append(strayLinks, href)
 				}
 			case "main":
 				mains++
@@ -126,7 +123,6 @@ func TestDocPageStructureIsWhatTheStylesheetAssumes(t *testing.T) {
 			t.Errorf("/docs/%s: %d <main>, %d inside .doc — the article is outside the layout",
 				slug, mains, mainsInDoc)
 		}
-		_ = strayLinks
 		break // structure is identical across pages; one is enough per run
 	}
 }
