@@ -108,6 +108,7 @@ globalThis.document = {
     if (sel === '.rows') return mk('rows');
     return null;
   },
+  addEventListener(){},
 };
 globalThis.location = { origin: 'http://node.example', pathname: '/browse', search: '' };
 globalThis.history = { pushState(){} };
@@ -118,10 +119,19 @@ globalThis.requestAnimationFrame = fn => fn();
 // The fetch stub answers what the record view actually asks for, and is
 // swapped per case below.
 let LOOKUP = GOOD;
+let LOOKUP_STATUS = 200;
+let VERSIONS_STATUS = 200;
 globalThis.fetch = async (url) => {
   if (url.includes('/dedi/log/checkpoint')) return { ok: true, text: async () => CKPT };
-  if (url.includes('/dedi/versions/'))      return { ok: true, json: async () => JSON.parse(VERSIONS) };
-  if (url.includes('/dedi/lookup/'))        return { ok: true, json: async () => JSON.parse(LOOKUP) };
+  if (url.includes('/dedi/versions/'))
+    return VERSIONS_STATUS === 200
+      ? { ok: true, json: async () => JSON.parse(VERSIONS) }
+      : { ok: false, status: VERSIONS_STATUS, json: async () => ({}) };
+  if (url.includes('/dedi/lookup/'))
+    return LOOKUP_STATUS === 200
+      ? { ok: true, json: async () => JSON.parse(LOOKUP) }
+      : { ok: false, status: LOOKUP_STATUS, json: async () => ({}) };
+  if (url.includes('/.well-known/')) return { ok: true, json: async () => ({files: []}) };
   if (url.includes('/dedi/query/'))         return { ok: true, json: async () => ({data:{registries:[],records:[]}}) };
   return { ok: false, status: 404, json: async () => ({}) };
 };
@@ -188,6 +198,58 @@ for (const v of want) {
   if (!hist.includes(v)) throw new Error('version ' + v + ' missing from the history table: ' + hist.slice(0, 400));
 }
 if (/what changed/i.test(hist)) throw new Error('the history table claims a diff the API cannot back');
+
+
+// 6. THE FALSE GREEN. With no verifier key the signature cannot be checked at
+//    all, and verifyCheckpointSig returns null — neither pass nor fail. Folding
+//    null in with true puts a green tick on a proof whose checkpoint nobody
+//    authenticated. /check already refuses to do this; this page must too.
+VKEY = '';
+LOOKUP = GOOD; LOOKUP_STATUS = 200;
+await loadRecord(P); await settle();
+const nokey = document.getElementById('proofpanel').innerHTML;
+if (nokey.includes('checked in your browser'))
+  throw new Error('an UNVERIFIED signature still produced the green verdict: ' + nokey.slice(0, 400));
+if (!nokey.includes('partly checked'))
+  throw new Error('the unchecked signature was not reported as partial: ' + nokey.slice(0, 400));
+if (!/NOT checked/.test(nokey))
+  throw new Error('the panel does not say the signature went unchecked: ' + nokey.slice(0, 400));
+// And it must not overstate what the two remaining checks establish.
+if (!/self-consistent|internally consistent/.test(nokey))
+  throw new Error('the panel implies the root check proves origin: ' + nokey.slice(0, 400));
+
+// 7. A 404 must not be announced as a revocation. Namespace typos, missing
+//    registries and revoked records all return the same status, so the page may
+//    only report what it can show.
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 404;
+ROWS.length = 0;                        // nothing in the list claims a state
+await loadRecord(P); await settle();
+const missing = document.getElementById('detail').innerHTML + ' ' + document.getElementById('nshist').innerHTML;
+if (/nothing was erased|still provable/i.test(missing))
+  throw new Error('a bare 404 was announced as a revocation: ' + missing.slice(0, 400));
+if (!/does not answer for this name/.test(missing))
+  throw new Error('a 404 was not explained at all: ' + missing.slice(0, 400));
+
+// 8. When the log DOES still hold versions, say so — that is the real revoked
+//    case and the one worth showing.
+VERSIONS_STATUS = 200;
+await loadRecord(P); await settle();
+// The surviving-versions sentence is written into #nshist once the versions
+// call returns, so read that element rather than the parent's markup: this
+// fake DOM does not parse HTML, and the parent's string was built before.
+const revoked = document.getElementById('nshist').innerHTML;
+if (!/Nothing was erased/.test(revoked))
+  throw new Error('a name with surviving versions did not report them: ' + revoked.slice(0, 400));
+
+// 9. Navigation must be real links, not handlers: reachable by keyboard, and
+//    with no seam where a name can close an attribute and add script.
+LOOKUP_STATUS = 200; VKEY = KEY;
+ROWS.length = 0;
+ROWS.push({kind:'record', name:"evil' onmouseover='alert(1)", state:'live', meta:''});
+const row = rowHTML(ROWS[0], P);
+if (/onmouseover/.test(row) && !/&#39;/.test(row))
+  throw new Error('a record name escaped its attribute and added a handler: ' + row);
+if (!/<a href="/.test(row)) throw new Error('a list row is not a link, so it cannot be reached by keyboard: ' + row);
 
 console.log('BROWSE-JS-OK');
 `

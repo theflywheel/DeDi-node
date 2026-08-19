@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -76,36 +77,100 @@ func TestGeneratedNavIsBreakable(t *testing.T) {
 	}
 }
 
-// A multi-column layout must have a single-column path for a narrow screen.
+// A multi-column layout must actually resolve to one column on a phone.
 //
-// The browser page introduced the first two-column reading layout, which is a
-// third way to push a phone sideways after the nav and the tables. This does
-// not mandate which direction the media query runs — the pages that already
-// had columns collapse with max-width, the browser expands with min-width, and
-// both give a phone one column — only that a page which can produce two
-// columns can also produce one.
+// The browser page introduced the first two-column reading layout, a third way
+// to push a phone sideways after the nav and the tables.
+//
+// Two earlier versions of this test were wrong in opposite directions, which is
+// worth recording because both looked fine. The first asked only whether a
+// "1fr" and an "@media" appeared somewhere in the file — true of a page whose
+// unconditional rule is two columns. The second tried to honour media queries
+// with a regex, and a regex cannot see a nested block: it read the rules INSIDE
+// every @media as though they were top-level, and reported two pages that were
+// already correct. So this scans braces properly, evaluates each query at a
+// 375px viewport, and asks what each selector actually computes to there.
 func TestEveryMultiColumnLayoutCollapsesOnAPhone(t *testing.T) {
+	const phonePx = 375.0
 	for name, page := range servedPages(t) {
 		css := withoutComments(page)
-		multi := false
-		for _, decl := range regexp.MustCompile(`grid-template-columns:\s*([^;}]+)`).FindAllStringSubmatch(css, -1) {
-			// repeat(auto-fit, minmax(X, 1fr)) already collapses to one column
-			// once the container is narrower than X, with no query involved.
-			// Flagging it cost this test its first run on a page that was
-			// already correct.
-			if strings.Contains(decl[1], "auto-fit") || strings.Contains(decl[1], "auto-fill") {
+		if i := strings.Index(css, "<style>"); i >= 0 {
+			css = css[i+len("<style>"):]
+		}
+		for sel, cols := range effectiveGrids(css, phonePx) {
+			// repeat(auto-fit, minmax(X, 1fr)) resolves to however many columns
+			// fit, and so to one on a narrow container, whatever the written
+			// track list looks like.
+			if strings.Contains(cols, "auto-fit") || strings.Contains(cols, "auto-fill") {
 				continue
 			}
-			if len(strings.Fields(decl[1])) > 1 {
-				multi = true
+			if n := len(strings.Fields(cols)); n > 1 {
+				t.Errorf("%s: at %.0fpx, %q still lays out %d columns (%q)", name, phonePx, sel, n, cols)
 			}
 		}
-		if !multi {
-			continue
-		}
-		single := regexp.MustCompile(`grid-template-columns:\s*1fr\s*[;}]`).MatchString(css)
-		if !single || !strings.Contains(css, "@media") {
-			t.Errorf("%s: lays out in multiple columns with no single-column rule for a narrow screen", name)
+	}
+}
+
+var mediaRE = regexp.MustCompile(`@media[^{]*\((min|max)-width:\s*([0-9.]+)(px|em)\)`)
+
+// effectiveGrids returns, per selector, the grid-template-columns that applies
+// at the given viewport width — later rules winning, and rules inside a query
+// that does not match at that width ignored.
+func effectiveGrids(css string, viewportPx float64) map[string]string {
+	out := map[string]string{}
+	var scan func(s string, active bool)
+	scan = func(s string, active bool) {
+		for i := 0; i < len(s); {
+			open := strings.IndexByte(s[i:], '{')
+			if open < 0 {
+				return
+			}
+			open += i
+			close := matchingBrace(s, open)
+			if close < 0 {
+				return
+			}
+			sel := strings.TrimSpace(s[i:open])
+			body := s[open+1 : close]
+			if strings.HasPrefix(sel, "@media") {
+				applies := false
+				if m := mediaRE.FindStringSubmatch(sel); m != nil {
+					px, _ := strconv.ParseFloat(m[2], 64)
+					if m[3] == "em" {
+						px *= 16 // the pages set no root font-size, so 1em is 16px
+					}
+					applies = (m[1] == "min" && viewportPx >= px) || (m[1] == "max" && viewportPx <= px)
+				}
+				scan(body, active && applies)
+			} else if strings.HasPrefix(sel, "@") {
+				scan(body, active) // @supports and friends: descend, do not filter
+			} else if active {
+				for _, d := range regexp.MustCompile(`grid-template-columns:\s*([^;}]+)`).FindAllStringSubmatch(body, -1) {
+					for _, one := range strings.Split(sel, ",") {
+						out[strings.TrimSpace(one)] = strings.TrimSpace(d[1])
+					}
+				}
+			}
+			i = close + 1
 		}
 	}
+	scan(css, true)
+	return out
+}
+
+// matchingBrace returns the index of the brace closing the one at open.
+func matchingBrace(s string, open int) int {
+	depth := 0
+	for i := open; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
