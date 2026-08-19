@@ -475,7 +475,8 @@ function select(sel){
           'signature against the key ' + esc(a.name) + ' published, and recompute the consistency proof ' +
           'between the root it reports and the target&rsquo;s log right now. None of it goes through ' +
           esc(a.name) + '.</p><p class="mut" style="margin:0 0 .5em">Fetching from <code>' +
-          esc(target) + '</code>.</p><button id="recheck">check it in my browser</button>'
+          esc(target) + '</code>. <a href="/verify">The evidence page</a> shows every hash and byte ' +
+          'this rests on, step by step.</p><button id="recheck">check it in my browser</button>'
         : '<p class="mut" style="margin:0">' + why + '</p>') +
       '<div id="recheck-out"></div></div></div>';
     if (canCheck) $('recheck').onclick = () => recheck(a, b, t);
