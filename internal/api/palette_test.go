@@ -25,17 +25,12 @@ import (
 var bareMono = regexp.MustCompile(`font-family:\s*monospace\s*[;}]`)
 
 func TestEverySurfaceSharesTheTypeAndPalette(t *testing.T) {
-	surfaces := map[string]string{
-		"overview.html": string(overviewHTML),
-		"index.html":    string(explorerHTML),
-		"network.html":  string(networkPageHTML),
-		"status.html":   string(statusPageHTML),
-		"verify.html":   string(verifyHTML),
-		"check.html":    string(checkPageHTML),
-		"docs.html":     string(docsHTML),
-		"admin.html":    string(adminHTML),
-	}
-	for name, page := range surfaces {
+	// Read what is SERVED, not what is on disk. The palette now arrives by
+	// injection from static/components.css, so a page whose source no longer
+	// spells out --ok is correct — and a page that never received the sheet is
+	// the actual bug this test is looking for. Checking the source files would
+	// have inverted both answers.
+	for name, page := range servedPages(t) {
 		if bareMono.MatchString(page) {
 			t.Errorf("%s uses the bare monospace keyword, so it renders at 13px while the "+
 				"pages that name a family render at 16px", name)

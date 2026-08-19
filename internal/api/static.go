@@ -2,7 +2,7 @@ package api
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"html"
 	"net/http"
@@ -42,6 +42,19 @@ var verifyHTML []byte
 //
 //go:embed static/verify.js
 var verifyJS []byte
+
+// componentsCSS is the one definition of the semantic palette and the shared
+// controls. It is spliced into each page rather than linked; the reasoning is
+// written at the top of the file itself.
+//
+//go:embed static/components.css
+var componentsCSS []byte
+
+// staticPages is the whole page directory, so tests can walk every surface
+// rather than trusting a hand-maintained list of them.
+//
+//go:embed static/*.html
+var staticPages embed.FS
 
 // defaultDemoURL is the flywheel reference demo, used when the operator sets
 // no DEDI_DEMO_URL of their own.
@@ -102,6 +115,7 @@ func (s *Server) checkPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writePage(w http.ResponseWriter, page []byte, current string) {
 	page = bytes.Replace(page, []byte("{{DEMO_URL}}"), []byte(s.demoHref()), 1)
 	page = bytes.Replace(page, []byte("{{NAV}}"), []byte(s.nav(current)), 1)
+	page = bytes.Replace(page, []byte("{{SHARED_CSS}}"), componentsCSS, 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(page)
 }

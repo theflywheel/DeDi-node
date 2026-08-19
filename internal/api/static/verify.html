@@ -6,10 +6,14 @@
 <meta name="dedi-verifier-key" content="{{VERIFIER_KEY}}">
 <title>DeDi &middot; Witness evidence</title>
 <style>
+  {{SHARED_CSS}}
+  /* Page-local additions: the tinted panel grounds, and a lighter rule than the
+     shared #ccc for the dense evidence tables. --new is this page's hover
+     accent and is deliberately NOT --wit: nothing here is claiming a witness. */
   :root {
-    --ink: #1a1a1a; --mut: #6b6b6b; --line: #d8d8d8; --panel: #f6f6f4;
-    --ok: #1a7f37; --okbg: #eaf4ec; --bad: #b42318; --badbg: #fbeceb;
-    --new: #1f6feb; --newbg: #e8f0fe; --warn: #8a6d1f; --warnbg: #fbf5e3;
+    --ink: #1a1a1a; --line: #d8d8d8; --panel: #f6f6f4;
+    --okbg: #eaf4ec; --badbg: #fbeceb;
+    --new: #1f6feb; --newbg: #e8f0fe; --warnbg: #fbf5e3;
   }
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink);

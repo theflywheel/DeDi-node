@@ -1,0 +1,58 @@
+/* The shared vocabulary: semantic tokens, buttons, and pills.
+ *
+ * This file is injected into every page's <style> block at serve time (see
+ * writePage in static.go, and docLayoutAt in docsmd.go), not linked with a
+ * <link>. The reason is the one already written down at docsmd.go: a page that
+ * needs a stylesheet fetch is a page that renders unstyled the one time the
+ * network is the thing going wrong — and an unstyled /verify is a page asking
+ * to be trusted while visibly broken. Injection also removes the whole class of
+ * bugs where a cached sheet and a freshly deployed binary disagree about what
+ * a green pill means.
+ *
+ * It exists because the token line below had already been copy-pasted into
+ * nine separate <style> blocks, and had already drifted: the generated
+ * documentation pages were missing --warn entirely. That is the same failure
+ * the nav had (see nav.go), caught earlier.
+ */
+
+/* The only five colours that carry meaning. Anything else is ink or a border.
+ *
+ * --wit is separate from --ok on purpose: witnessing is an independent party
+ * proving this node's history, which is a different claim from a check that
+ * happened to pass, and the two must never be told apart by shade alone. */
+:root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
+
+/* Buttons.
+ *
+ * The bare element gets the secondary treatment rather than the browser
+ * default, because the default border is invisible against the #f4f4f4 used
+ * for banners and table headers — a control you cannot see is a control that
+ * is not there. Emphasis is opt-in through .btn-primary, so a page has to
+ * choose its one loudest action deliberately. */
+button, .btn {
+  /* 1em, not smaller: a button sits beside inputs that are 1em, and a label
+     that typesets below its own field reads as secondary to it. */
+  font-family: inherit; font-size: 1em; line-height: 1.4;
+  padding: .3em .9em; border-radius: 3px; cursor: pointer;
+  background: #fff; border: 1px solid #767676; color: #1a1a1a;
+}
+.btn-primary { background: #1a1a1a; border-color: #1a1a1a; color: #fff; }
+button:disabled, .btn:disabled { color: var(--mut); border-color: #ccc; cursor: default; }
+
+/* Pills: a short piece of state next to the thing it describes.
+ *
+ * These rules change ONLY the colour. Colour alone does not survive greyscale
+ * printing or a reader who cannot separate green from red, and --ok green and
+ * --bad red sit at nearly the same luminance (0.157 and 0.110), so they are
+ * close to indistinguishable once the hue is gone. The markup must therefore
+ * carry the distinction in its text: write <span class="pill pill-ok">
+ * &#10003; verified</span> with a leading glyph, never a bare coloured word.
+ * Said explicitly because the first version of this comment claimed the CSS
+ * supplied that glyph, and it does not. */
+.pill {
+  display: inline-block; font-size: .85em; padding: 0 .4em;
+  border: 1px solid #ccc; border-radius: 3px; white-space: nowrap;
+}
+.pill-ok  { border-color: var(--ok);  color: var(--ok); }
+.pill-bad { border-color: var(--bad); color: var(--bad); }
+.pill-wit { border-color: var(--wit); color: var(--wit); }
