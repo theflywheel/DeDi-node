@@ -1,6 +1,7 @@
 package api
 
 import (
+	"embed"
 	"math"
 	"net/http/httptest"
 	"regexp"
@@ -16,6 +17,17 @@ import (
 // so a warning rendered there as unstyled inherited ink. These tests are about
 // the two ways that recurs: a page that never receives the sheet, and a page
 // that receives it and then quietly redefines part of it locally.
+
+// staticPages is the whole page directory, so the walk below covers every
+// surface rather than trusting a hand-maintained list.
+//
+// It lives in the test file on purpose: each page is already embedded
+// individually for serving, so a second //go:embed of the directory in
+// production code would carry a duplicate copy of every page in the shipped
+// binary to satisfy a test.
+//
+//go:embed static/*.html
+var staticPages embed.FS
 
 // servedPages renders every page through the real write path, so a placeholder
 // nobody substituted shows up as the served bytes rather than being masked by
@@ -108,7 +120,7 @@ func TestNoPageRedefinesTheSharedTokensOrComponents(t *testing.T) {
 	// border-color a variant had just set — so `class="pill pill-ok"` would have
 	// rendered grey on that page alone. A guard that only sees .pill- is the
 	// "added to one implementation and not the other" bug in miniature.
-	local := regexp.MustCompile(`(--ok|--bad|--wit|--warn):|\.pill[ ,{]|\.pill-|\.btn-primary`)
+	local := regexp.MustCompile(`(--ok|--bad|--mut|--wit|--warn):|\.pill[ ,{]|\.pill-|\.btn-primary`)
 	for name, raw := range map[string][]byte{
 		"overview.html": overviewHTML, "index.html": explorerHTML,
 		"network.html": networkPageHTML, "status.html": statusPageHTML,

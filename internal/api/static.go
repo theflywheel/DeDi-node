@@ -2,7 +2,7 @@ package api
 
 import (
 	"bytes"
-	"embed"
+	_ "embed"
 	"encoding/json"
 	"html"
 	"net/http"
@@ -49,12 +49,6 @@ var verifyJS []byte
 //
 //go:embed static/components.css
 var componentsCSS []byte
-
-// staticPages is the whole page directory, so tests can walk every surface
-// rather than trusting a hand-maintained list of them.
-//
-//go:embed static/*.html
-var staticPages embed.FS
 
 // defaultDemoURL is the flywheel reference demo, used when the operator sets
 // no DEDI_DEMO_URL of their own.
