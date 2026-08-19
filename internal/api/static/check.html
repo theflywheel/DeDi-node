@@ -164,6 +164,23 @@ async function check(){
       // "nothing was compared" and REFUSED a perfectly valid proof — a false
       // rejection, which tells an honest reader their record is not in the log.
       const kind = p.leaf.entry_type || 'record';
+
+      // The leaf must not get to choose which fields are compared.
+      //
+      // Taking `kind` from the leaf alone let an envelope pair a namespace
+      // proof — whose branch only binds the namespace — with record-shaped
+      // data, and the record's own name and registry were then never looked
+      // at. Picking the leaf picked the weakest branch.
+      //
+      // So the response's own shape is derived and required to agree. The DTOs
+      // are cleanly distinguishable: a record carries record_name, a registry
+      // carries registry_id without one, a namespace carries neither.
+      const dataKind = d.record_name !== undefined ? 'record'
+                     : d.registry_id !== undefined ? 'registry'
+                     : d.name !== undefined ? 'namespace'
+                     : 'unrecognised';
+      bind('entry type', dataKind, kind);
+
       if (kind === 'namespace') {
         bind('namespace', d.name || d.namespace_id || d.namespace, p.leaf.namespace);
       } else if (kind === 'registry') {

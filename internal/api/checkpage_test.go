@@ -240,6 +240,29 @@ if (!hi.includes('\u2713 The record shown is the one the proof covers')) {
   }
 }
 
+// The leaf must not choose which fields are compared. Pairing a namespace
+// proof with record-shaped data selected the branch that binds least, and the
+// record's own name and registry were never looked at.
+{
+  const nsEnv = JSON.parse(NS);
+  const recEnv = JSON.parse(GOOD);
+  const spliced = { data: recEnv.data, proof: nsEnv.proof };
+  // Make every field the namespace branch DOES compare agree, so only the
+  // entry-type check can catch it.
+  spliced.data.digest = nsEnv.data.digest;
+  spliced.data.version = nsEnv.data.version;
+  spliced.data.created_by = nsEnv.data.created_by;
+  spliced.data.updated_at = nsEnv.data.updated_at;
+  spliced.data.name = nsEnv.data.name;
+  document.getElementById('doc').value = JSON.stringify(spliced);
+  document.getElementById('vkey').value = VKEY;
+  await check();
+  const mix = out.innerHTML;
+  if (mix.includes('\u2713 The record shown is the one the proof covers')) {
+    throw new Error('a namespace proof beside record data passed the bind: ' + mix.slice(0, 300));
+  }
+}
+
 // A proof claiming a different tree size than the checkpoint signed is not
 // bound to that checkpoint, however well the root happens to compare.
 {
