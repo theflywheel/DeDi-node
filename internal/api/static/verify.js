@@ -32,8 +32,24 @@ async function proofRoot(path, t, n, leaf){
 
 // Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes. JSON.stringify
 // and Go json.Marshal agree for ASCII payloads (no <,>,& in these fields).
+// The leaf preimage must be byte-identical to internal/merkle.LeafBytes, which
+// builds it with Go's encoding/json — and Go escapes <, > and & in strings by
+// default, plus U+2028 and U+2029. JSON.stringify escapes none of them.
+//
+// None of those characters is structural in JSON, so they can only appear
+// inside a string value and replacing them in the finished output is exact.
+//
+// The store accepts them in a namespace, registry, record name or author, so
+// without this a perfectly valid inclusion proof for a record named
+// "a&b.example" is reported as not folding to the root — the verifier calling
+// an honest node a liar.
+const GO_ESCAPES = { '<': '\\u003c', '>': '\\u003e', '&': '\\u0026',
+                     '\u2028': '\\u2028', '\u2029': '\\u2029' };
+function goJSON(v){
+  return JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, c => GO_ESCAPES[c]);
+}
 function leafBytes(L){
-  return te.encode(JSON.stringify([
+  return te.encode(goJSON([
     "dedi/v1/leaf", L.entry_type, L.namespace, L.registry, L.record_name,
     L.version_num, L.digest, L.created_by, L.created_at ]));
 }
