@@ -228,6 +228,15 @@ async function check(){
       'proof says ' + num(p.tree_size) + ', the signed checkpoint says ' + num(cp.size) + '.');
 
     // 3. fold the path
+    //
+    // The index is validated here as well as in proofRoot, so the reader gets
+    // a sentence about the envelope rather than a thrown error about the fold.
+    if (!Number.isInteger(p.leaf_index) || !Number.isInteger(p.tree_size) ||
+        p.tree_size < 1 || p.leaf_index < 0 || p.leaf_index >= p.tree_size) {
+      html += step('fail', 'The proof names a position that is not in the tree',
+        'leaf ' + esc(String(p.leaf_index)) + ' of a tree of ' + esc(String(p.tree_size)) + '.');
+      throw new Error('leaf_index ' + p.leaf_index + ' is not within a tree of size ' + p.tree_size);
+    }
     const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, leaf);
 
     const rootsMatch = eq(root, cp.root);

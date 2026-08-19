@@ -191,6 +191,27 @@ if (!hi.includes('\u2713 The record shown is the one the proof covers')) {
   throw new Error('an honest historical proof failed the bind: ' + hi.slice(0, 300));
 }
 
+// An envelope may not move the record to a log position the proof does not
+// cover. proofRoot's base case returned the leaf for ANY index in a size-1
+// tree, so a single-entry proof could claim leaf_index 999 — and with
+// data.version edited to match, the bind passed and the fold still reached the
+// signed root. A green verdict for a position nothing proves.
+{
+  const env = JSON.parse(GOOD);
+  env.proof.leaf_index = 999999;
+  env.data.version = '999999';
+  document.getElementById('doc').value = JSON.stringify(env);
+  document.getElementById('vkey').value = VKEY;
+  await check();
+  const ix = out.innerHTML;
+  if (ix.includes('\u2713 This record is in the log')) {
+    throw new Error('an out-of-range leaf index still verified: ' + ix.slice(0, 300));
+  }
+  if (!ix.includes('not in the tree')) {
+    throw new Error('the bad index was not reported as its own step: ' + ix.slice(0, 300));
+  }
+}
+
 // A proof claiming a different tree size than the checkpoint signed is not
 // bound to that checkpoint, however well the root happens to compare.
 {

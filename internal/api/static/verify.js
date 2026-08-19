@@ -23,15 +23,24 @@ function maxpow2(n){ let k=1; while((k<<1) < n) k<<=1; return k; } // largest po
 
 // Recursive RFC 6962 record-proof verification, matching x/mod/sumdb/tlog.
 async function proofRoot(path, t, n, leaf){
-  if(t===1){ if(path.length!==0) throw new Error('proof len'); return leaf; }
+  // The base case reached with a non-zero index means the index was never in
+  // the tree: every legitimate recursion subtracts k until n is 0 at a leaf.
+  // Without this a size-1 proof returned its leaf for ANY index, so an envelope
+  // could claim leaf_index 999 in a tree of 1 and still fold to the signed
+  // root. Go's tlog rejects that; this was the more permissive of the two.
+  if(t===1){
+    if(path.length!==0) throw new Error('proof len');
+    if(n!==0) throw new Error('leaf index ' + n + ' is not in a tree of size 1');
+    return leaf;
+  }
   if(path.length===0) throw new Error('empty path');
   const k = maxpow2(t), top = path[path.length-1], rest = path.slice(0,-1);
   if(n < k){ return nodeHash(await proofRoot(rest, k, n, leaf), top); }
   return nodeHash(top, await proofRoot(rest, t-k, n-k, leaf));
 }
 
-// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes. JSON.stringify
-// and Go json.Marshal agree for ASCII payloads (no <,>,& in these fields).
+// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes.
+//
 // The leaf preimage must be byte-identical to internal/merkle.LeafBytes, which
 // builds it with Go's encoding/json — and Go escapes <, > and & in strings by
 // default, plus U+2028 and U+2029. JSON.stringify escapes none of them.
