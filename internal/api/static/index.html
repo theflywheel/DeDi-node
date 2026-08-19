@@ -196,8 +196,7 @@ async function loadCheckpoint(){
   // to check the signature against.
   // The standing claim at the top of the page is only half true without a key,
   // and it is made before the reader has opened anything. Written in both
-  // directions rather than only overwritten in the bad case: a guard that fires
-  // one way leaves the wrong text on screen the moment anything else moves.
+  // directions, so the sentence always matches the configuration.
   const banner = $('banner');
   if(banner) banner.innerHTML = VKEY
     ? 'Public, read-only directory over a Merkle transparency log. Inclusion proofs and the ' +
@@ -338,10 +337,6 @@ function kv(rows){
   return '<div class="tw"><table>' + rows.map(([k,v]) =>
     '<tr><th scope="row">'+esc(k)+'</th><td>'+v+'</td></tr>').join('') + '</table></div>';
 }
-function stateOf(name){
-  const r = ROWS.find(x => x.name === name && x.kind === 'record');
-  return r ? String(r.state || '') : '';
-}
 
 function loadRecord(p, seq){
   seq = seq === undefined ? ++SEQ : seq;
@@ -388,19 +383,32 @@ function loadRecord(p, seq){
 // show: the list's own word for this row if there is one, and the history only
 // once the log has actually returned some.
 function notServed(p, seq){
-  const claimed = stateOf(p.rec);
-  const pill = claimed
-    ? '<span class="pill pill-bad">&#10007; '+esc(claimed)+'</span>'
-    : '<span class="pill">not answered</span>';
-  $('detail').innerHTML = '<h2 class="hrow">'+esc(p.rec)+' '+pill+'</h2>' +
-    '<div class="panel idle" id="nspanel"><p>' +
-    (claimed
-      ? 'This node lists this record as <b>'+esc(claimed)+'</b> and does not serve a current version of it.'
-      : 'This node does not answer for this name. That may be because it was revoked, or because no ' +
-        'such record, registry or namespace exists here &mdash; the log returns the same 404 for all of ' +
-        'them, so this page will not guess between them.') +
-    '</p><p class="mut" id="nshist">looking for earlier versions&hellip;</p></div>' +
+  $('detail').innerHTML = '<h2 class="hrow">'+esc(p.rec)+' <span class="pill">not answered</span></h2>' +
+    '<div class="panel idle" id="nspanel"><p id="nswhy">This node does not answer for this name. ' +
+    'That may be because it was revoked, or because no such record, registry or namespace exists ' +
+    'here &mdash; the log returns the same 404 for all of them, so this page will not guess between ' +
+    'them.</p><p class="mut" id="nshist">looking for earlier versions&hellip;</p></div>' +
     '<div id="history"></div>';
+
+  // The registry's own listing, fetched for THIS namespace and registry.
+  //
+  // An earlier version read the state out of the ROWS cache, but render() starts
+  // the list and the record load at the same time, so on a deep link ROWS is
+  // either empty or still holds the previous registry — and a record of the same
+  // name in a different registry would have had its state reported for this one.
+  // An ungrounded state claim is the thing this whole panel was rewritten to
+  // stop making; taking it from a cache that may be about something else is the
+  // same mistake wearing a different hat.
+  jget('/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)).then(j => {
+    if(seq !== SEQ) return;
+    const row = ((j.data && j.data.records) || []).find(r => r.record_name === p.rec);
+    if(!row || !row.state) return;
+    const h2 = document.querySelector('#detail h2'), why = $('nswhy');
+    if(h2) h2.innerHTML = esc(p.rec) + ' <span class="pill pill-bad">&#10007; '+esc(row.state)+'</span>';
+    if(why) why.innerHTML = 'This node lists this record as <b>'+esc(row.state)+'</b> and does not ' +
+      'serve a current version of it.';
+  }).catch(() => {});
+
   jget('/dedi/versions/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)+'/'+encodeURIComponent(p.rec))
     .then(j => {
       if(seq !== SEQ) return;
@@ -563,9 +571,15 @@ function renderHistory(p, vs, shown){
 // Every load carries the sequence number it started with and drops its result
 // if another navigation has happened since. Without it, clicking record A then
 // record B could paint A's detail — and A's green verdict — over B.
+let LISTED = '';
 function render(){
   const seq = ++SEQ;
   const p = here();
+  // A filter belongs to the list it was typed into. Carrying it across meant
+  // landing on a different registry already narrowed by a word from the last
+  // one, with the box looking half-empty for no visible reason.
+  const listKey = p.ns + '\u0000' + p.reg;
+  if(listKey !== LISTED){ FILTER = ''; LISTED = listKey; }
   crumb(p);
   loadList(p, seq);
   if(p.ns && p.reg && p.rec){

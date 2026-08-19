@@ -93,9 +93,23 @@ func TestGeneratedNavIsBreakable(t *testing.T) {
 func TestEveryMultiColumnLayoutCollapsesOnAPhone(t *testing.T) {
 	const phonePx = 375.0
 	for name, page := range servedPages(t) {
-		css := withoutComments(page)
-		if i := strings.Index(css, "<style>"); i >= 0 {
-			css = css[i+len("<style>"):]
+		// Only the stylesheet blocks. Slicing from <style> to the end of the
+		// document fed the page's JavaScript to a brace scanner as well, which
+		// happens to be harmless today and would not stay that way.
+		css := ""
+		for rest := withoutComments(page); ; {
+			i := strings.Index(rest, "<style>")
+			if i < 0 {
+				break
+			}
+			rest = rest[i+len("<style>"):]
+			j := strings.Index(rest, "</style>")
+			if j < 0 {
+				css += rest
+				break
+			}
+			css += rest[:j] + "\n"
+			rest = rest[j:]
 		}
 		for sel, cols := range effectiveGrids(css, phonePx) {
 			// repeat(auto-fit, minmax(X, 1fr)) resolves to however many columns

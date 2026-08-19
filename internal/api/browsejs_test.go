@@ -107,6 +107,7 @@ globalThis.document = {
   querySelector: sel => {
     if (sel.startsWith('meta')) return { content: KEY };
     if (sel === '.rows') return mk('rows');
+    if (sel === '#detail h2') return mk('detailh2');
     return null;
   },
   addEventListener(){},
@@ -122,6 +123,7 @@ globalThis.requestAnimationFrame = fn => fn();
 let LOOKUP = GOOD;
 let LOOKUP_STATUS = 200;
 let VERSIONS_STATUS = 200;
+let QUERY_RECORDS = [];
 globalThis.fetch = async (url) => {
   if (url.includes('/dedi/log/checkpoint')) return { ok: true, text: async () => CKPT };
   if (url.includes('/dedi/versions/'))
@@ -133,7 +135,8 @@ globalThis.fetch = async (url) => {
       ? { ok: true, json: async () => JSON.parse(LOOKUP) }
       : { ok: false, status: LOOKUP_STATUS, json: async () => ({}) };
   if (url.includes('/.well-known/')) return { ok: true, json: async () => ({files: []}) };
-  if (url.includes('/dedi/query/'))         return { ok: true, json: async () => ({data:{registries:[],records:[]}}) };
+  if (url.includes('/dedi/query/'))
+    return { ok: true, json: async () => ({data:{registries:[], records: QUERY_RECORDS}}) };
   return { ok: false, status: 404, json: async () => ({}) };
 };
 const settle = () => new Promise(r => setTimeout(r, 50));
@@ -274,6 +277,31 @@ await loadCheckpoint();
 const keyed = document.getElementById('banner').innerHTML;
 if (/cannot be checked/.test(keyed))
   throw new Error('a node WITH a key wrongly says signatures cannot be checked: ' + keyed.slice(0, 300));
+
+
+// 11. A STATE CLAIM MUST BE ABOUT THIS RECORD. render() starts the list and the
+//     record load together, so on a deep link the row cache is empty or still
+//     holds the previous registry. Reporting a state out of it would attach one
+//     record's status to a different record that happens to share a name — an
+//     ungrounded claim of exactly the kind this panel was rewritten to stop.
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 404;
+ROWS.length = 0;
+ROWS.push({kind:'record', name:'bap.example.com', state:'revoked', meta:''});  // stale: another registry
+QUERY_RECORDS = [];                       // the authority for THIS registry lists nothing
+await loadRecord(P); await settle();
+// Match the CLAIM, not the word. The neutral copy legitimately contains
+// "revoked" while explaining that it will not guess, and an earlier version of
+// this assertion failed on that sentence.
+const stale = document.getElementById('detail').innerHTML + document.getElementById('nswhy').innerHTML;
+if (/lists this record as/.test(stale) || /pill-bad/.test(stale))
+  throw new Error('a state was claimed from a stale list cache: ' + stale.slice(0, 400));
+
+// And when the registry's own listing DOES name it, the state is reported.
+QUERY_RECORDS = [{record_name: 'bap.example.com', state: 'revoked'}];
+await loadRecord(P); await settle();
+const grounded = document.getElementById('nswhy').innerHTML;
+if (!/lists this record as <b>revoked<\/b>/.test(grounded))
+  throw new Error('an authoritative state was not reported: ' + grounded.slice(0, 300));
 
 console.log('BROWSE-JS-OK');
 `
