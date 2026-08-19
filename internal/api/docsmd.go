@@ -408,7 +408,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   code { background: #f4f4f4; padding: 0 .2em; }
   pre code { background: none; padding: 0; }
   blockquote { border-left: 3px solid #ccc; margin: .8em 0; padding: 0 0 0 .8em; color: #444; }
-  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; }
+` + string(componentsCSS) + `
   .mut { color: var(--mut); }
   .back { margin-top: 2.5em; border-top: 1px solid #ddd; padding-top: .8em; }
   /* Contents beside the page, not under it. Nineteen documents with a reading
@@ -417,7 +417,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   .doc.solo { grid-template-columns: 1fr; }
   .doc main { min-width: 0; }
   .toc { position: sticky; top: 1em; font-size: .9em; border-right: 1px solid #eee; padding-right: 1em; }
-  .toc .sec { color: #666; text-transform: uppercase; letter-spacing: .06em; font-size: .82em;
+  .toc .sec { color: var(--mut); text-transform: uppercase; letter-spacing: .06em; font-size: .82em;
               margin: 1.1em 0 .3em; }
   .toc .sec:first-child { margin-top: 0; }
   .toc a, .toc .here { display: block; padding: .12em 0; }
