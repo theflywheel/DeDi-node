@@ -69,6 +69,88 @@ var (
 	docsErr    error
 )
 
+// readingOrder flattens the sections into the sequence they are meant to be
+// read in. The order already existed in `sections`; nothing surfaced it, so a
+// reader arriving at one page had no way to know it sat fourth of three in
+// "Operating it", or what came next.
+func readingOrder() []string {
+	var out []string
+	for _, sec := range sections {
+		out = append(out, sec.Slugs...)
+	}
+	return out
+}
+
+// docSidebar renders the whole contents with the current page marked.
+//
+// Every page carries it, rather than a link back to an index, because the index
+// was a footer: at line 128 of a 148-line page, a reader had to scroll past the
+// entire explainer to discover the documentation existed. Nineteen documents
+// with a deliberate reading order need navigation present, not findable.
+func docSidebar(current string, docs map[string]*doc) string {
+	var b strings.Builder
+	b.WriteString(`<nav class="toc" aria-label="Documentation">`)
+	for _, sec := range sections {
+		b.WriteString(`<div class="sec">`)
+		b.WriteString(html.EscapeString(sec.Name))
+		b.WriteString(`</div>`)
+		for _, slug := range sec.Slugs {
+			d, ok := docs[slug]
+			if !ok {
+				continue
+			}
+			if slug == current {
+				// Not a link: a reader should be able to see where they are
+				// without reading every href, and aria-current says the same
+				// thing to a screen reader.
+				b.WriteString(`<span class="here" aria-current="page">`)
+				b.WriteString(html.EscapeString(d.Title))
+				b.WriteString(`</span>`)
+				continue
+			}
+			b.WriteString(`<a href="/docs/` + slug + `">`)
+			b.WriteString(html.EscapeString(d.Title))
+			b.WriteString(`</a>`)
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</nav>`)
+	return b.String()
+}
+
+// docPrevNext renders the steps either side of this page in the reading order.
+func docPrevNext(current string, docs map[string]*doc) string {
+	order := readingOrder()
+	i := -1
+	for n, slug := range order {
+		if slug == current {
+			i = n
+			break
+		}
+	}
+	if i < 0 {
+		return ""
+	}
+	link := func(slug, label string) string {
+		d, ok := docs[slug]
+		if !ok {
+			return ""
+		}
+		return `<a href="/docs/` + slug + `">` + label + " " + html.EscapeString(d.Title) + `</a>`
+	}
+	var prev, next string
+	if i > 0 {
+		prev = link(order[i-1], "←")
+	}
+	if i < len(order)-1 {
+		next = link(order[i+1], "→")
+	}
+	if prev == "" && next == "" {
+		return ""
+	}
+	return `<div class="pn"><span>` + prev + `</span><span>` + next + `</span></div>`
+}
+
 // mermaidFence rewrites goldmark's output for a ```mermaid block into the shape
 // the pages already use. The explainer page at /docs has rendered diagrams this
 // way since before there was a markdown plane, and having two conventions would
@@ -257,7 +339,7 @@ func (s *Server) docPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, s.docLayout(d.Title, d.Body))
+	fmt.Fprint(w, s.docLayoutAt(r.PathValue("page"), d.Title, d.Body))
 }
 
 // docLayout wraps rendered markdown in the same shell the other embedded pages
@@ -265,6 +347,17 @@ func (s *Server) docPage(w http.ResponseWriter, r *http.Request) {
 // a documentation page that needs a stylesheet fetch is a page that renders
 // unstyled the one time the network is the thing going wrong.
 func (s *Server) docLayout(title, body string) string {
+	return s.docLayoutAt("", title, body)
+}
+
+// docLayoutAt renders a page that knows where it sits in the documentation.
+func (s *Server) docLayoutAt(slug, title, body string) string {
+	docs, _ := loadDocs()
+	side, pn := "", ""
+	if docs != nil && slug != "" {
+		side = docSidebar(slug, docs)
+		pn = docPrevNext(slug, docs)
+	}
 	return `<!doctype html>
 <html lang="en">
 <head>
@@ -289,12 +382,33 @@ func (s *Server) docLayout(title, body string) string {
   blockquote { border-left: 3px solid #ccc; margin: .8em 0; padding: 0 0 0 .8em; color: #444; }
   .mut { color: #666; }
   .back { margin-top: 2.5em; border-top: 1px solid #ddd; padding-top: .8em; }
+  /* Contents beside the page, not under it. Nineteen documents with a reading
+     order need navigation that is present rather than findable. */
+  .doc { display: grid; grid-template-columns: 15em 1fr; gap: 0 2.2em; align-items: start; }
+  .doc main { min-width: 0; }
+  .toc { position: sticky; top: 1em; font-size: .9em; border-right: 1px solid #eee; padding-right: 1em; }
+  .toc .sec { color: #666; text-transform: uppercase; letter-spacing: .06em; font-size: .82em;
+              margin: 1.1em 0 .3em; }
+  .toc .sec:first-child { margin-top: 0; }
+  .toc a, .toc .here { display: block; padding: .12em 0; }
+  .toc .here { font-weight: bold; border-left: 2px solid #1f4788; padding-left: .5em; margin-left: -.6em; }
+  .pn { display: flex; justify-content: space-between; gap: 1em; margin-top: 2.5em;
+        border-top: 1px solid #ddd; padding-top: .8em; font-size: .95em; }
+  .pn span { flex: 1 1 0; }
+  .pn span:last-child { text-align: right; }
+  @media (max-width: 52em) {
+    .doc { grid-template-columns: 1fr; }
+    .toc { position: static; border-right: 0; border-bottom: 1px solid #eee;
+           padding: 0 0 .8em; margin-bottom: 1.2em; }
+    .toc a, .toc .here { display: inline-block; margin-right: 1em; }
+  }
 </style>
 </head>
 <body>
 ` + s.nav("/docs") + `
-` + body + `
+<div class="doc">` + side + `<main>` + body + pn + `
 <p class="back"><a href="/docs">← All documentation</a></p>
+</main></div>
 ` + mermaidRuntime(body) + `</body>
 </html>`
 }
