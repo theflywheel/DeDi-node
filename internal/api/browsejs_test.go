@@ -346,6 +346,21 @@ await settle(); await settle();
 if (ROWS.length !== 250)
   throw new Error('the list holds ' + ROWS.length + ' of 250 records — the rest were dropped in silence');
 
+
+// 13. The grounding query must drain pages too. A revoked record sitting past
+//     the first page of its registry would otherwise fall back to the neutral
+//     copy while its own registry names it — safe, but inconsistent with the
+//     list beside it, which does page.
+QUERY_RECORDS = [];
+for (let i = 0; i < 120; i++) QUERY_RECORDS.push({record_name: 'filler-' + i, state: 'live'});
+QUERY_RECORDS.push({record_name: 'bap.example.com', state: 'revoked'});   // row 121
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 200;
+document.getElementById('nswhy').innerHTML = '';
+await loadRecord(P); await settle(); await settle();
+const deep = document.getElementById('nswhy').innerHTML;
+if (!/lists this record as <b>revoked<\/b>/.test(deep))
+  throw new Error('a record past the first page was not grounded: ' + deep.slice(0, 300));
+
 console.log('BROWSE-JS-OK');
 `
 

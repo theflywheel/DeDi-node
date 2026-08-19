@@ -37,7 +37,7 @@
 
   /* The two-column reading layout from the design: the list of things on the
      left, the selected thing on the right.
-     
+
      Single column is the DEFAULT and the wide layout is the exception, rather
      than the other way round. This page has shipped a horizontal-scroll bug on
      a phone twice — a nav with no break opportunities, and tables of digests —
@@ -434,9 +434,12 @@ function notServed(p, seq){
   // An ungrounded state claim is the thing this whole panel was rewritten to
   // stop making; taking it from a cache that may be about something else is the
   // same mistake wearing a different hat.
-  jget('/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)).then(j => {
+  // Drains the pages, like the list does. Reading only the first page meant a
+  // revoked record beyond row 25 fell back to the neutral copy even though its
+  // own registry names it — failing safe, but inconsistently.
+  queryAll('/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg), 'records', 'total_records').then(({rows}) => {
     if(seq !== SEQ) return;
-    const row = ((j.data && j.data.records) || []).find(r => r.record_name === p.rec);
+    const row = rows.find(r => r.record_name === p.rec);
     if(!row || !row.state) return;
     const h2 = document.querySelector('#detail h2'), why = $('nswhy');
     if(h2) h2.innerHTML = esc(p.rec) + ' <span class="pill pill-bad">&#10007; '+esc(row.state)+'</span>';
