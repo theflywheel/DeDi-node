@@ -169,15 +169,22 @@ async function check(){
       // different time while everything else matched, and the earlier bind
       // would have called that a match.
       //
-      // Which DTO field to compare each against is not guessable, and getting
-      // it wrong fails every honest record with more than one version:
+      // Which DTO field to compare each against is not guessable:
       //
-      //   leaf.created_at  is data.UPDATED_at   (created_at is the genesis)
-      //   leaf.version_num is data.VERSION_COUNT (version is the sequence id)
+      //   leaf.created_at is data.UPDATED_at   created_at is the genesis time
+      //   proof.leaf_index is data.VERSION     both are the log position
       //
-      // Checked against a live response rather than assumed.
+      // version_count is NOT leaf.version_num. It is the total number of
+      // versions, equal to this entry's number only when you are looking at
+      // the newest one — so binding them rejected every honest historical
+      // proof. Verified against a real one: version_id=425 returns
+      // version_count 6 beside version_num 1.
+      //
+      // data.version is the stronger bind anyway. It is the sequence, so it
+      // ties the record shown to the exact log position being proved, which is
+      // what leaf_index names.
       bind('author', d.created_by, p.leaf.created_by);
-      bind('version', d.version_count, p.leaf.version_num);
+      bind('log position', d.version, p.leaf_index);
       bind('time', d.updated_at, p.leaf.created_at);
     }
     // No data block at all is not a passing bind: there is nothing to tie the

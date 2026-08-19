@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,8 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 		t.Skip("node not installed")
 	}
 	srv, s, vkey := testServer(t)
-	seedBasic(t, s)
+	_, _, rec1, _ := seedBasic(t, s)
+	rec1Version := strconv.FormatInt(rec1.Seq, 10)
 
 	// A real record with a real inclusion proof.
 	resp, err := http.Get(srv.URL + "/dedi/lookup/flywheel/participants/bap.example.com?proof=inclusion")
@@ -55,6 +57,22 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	pageJS = pageJS[:strings.Index(pageJS, "</script>")]
 	// The two handler bindings need elements that exist; the harness supplies them.
 	good, _ := json.Marshal(env)
+
+	// A HISTORICAL version must verify too. The bind briefly compared
+	// data.version_count (the total) to leaf.version_num (this entry's), which
+	// are equal only when you look at the newest version — so every honest
+	// proof for an older one was rejected. seedBasic writes two versions, so
+	// the first is genuinely historical.
+	histResp, err := http.Get(srv.URL + "/dedi/lookup/flywheel/participants/bap.example.com?version_id=" +
+		rec1Version + "&proof=inclusion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	histBody, _ := io.ReadAll(histResp.Body)
+	histResp.Body.Close()
+	if histResp.StatusCode != http.StatusOK {
+		t.Fatalf("historical lookup: %d — %s", histResp.StatusCode, histBody)
+	}
 
 	// Splice: a genuine leaf and proof beside somebody else's record. This is
 	// the attack the fold cannot see, because everything it checks is true —
@@ -89,6 +107,9 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "spliced.json"), splicedJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "hist.json"), histBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	harness := `
 import fs from 'node:fs';
@@ -110,7 +131,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '' });
 const GOOD = fs.readFileSync(process.argv[2], 'utf8');
 const BAD  = fs.readFileSync(process.argv[3], 'utf8');
 const SPLICED = fs.readFileSync(process.argv[4], 'utf8');
-const VKEY = process.argv[5];
+const HIST = fs.readFileSync(process.argv[5], 'utf8');
+const VKEY = process.argv[6];
 `
 	check := `
 const out = document.getElementById('out');
@@ -158,6 +180,17 @@ if (!sp.includes('not about this record')) {
   throw new Error('the splice was not reported: ' + sp.slice(0, 300));
 }
 
+// An honest proof for an OLDER version must verify. This is the false failure,
+// which is quieter than a false pass and just as wrong: a reader checking a
+// historical record is told it is not in the log.
+document.getElementById('doc').value = HIST;
+document.getElementById('vkey').value = VKEY;
+await check();
+const hi = out.innerHTML;
+if (!hi.includes('\u2713 The record shown is the one the proof covers')) {
+  throw new Error('an honest historical proof failed the bind: ' + hi.slice(0, 300));
+}
+
 // A proof claiming a different tree size than the checkpoint signed is not
 // bound to that checkpoint, however well the root happens to compare.
 {
@@ -189,7 +222,7 @@ if (!sp.includes('not about this record')) {
 // rest matched used to collect a green bind.
 for (const [field, value] of [['created_by', 'publisher:someone-else'],
                               ['updated_at', '2001-01-01T00:00:00Z'],
-                              ['version_count', 999]]) {
+                              ['version', 999]]) {
   const env = JSON.parse(GOOD);
   env.data[field] = value;
   document.getElementById('doc').value = JSON.stringify(env);
@@ -247,7 +280,7 @@ console.log('OK');
 	}
 	out, err := exec.Command("node", file,
 		filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json"),
-		filepath.Join(dir, "spliced.json"), vkey).CombinedOutput()
+		filepath.Join(dir, "spliced.json"), filepath.Join(dir, "hist.json"), vkey).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "OK") {
 		t.Fatalf("checker: %v\n%s", err, out)
 	}
