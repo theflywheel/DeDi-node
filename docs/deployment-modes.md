@@ -3,29 +3,54 @@
 dedid ships as one binary with three trust planes. Two of them are **feature
 flags**: set the env vars and the plane turns on, unset them and it does not
 exist. There are no separate builds, images, or migrations between modes; every
-mode is the previous one plus flags, so you can start standalone and upgrade in
+mode is the previous one plus flags, so you can start unwitnessed and upgrade in
 place.
 
 | Mode | What runs | Flags | Defends against |
 |---|---|---|---|
-| **1 · Standalone** | dedid + Postgres | (none) | Silent history rewrites: every read can carry an inclusion proof against a signed checkpoint; clients verify in-browser. Detection requires a client that compares checkpoints over time. |
+| **1 · Unwitnessed** | dedid + Postgres | (none) | Silent history rewrites: every read can carry an inclusion proof against a signed checkpoint; clients verify in-browser. Detection requires a client that compares checkpoints over time. |
 | **2 · Witnessed** | + any other dedid node watching this one | `DEDI_WITNESS_*` on the watcher | Split views and forked history: an independent operator continuously demands consistency proofs and records verdicts in its own log. Cheating becomes *provable by a third party*. |
 | **3 · Anchored** | + a ledger the checkpoints are published to | `DEDI_ANCHOR_*` | Backdating and checkpoint suppression: roots are pinned into an external, ordered timeline the operator does not control. |
 
-**Availability is a separate axis, not a fourth mode.** Any of these can run as
-a Raft cluster of replicas (`DEDI_CLUSTER_*`, see `docs/replication.md`), which
-keeps the directory serving when a machine dies. It is crash tolerance and
-carries no trust claim whatsoever: a quorum of replicas run by one operator
-agrees with that operator. Whatever a node defends against above, it defends
-against exactly as well replicated and unreplicated — no better. Do not present
-replicas as witnesses.
+Mode 1 was called *Standalone* until the node roles below were named, and the
+two meanings collided: a **standalone** node in the role sense — its own key,
+its own log, nothing above it — is a perfectly ordinary thing to run
+*witnessed*. Mode 1 is not about a node's shape, it is about nothing
+independent checking it, so *unwitnessed* is what it always meant.
+
+## Two axes, and they are not the same question
+
+**A mode is how strong the evidence is.** A role is what the node is to the
+others. They cross freely, and confusing them is how a deployment ends up
+feeling safe without being checkable.
+
+| Role | What it is | Weakest mode it can run | Naturally reaches |
+|---|---|---|---|
+| **standalone** | a directory of its own | 1 | 1+2 once a peer witnesses it |
+| **mirror** | serves reads, never routed for writes | 1 | 1+2 — it can be witnessed like any log |
+| **witness** | proves another node's log append-only | 1 | it is what *puts another node in mode 2* |
+| **replica** | one member of a set, fixed at bootstrap | whatever the set runs | no change: replicas carry **no** trust claim |
+| **child** | holds a namespace another node delegates | 1 | 1+2 — the parent normally witnesses it |
+
+Two rows are worth reading twice.
+
+**A witness does not improve its own mode.** Witnessing is something a node does
+*for someone else*: it puts the target in mode 2 and leaves the witness exactly
+where it was. A ring is how everyone reaches mode 2 at once — each node
+witnesses the next, so every node is watched by one it does not control.
+
+**Replicas change no mode at all.** Availability is a third axis
+(`DEDI_CLUSTER_*`, see [replication](/docs/replication)) and carries no trust
+claim whatsoever: a quorum of replicas run by one operator agrees with that
+operator. Whatever a node defends against, it defends against exactly as well
+replicated and unreplicated — no better. Do not present replicas as witnesses.
 
 Modes compose: a production node typically runs 1+2, adds 3 when an external
 timeline is wanted. Nothing about a mode is load-bearing for reads — if a
 witness or anchor target is down, the node serves traffic unaffected and the
 plane retries.
 
-## Mode 1 — Standalone
+## Mode 1 — Unwitnessed
 
 ```sh
 make keygen && docker compose up -d
@@ -113,11 +138,19 @@ layout from on-chain metadata, so the same flags work against:
 
 ## Choosing
 
-- Internal registry, single org: **1**.
-- Public registry, multiple parties rely on it: **1+2** (find one peer; witness
-  each other).
+Pick the **role** from what the node is for, then the **mode** from how much
+the reader needs to be able to check:
+
+- Internal registry, single org: role *standalone*, mode **1**.
+- Public registry, multiple parties rely on it: role *standalone*, mode **1+2**
+  — find one peer and witness each other. Each of you is then in mode 2 because
+  of what the *other* runs.
 - Institutional / cross-network deployments that want an operator-independent
   timeline: **1+2+3**.
+- A namespace someone else should govern: role *child*, and the parent
+  witnesses it, so it arrives in mode 2 rather than being upgraded to it later.
+- Reach without authority: role *mirror*. It cannot write, and everything it
+  serves is still checkable against the origin's own checkpoint.
 
 Add replicas when the cost of the directory being *unreachable* matters — for
 Beckn, an unresolvable subscriber key is a 401 NACK on every message in flight.

@@ -11,6 +11,38 @@ derived at deploy time.
 Your node mints its own Ed25519 identity key on first boot and keeps it in its
 own database. Nothing has to be generated beforehand and handed to it.
 
+## Which node this is
+
+The button deploys a **standalone** node in the role sense: its own identity
+key, its own log, its own origin, nothing above it. It arrives read-only —
+see below — and in mode **1**, meaning nothing independent is checking it yet.
+
+The other four roles are configurations of the same binary, not other products:
+
+| To make it a | set | and read |
+|---|---|---|
+| witness | `DEDI_WITNESS_TARGET_URL` + `_KEY` | [witnessing](/docs/witnessing) |
+| mirror | `DEDI_CRAWL_DOMAINS`, and no publisher keys | [file publication](/docs/file-publication) |
+| replica set member | `DEDI_CLUSTER_*`, the **same** key file and origin on every member | [replication](/docs/replication) |
+| child of another node | an enrolment offer from the parent | [delegation](/docs/delegation) |
+
+A running node's console renders these for you, with only the fields each one
+needs: **Child nodes → what kind of node?**. Two of them cannot be reached by
+editing variables on an existing deployment, and it is worth knowing why before
+you try:
+
+- A **replica set** is a fixed membership decided at bootstrap. This daemon
+  bootstraps a Raft configuration and has no way to add a member to a running
+  cluster, so a set is configured together, once, with
+  `DEDI_CLUSTER_BOOTSTRAP=true` on exactly one member on its first start.
+- A **child** is granted its namespace by a parent, so it needs a one-time
+  enrolment offer minted there. It generates its own key on first boot; a
+  parent that ever held that key could forge the child's checkpoints.
+
+The reverse is easy: this node becomes *witnessed* — mode 2 — when somebody
+else points a witness at it. Nothing changes here at all, which is the point.
+Its verifier key and checkpoint are already public.
+
 ## What you get
 
 Within a couple of minutes:
