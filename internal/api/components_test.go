@@ -168,7 +168,12 @@ func TestButtonBordersAreVisibleAgainstTheBannerGrey(t *testing.T) {
 	if rule == nil {
 		t.Fatal("no button rule in components.css")
 	}
-	border := regexp.MustCompile(`border: 1px solid (#[0-9a-fA-F]{6})`).FindStringSubmatch(rule[1])
+	// Either spelling. The point is that a border colour is declared and that a
+	// reader can see it — not that it was written as the shorthand. Pinning
+	// `border: 1px solid #x` would fail an equivalent refactor to
+	// `border-color:`, which would make this a test about phrasing rather than
+	// about whether the control is visible.
+	border := regexp.MustCompile(`border(?:-color)?:[^;}]*?(#[0-9a-fA-F]{6})`).FindStringSubmatch(rule[1])
 	if border == nil {
 		t.Fatal("the button rule declares no explicit border colour, which is the bug it exists to fix")
 	}
