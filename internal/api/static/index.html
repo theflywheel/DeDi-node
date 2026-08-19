@@ -6,16 +6,37 @@
 <meta name="dedi-verifier-key" content="{{VERIFIER_KEY}}">
 <title>DeDi Node Explorer</title>
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  /* One semantic palette, shared with every other page.
+     These values came from /verify, which had the only considered set: the CSS
+     keyword `green` is a harsh pure hue and #b00 a harsh red, while these are
+     the same meanings at a saturation that reads on a screen. Four pages using
+     four values for "this verified" is the kind of drift a reader feels without
+     being able to name. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: var(--wit); --warn: #8a6d1f; }
+  /* A named family first, deliberately. Bare `font-family: monospace` triggers
+     the browser's monospace font-size quirk: the page renders at the "default
+     fixed" size — 13px in Chrome and Safari — instead of 16px. Every page here
+     except /verify used the bare keyword, so /verify was about a quarter larger
+     than the rest of the site and everything else was cramped on a phone. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
   h1 { font-size: 1.3em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   ul { margin: .3em 0; padding-left: 1.4em; }
   li { margin: .15em 0; }
   a { cursor: pointer; }
-  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
+  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
   #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav a { margin-right: 0; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
 </style>
 </head>
 <body>

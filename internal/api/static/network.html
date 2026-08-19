@@ -5,37 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The ring</title>
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  /* One semantic palette, shared with every other page.
+     These values came from /verify, which had the only considered set: the CSS
+     keyword `green` is a harsh pure hue and #b00 a harsh red, while these are
+     the same meanings at a saturation that reads on a screen. Four pages using
+     four values for "this verified" is the kind of drift a reader feels without
+     being able to name. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: var(--wit); --warn: #8a6d1f; }
+  /* A named family first, deliberately. Bare `font-family: monospace` triggers
+     the browser's monospace font-size quirk: the page renders at the "default
+     fixed" size — 13px in Chrome and Safari — instead of 16px. Every page here
+     except /verify used the bare keyword, so /verify was about a quarter larger
+     than the rest of the site and everything else was cramped on a phone. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
   h1 { font-size: 1.3em; margin: 0 0 .2em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   h3 { font-size: .98em; margin: 1.1em 0 .3em; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav a { margin-right: 0; }
   nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
+
   th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
   th { background: #f4f4f4; font-weight: normal; }
   td.num { font-variant-numeric: tabular-nums; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
-  .warn { color: #8a6d00; }
+  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
+  .warn { color: var(--warn); }
   /* Witnessing is the only relationship on this page that is evidence, so it is
      the only one given a colour. See the legend, which says so out loud. */
-  .wit { color: #1f4788; }
+  .wit { color: var(--wit); }
   #stage { position: relative; border: 1px solid #ccc; background: #fcfcfc; overflow: hidden; }
   #edges { position: absolute; inset: 0; width: 100%; height: 100%; }
   .node { position: absolute; transform: translate(-50%, -50%); width: 15em; box-sizing: border-box;
           border: 1px solid #ccc; background: #fff; padding: .4em .6em; cursor: pointer; font-size: .92em; }
   .node:hover { background: #f7f9fc; }
-  .node.sel { border: 2px solid #1f4788; }
+  .node.sel { border: 2px solid var(--wit); }
   /* A node that did not answer is drawn as an outline: we know it exists
      because someone named it, and we know nothing else about it. */
-  .node.silent { border-style: dashed; color: #666; background: #fafafa; }
+  .node.silent { border-style: dashed; color: var(--mut); background: #fafafa; }
   .node .nm { font-weight: bold; }
-  .badge { position: absolute; transform: translate(-50%, -50%); background: #fff; border: 1px solid #1f4788;
-           color: #1f4788; font-size: .8em; padding: 0 .35em; white-space: nowrap; cursor: pointer; }
-  .badge.bad { border-color: #b00; color: #b00; }
-  .badge.unk { border-color: #999; color: #666; }
+  .badge { position: absolute; transform: translate(-50%, -50%); background: #fff; border: 1px solid var(--wit);
+           color: var(--wit); font-size: .8em; padding: 0 .35em; white-space: nowrap; cursor: pointer; }
+  .badge.bad { border-color: var(--bad); color: var(--bad); }
+  .badge.unk { border-color: #999; color: var(--mut); }
   .legend { display: flex; gap: 1.6em; flex-wrap: wrap; font-size: .9em; margin: .6em 0 1em; align-items: center; }
   .legend span { display: flex; gap: .4em; align-items: center; }
   /* Replication is drawn as a boundary, never as edges between peers: replicas
@@ -44,7 +65,7 @@
           padding: .6em .8em; }
   .repl .inner { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: .5em; }
   .repl .m { border: 1px solid #ccc; background: #fff; padding: .4em .6em; font-size: .92em; }
-  #detail { border: 1px solid #1f4788; border-top-width: 3px; padding: .7em .9em; margin-top: .8em; }
+  #detail { border: 1px solid var(--wit); border-top-width: 3px; padding: .7em .9em; margin-top: .8em; }
   .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.4em; }
   @media (max-width: 46em) { .cols2 { grid-template-columns: 1fr; } .node { width: 11em; font-size: .82em; } }
 </style>
@@ -56,7 +77,7 @@
 <p class="mut" id="lede">Who watches whom, and what each of them has actually proved.</p>
 
 <div class="legend">
-  <span><svg width="42" height="12" aria-hidden="true"><line x1="0" y1="6" x2="32" y2="6" stroke="#1f4788" stroke-width="2"/><path d="M32 2 L40 6 L32 10 Z" fill="#1f4788"/></svg>
+  <span><svg width="42" height="12" aria-hidden="true"><line x1="0" y1="6" x2="32" y2="6" stroke="var(--wit)" stroke-width="2"/><path d="M32 2 L40 6 L32 10 Z" fill="var(--wit)"/></svg>
     <b class="wit">watches</b><span class="mut">&mdash; trust. Different operators, independent logs.</span></span>
   <span><span style="width:42px;height:12px;border:1px solid #999;background:repeating-linear-gradient(45deg,#e8e8e8,#e8e8e8 3px,#fff 3px,#fff 6px)"></span>
     <b>replicates</b><span class="mut">&mdash; uptime. One operator, one key.</span></span>
@@ -271,7 +292,7 @@ function draw(){
     if (!a || !b) continue;
     const p1 = trim(a, b), p2 = trim(b, a);
     const cls = edgeClass(e.t);
-    const stroke = cls === 'bad' ? '#b00' : cls === 'unk' ? '#999' : '#1f4788';
+    const stroke = cls === 'bad' ? '#b00' : cls === 'unk' ? '#999' : 'var(--wit)';
     const line = document.createElementNS(SVGNS, 'line');
     line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
     line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);

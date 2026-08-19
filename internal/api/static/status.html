@@ -6,22 +6,43 @@
 <title>Status</title>
 <meta name="dedi-external-status" content="{{STATUS_URL}}">
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  /* One semantic palette, shared with every other page.
+     These values came from /verify, which had the only considered set: the CSS
+     keyword `green` is a harsh pure hue and #b00 a harsh red, while these are
+     the same meanings at a saturation that reads on a screen. Four pages using
+     four values for "this verified" is the kind of drift a reader feels without
+     being able to name. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: var(--wit); --warn: #8a6d1f; }
+  /* A named family first, deliberately. Bare `font-family: monospace` triggers
+     the browser's monospace font-size quirk: the page renders at the "default
+     fixed" size — 13px in Chrome and Safari — instead of 16px. Every page here
+     except /verify used the bare keyword, so /verify was about a quarter larger
+     than the rest of the site and everything else was cramped on a phone. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
   h1 { font-size: 1.3em; margin: 0 0 .2em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav a { margin-right: 0; }
   nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
+
   th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
   th { background: #f4f4f4; font-weight: normal; }
   td.num { font-variant-numeric: tabular-nums; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: green; } .no { color: #b00; } .mut { color: #666; } .warn { color: #8a6d00; }
-  .wit { color: #1f4788; }
+  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); } .warn { color: var(--warn); }
+  .wit { color: var(--wit); }
   .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
   /* The one claim on this page that is not self-reported gets the colour the
      other pages reserve for exactly that. */
-  .checked { border: 1px solid #1f4788; border-left-width: 3px; padding: .5em .8em; margin: .8em 0; }
+  .checked { border: 1px solid var(--wit); border-left-width: 3px; padding: .5em .8em; margin: .8em 0; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: .5em; margin: .6em 0 1em; }
   .card { border: 1px solid #ccc; padding: .5em .7em; }
   .card .v { font-size: 1.25em; font-variant-numeric: tabular-nums; }
@@ -65,7 +86,7 @@ here, and that is decided by log position rather than by which half-hour a signa
   <div class="lbl" style="margin-top:.5em"><span class="mut">&nbsp;</span><span class="mut">entries written</span><span class="mut">&nbsp;</span></div>
   <div class="row act" id="row-act"></div>
   <div class="key">
-    <span><i class="sw" style="background:#1f4788"></i> signed</span>
+    <span><i class="sw" style="background:var(--wit)"></i> signed</span>
     <span><i class="sw" style="background:#ccc"></i> entries written</span>
     <span><i class="sw" style="background:#fff"></i> idle &mdash; nothing to sign</span>
     <span><i class="sw" style="background:#b00"></i> writes unsigned</span>
@@ -150,7 +171,7 @@ function render(d){
         num(b.max_seq) + ' yet';
       unsigned++;
     } else if (signed) {
-      colour = '#1f4788';
+      colour = 'var(--wit)';
       title = when + ' — signed ' + num(b.checkpoints) + ' checkpoint(s)';
       signing++;
     } else if (wrote) {

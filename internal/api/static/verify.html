@@ -12,9 +12,10 @@
     --new: #1f6feb; --newbg: #e8f0fe; --warn: #8a6d1f; --warnbg: #fbf5e3;
   }
   * { box-sizing: border-box; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
-         max-width: 78em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink);
+         max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav a { margin-right: 0; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.35em; margin-bottom: .2em; }
   h2 { font-size: 1.05em; margin: 2em 0 .5em; border-bottom: 1px solid var(--line); padding-bottom: .25em; }
   h3 { font-size: .95em; font-weight: normal; color: var(--mut); margin: 1.2em 0 .4em; }
@@ -25,6 +26,14 @@
   code { background: var(--panel); padding: 0 .2em; }
   .wrap { overflow-x: auto; }
   table { border-collapse: collapse; font-size: .88em; width: 100%; }
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
+
   th, td { border: 1px solid var(--line); padding: .3em .5em; text-align: left; vertical-align: top; }
   th { background: var(--panel); font-weight: normal; }
   td.h { word-break: break-all; } td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -51,7 +60,7 @@
   .verdict.fail { border-color: var(--bad); background: var(--badbg); }
 
   svg { max-width: 100%; height: auto; display: block; }
-  svg text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  svg text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .hit { cursor: pointer; }
   .hit:hover rect, .hit:hover circle { stroke: var(--new); stroke-width: 2.5; }
 

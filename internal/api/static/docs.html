@@ -5,17 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DeDi Node · What this is</title>
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* One semantic palette, shared with every other page. See the note in
+     overview.html: these values came from /verify, which had the only
+     considered set. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
+  /* A named family first, deliberately. Bare `font-family: monospace` triggers
+     the browser's monospace font-size quirk: the page renders at the "default
+     fixed" size — 13px in Chrome and Safari — instead of 16px. Every page here
+     except /verify used the bare keyword, so /verify was about a quarter larger
+     than the rest of the site and everything else was cramped on a phone. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav a { margin-right: 0; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
+
   th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
   th { background: #f4f4f4; }
-  .ok { color: green; }
+  .ok { color: var(--ok); }
   pre { overflow-x: auto; }
   pre.mermaid { background: #fff; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .mut { color: #666; }
+  .mut { color: var(--mut); }
 </style>
 </head>
 <body>
