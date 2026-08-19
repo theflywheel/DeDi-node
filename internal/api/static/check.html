@@ -158,9 +158,22 @@ async function check(){
       }
     };
     if (d) {
-      bind('record name', d.record_name, p.leaf.record_name);
-      bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
-      bind('registry', d.registry_name || d.registry, p.leaf.registry);
+      // The identity fields differ by entry type, and the endpoint serves
+      // proofs for all three. A namespace lookup returns record_name "" and
+      // carries its name as `name`, so binding it as a record reported
+      // "nothing was compared" and REFUSED a perfectly valid proof — a false
+      // rejection, which tells an honest reader their record is not in the log.
+      const kind = p.leaf.entry_type || 'record';
+      if (kind === 'namespace') {
+        bind('namespace', d.name || d.namespace_id || d.namespace, p.leaf.namespace);
+      } else if (kind === 'registry') {
+        bind('registry', d.name || d.registry_name, p.leaf.registry);
+        bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
+      } else {
+        bind('record name', d.record_name, p.leaf.record_name);
+        bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
+        bind('registry', d.registry_name || d.registry, p.leaf.registry);
+      }
       // The one that matters: the leaf commits to the payload's digest.
       bind('digest', d.digest, p.leaf.digest);
 

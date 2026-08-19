@@ -58,6 +58,20 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	// The two handler bindings need elements that exist; the harness supplies them.
 	good, _ := json.Marshal(env)
 
+	// A NAMESPACE proof must verify too. The endpoint serves proofs for all
+	// three entry types, and a namespace leaf carries record_name "" while its
+	// data calls the name `name` — bound as a record, that reported "nothing
+	// was compared" and refused a valid proof.
+	nsResp, err := http.Get(srv.URL + "/dedi/lookup/flywheel?proof=inclusion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsBody, _ := io.ReadAll(nsResp.Body)
+	nsResp.Body.Close()
+	if nsResp.StatusCode != http.StatusOK {
+		t.Fatalf("namespace lookup: %d — %s", nsResp.StatusCode, nsBody)
+	}
+
 	// A HISTORICAL version must verify too. The bind briefly compared
 	// data.version_count (the total) to leaf.version_num (this entry's), which
 	// are equal only when you look at the newest version — so every honest
@@ -110,6 +124,9 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "hist.json"), histBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "ns.json"), nsBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	harness := `
 import fs from 'node:fs';
@@ -132,7 +149,8 @@ const GOOD = fs.readFileSync(process.argv[2], 'utf8');
 const BAD  = fs.readFileSync(process.argv[3], 'utf8');
 const SPLICED = fs.readFileSync(process.argv[4], 'utf8');
 const HIST = fs.readFileSync(process.argv[5], 'utf8');
-const VKEY = process.argv[6];
+const NS   = fs.readFileSync(process.argv[6], 'utf8');
+const VKEY = process.argv[7];
 `
 	check := `
 const out = document.getElementById('out');
@@ -178,6 +196,16 @@ if (sp.includes('\u2713 This record is in the log')) {
 }
 if (!sp.includes('not about this record')) {
   throw new Error('the splice was not reported: ' + sp.slice(0, 300));
+}
+
+// A namespace proof is a valid thing to paste here and must not be refused
+// for being shaped differently from a record.
+document.getElementById('doc').value = NS;
+document.getElementById('vkey').value = VKEY;
+await check();
+const ns = out.innerHTML;
+if (!ns.includes('\u2713 The record shown is the one the proof covers')) {
+  throw new Error('an honest namespace proof failed the bind: ' + ns.slice(0, 300));
 }
 
 // An honest proof for an OLDER version must verify. This is the false failure,
@@ -301,7 +329,8 @@ console.log('OK');
 	}
 	out, err := exec.Command("node", file,
 		filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json"),
-		filepath.Join(dir, "spliced.json"), filepath.Join(dir, "hist.json"), vkey).CombinedOutput()
+		filepath.Join(dir, "spliced.json"), filepath.Join(dir, "hist.json"),
+		filepath.Join(dir, "ns.json"), vkey).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "OK") {
 		t.Fatalf("checker: %v\n%s", err, out)
 	}
