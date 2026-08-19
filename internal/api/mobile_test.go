@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -72,5 +73,39 @@ func TestGeneratedNavIsBreakable(t *testing.T) {
 	hasBreaks := strings.Contains(nav, "</a> <a") || strings.Contains(nav, "</a>\n")
 	if !wrapsByLayout && !hasBreaks {
 		t.Error("the nav neither wraps nor contains a break opportunity between its links")
+	}
+}
+
+// A multi-column layout must have a single-column path for a narrow screen.
+//
+// The browser page introduced the first two-column reading layout, which is a
+// third way to push a phone sideways after the nav and the tables. This does
+// not mandate which direction the media query runs — the pages that already
+// had columns collapse with max-width, the browser expands with min-width, and
+// both give a phone one column — only that a page which can produce two
+// columns can also produce one.
+func TestEveryMultiColumnLayoutCollapsesOnAPhone(t *testing.T) {
+	for name, page := range servedPages(t) {
+		css := withoutComments(page)
+		multi := false
+		for _, decl := range regexp.MustCompile(`grid-template-columns:\s*([^;}]+)`).FindAllStringSubmatch(css, -1) {
+			// repeat(auto-fit, minmax(X, 1fr)) already collapses to one column
+			// once the container is narrower than X, with no query involved.
+			// Flagging it cost this test its first run on a page that was
+			// already correct.
+			if strings.Contains(decl[1], "auto-fit") || strings.Contains(decl[1], "auto-fill") {
+				continue
+			}
+			if len(strings.Fields(decl[1])) > 1 {
+				multi = true
+			}
+		}
+		if !multi {
+			continue
+		}
+		single := regexp.MustCompile(`grid-template-columns:\s*1fr\s*[;}]`).MatchString(css)
+		if !single || !strings.Contains(css, "@media") {
+			t.Errorf("%s: lays out in multiple columns with no single-column rule for a narrow screen", name)
+		}
 	}
 }

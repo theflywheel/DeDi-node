@@ -40,7 +40,11 @@
   a { cursor: pointer; }
   label { display: block; margin: .5em 0 .1em; }
   input, select { font-family: inherit; font-size: 1em; width: 100%; box-sizing: border-box; padding: .2em .3em; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2em; }
+  /* One column is the default and two is the exception, so a phone never
+     executes a two-column rule. Found by TestEveryMultiColumnLayoutCollapsesOnAPhone
+     while it was guarding a different page: this grid had no query at all. */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 0 1.2em; }
+  @media (min-width: 46em) { .grid { grid-template-columns: 1fr 1fr; } }
   .grid .full { grid-column: 1 / -1; }
   fieldset { border: 1px solid #ccc; margin: .8em 0; padding: .4em 1em 1em; }
   legend { padding: 0 .4em; }
