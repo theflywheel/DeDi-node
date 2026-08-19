@@ -124,13 +124,23 @@ async function verifyCheckpointSig(note, vkey){
 // derivation instead of a verdict. They exist because "verified ✓" is itself
 // just an assertion unless the reader can see which bytes were combined in what
 // order to get there. The untraced functions above remain the ones used for the
-// answer; these must agree with them, and a test asserts that they do.
+// answer; these must agree with them, and tests assert that they do — for
+// consistency proofs and, since one guard was added to only half of them, for
+// inclusion proofs as well.
 
 function b64e(u){ let s=''; for(const b of u) s += String.fromCharCode(b); return btoa(s); }
 
 // proofRootTraced mirrors proofRoot, appending {left, right, out} per step.
 async function proofRootTraced(path, t, n, leaf, steps){
-  if(t===1){ if(path.length!==0) throw new Error('proof len'); return leaf; }
+  // The same guard as the untraced version, and it has to be here too: this is
+  // the one /verify actually computes its inclusion verdict with, so guarding
+  // only the other left the page that shows every byte accepting an index the
+  // page that shows a tick rejected.
+  if(t===1){
+    if(path.length!==0) throw new Error('proof len');
+    if(n!==0) throw new Error('leaf index ' + n + ' is not in a tree of size 1');
+    return leaf;
+  }
   if(path.length===0) throw new Error('empty path');
   const k = maxpow2(t), top = path[path.length-1], rest = path.slice(0,-1);
   if(n < k){
