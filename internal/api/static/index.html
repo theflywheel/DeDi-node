@@ -104,7 +104,7 @@
 {{NAV}}
 <h1>Browse the directory</h1>
 <p id="node" class="mut">loading...</p>
-<p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
+<p class="mut" id="banner">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
 checkpoint signature are checked in your browser; the server is trusted for neither.</p>
 
 <div class="crumb" id="crumb"></div>
@@ -194,10 +194,17 @@ async function loadCheckpoint(){
     'tree size '+cb.size+', root '+esc(cb.rootB64.slice(0,20))+'&hellip; '+sig;
   // The standing claim at the top of the page is only true when there is a key
   // to check the signature against.
+  // The standing claim at the top of the page is only half true without a key,
+  // and it is made before the reader has opened anything. Written in both
+  // directions rather than only overwritten in the bad case: a guard that fires
+  // one way leaves the wrong text on screen the moment anything else moves.
   const banner = $('banner');
-  if(banner && !VKEY) banner.innerHTML = 'Public, read-only directory over a Merkle transparency log. ' +
-    'Inclusion proofs are recomputed in your browser. This node published no verifier key, so ' +
-    '<b>checkpoint signatures cannot be checked here</b> and nothing below establishes who signed them.';
+  if(banner) banner.innerHTML = VKEY
+    ? 'Public, read-only directory over a Merkle transparency log. Inclusion proofs and the ' +
+      'checkpoint signature are checked in your browser; the server is trusted for neither.'
+    : 'Public, read-only directory over a Merkle transparency log. Inclusion proofs are recomputed ' +
+      'in your browser. This node published no verifier key, so <b>checkpoint signatures cannot be ' +
+      'checked here</b> and nothing below establishes who signed them.';
 }
 
 // ---- breadcrumb --------------------------------------------------------
@@ -241,7 +248,10 @@ function onFilter(v){
 // from a live one by colour alone: --ok and --bad are nearly the same
 // luminance, so hue is the one channel that does not survive greyscale.
 function rowHTML(r, p){
-  const revoked = String(r.state||'').toLowerCase() !== 'live' && r.kind === 'record';
+  const st = String(r.state||'').toLowerCase();
+  // Registries carry a state as well, and /dedi/query returns it. Hiding it for
+  // registries meant a reader descended into one without being told.
+  const revoked = st !== '' && st !== 'live' && st !== 'active';
   const to = r.kind === 'registry' ? {ns:p.ns, reg:r.name} : {ns:p.ns, reg:p.reg, rec:r.name};
   const selected = (r.kind === 'registry' ? p.reg : p.rec) === r.name;
   const tag = revoked
@@ -535,7 +545,6 @@ function renderHistory(p, vs, shown){
   if(!box) return;
   const rows = vs.map((v, i) => {
     const isCur = String(v) === String(shown);
-    const label = 'version '+esc(v)+' &mdash; '+(i+1)+' of '+vs.length;
     return '<tr><td>' +
       (isCur ? '<b>'+esc(v)+'</b> <span class="pill">on screen</span>'
              : nav({ns:p.ns, reg:p.reg, rec:p.rec, v:v}, esc(v))) +

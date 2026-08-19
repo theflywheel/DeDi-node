@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -251,6 +252,29 @@ if (/onmouseover/.test(row) && !/&#39;/.test(row))
   throw new Error('a record name escaped its attribute and added a handler: ' + row);
 if (!/<a href="/.test(row)) throw new Error('a list row is not a link, so it cannot be reached by keyboard: ' + row);
 
+
+// 10. THE STANDING CLAIM AT THE TOP OF THE PAGE. It says inclusion proofs AND
+//     the checkpoint signature are checked in your browser. On a node that
+//     published no verifier key the second half is false, and it is stated
+//     before the reader has opened anything.
+//
+//     This is here because the first version of the fix rewrote #banner and
+//     never gave the paragraph that id, so the guard ran, found nothing, and
+//     the false claim shipped anyway. The assertion is on the rendered text.
+VKEY = '';
+await loadCheckpoint();
+const keyless = document.getElementById('banner').innerHTML;
+if (/signature[s]? are checked in your browser/.test(keyless))
+  throw new Error('a node with no verifier key still claims it checks signatures: ' + keyless.slice(0, 300));
+if (!/cannot be checked/.test(keyless))
+  throw new Error('the keyless banner does not say signatures go unchecked: ' + keyless.slice(0, 300));
+
+VKEY = KEY;
+await loadCheckpoint();
+const keyed = document.getElementById('banner').innerHTML;
+if (/cannot be checked/.test(keyed))
+  throw new Error('a node WITH a key wrongly says signatures cannot be checked: ' + keyed.slice(0, 300));
+
 console.log('BROWSE-JS-OK');
 `
 
@@ -265,5 +289,45 @@ console.log('BROWSE-JS-OK');
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "BROWSE-JS-OK") {
 		t.Fatalf("browse page JS: %v\n%s", err, out)
+	}
+}
+
+// Every element the script writes to must actually exist.
+//
+// This exists because of a bug the JS harness structurally cannot see. The page
+// downgrades its "signatures are checked in your browser" claim on a node with
+// no verifier key by rewriting #banner — and the paragraph had no id="banner",
+// so the guard ran, found nothing, and the false claim shipped. The fake DOM in
+// the test above manufactures an element for any id asked of it, so it reported
+// the downgrade working while the real page never did it.
+//
+// A test whose fake is more forgiving than the browser will certify a page that
+// does not work. This one reads the file instead.
+func TestBrowseWritesOnlyToElementsThatExist(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(page)
+
+	// Ids that exist: written into the static markup, or into markup the script
+	// itself builds (both are id="..." in this file).
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`id="([A-Za-z0-9_-]+)"`).FindAllStringSubmatch(src, -1) {
+		defined[m[1]] = true
+	}
+	// Ids that are read.
+	read := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\$\('([A-Za-z0-9_-]+)'\)`).FindAllStringSubmatch(src, -1) {
+		read[m[1]] = true
+	}
+	if len(read) == 0 {
+		t.Fatal("found no element lookups at all, so this proves nothing")
+	}
+	for id := range read {
+		if !defined[id] {
+			t.Errorf("the script writes to #%s, which nothing in the page ever defines — "+
+				"whatever that code does, it does to nobody", id)
+		}
 	}
 }
