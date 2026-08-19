@@ -16,14 +16,6 @@
   .ok { color: green; } .no { color: #b00; } .mut { color: #666; }
   #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
   nav { margin-bottom: 1em; } nav a { margin-right: 1em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
-  /* The network table can outgrow a phone; let it scroll rather than the page. */
-  #network { overflow-x: auto; }
-  table.net { border-collapse: collapse; font-size: .92em; }
-  table.net th, table.net td { border: 1px solid #ccc; padding: .25em .5em; text-align: left; white-space: nowrap; }
-  table.net th { background: #f4f4f4; font-weight: normal; }
-  table.net td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .self { font-weight: bold; }
-  .dot { font-size: 1.1em; line-height: 1; }
 </style>
 </head>
 <body>
@@ -35,9 +27,9 @@
 <p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
 checkpoint signature are checked in your browser; the server is trusted for neither.</p>
 
-<p class="mut">This node's peers, what it witnesses, and how its replicas are keeping up are on
-<a href="/network">the network page</a> — with every edge fetched from the node that claims it, and
-a button to re-check any of them in your browser.</p>
+<p class="mut">This node's peers, what it witnesses, and its replica set are on
+<a href="/network">the network page</a> — with every witness edge fetched from the node that claims
+it, and a button to re-check any of them in your browser.</p>
 
 <hr>
 

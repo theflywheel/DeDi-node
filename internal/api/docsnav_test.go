@@ -111,8 +111,13 @@ func TestEveryDocIsInTheReadingOrder(t *testing.T) {
 	}
 }
 
-// The contents must be near the top of /docs. It was at line 128 of 148, which
-// is why the page read as having no index at all.
+// The contents must be near the top of /docs, and must actually list something.
+//
+// The first version searched for "All documentation" — a hardcoded <h2> in
+// docs.html that precedes the placeholder. docIndex() returns "" when loadDocs
+// fails or embeds nothing, and the heading and its caption stay put, so the
+// test named for the index not being a footer passed on a page listing not a
+// single document. It proved a heading sat near the top.
 func TestTheDocsIndexIsNotAFooter(t *testing.T) {
 	srv, _, _ := testServer(t)
 	resp, err := http.Get(srv.URL + "/docs")
@@ -122,13 +127,30 @@ func TestTheDocsIndexIsNotAFooter(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	page := string(body)
-	i := strings.Index(page, "All documentation")
-	if i < 0 {
-		t.Fatal("/docs no longer carries an index")
+
+	// Anchor on something docIndex actually emits: a link to a real document.
+	order := readingOrder()
+	if len(order) == 0 {
+		t.Fatal("no documents in the reading order")
 	}
-	// Generously: within the first third of the page.
+	first := `href="/docs/` + order[0] + `"`
+	i := strings.Index(page, first)
+	if i < 0 {
+		t.Fatalf("/docs does not link %s — the generated contents is empty", order[0])
+	}
 	if i > len(page)/3 {
-		t.Errorf("the index starts %d%% of the way down /docs — a reader must scroll past the "+
+		t.Errorf("the contents starts %d%% of the way down /docs — a reader must scroll past the "+
 			"explainer to learn the documentation exists", 100*i/len(page))
+	}
+
+	// And it must list all of them, not merely begin near the top.
+	missing := 0
+	for _, slug := range order {
+		if !strings.Contains(page, `href="/docs/`+slug+`"`) {
+			missing++
+		}
+	}
+	if missing > 0 {
+		t.Errorf("%d of %d documents are absent from the contents", missing, len(order))
 	}
 }

@@ -112,10 +112,24 @@ func docSidebar(current string, docs map[string]*doc) string {
 			b.WriteString(html.EscapeString(d.Title))
 			b.WriteString(`</a>`)
 		}
-		b.WriteString(`</div>`)
+		// No closing </div> here: the section heading above is its own element,
+		// already closed, and the links are siblings of it rather than children.
+		// An extra one closed div.doc instead — <nav> is not in HTML's default
+		// scope list, so the parser popped straight past it — and the sidebar
+		// and article escaped the grid on every page.
 	}
 	b.WriteString(`</nav>`)
 	return b.String()
+}
+
+// docClass picks the layout. A page with no contents — the not-found page — is
+// one column: a lone child of the two-column grid lands in the 15em track and
+// renders its message in a strip with the rest of the width blank.
+func docClass(side string) string {
+	if side == "" {
+		return "doc solo"
+	}
+	return "doc"
 }
 
 // docPrevNext renders the steps either side of this page in the reading order.
@@ -385,6 +399,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   /* Contents beside the page, not under it. Nineteen documents with a reading
      order need navigation that is present rather than findable. */
   .doc { display: grid; grid-template-columns: 15em 1fr; gap: 0 2.2em; align-items: start; }
+  .doc.solo { grid-template-columns: 1fr; }
   .doc main { min-width: 0; }
   .toc { position: sticky; top: 1em; font-size: .9em; border-right: 1px solid #eee; padding-right: 1em; }
   .toc .sec { color: #666; text-transform: uppercase; letter-spacing: .06em; font-size: .82em;
@@ -406,7 +421,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
 </head>
 <body>
 ` + s.nav("/docs") + `
-<div class="doc">` + side + `<main>` + body + pn + `
+<div class="` + docClass(side) + `">` + side + `<main>` + body + pn + `
 <p class="back"><a href="/docs">← All documentation</a></p>
 </main></div>
 ` + mermaidRuntime(body) + `</body>
