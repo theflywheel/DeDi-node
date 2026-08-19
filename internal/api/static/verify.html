@@ -300,6 +300,9 @@ async function run(){
     '<p>Who watches whom. Each arrow is that node&rsquo;s own statement, read from its own ' +
     '<code>/dedi/network</code> by your browser &mdash; not this node&rsquo;s account of its ' +
     'neighbours. Click a node for its details, or follow its link to check it the same way.</p>' +
+    '<p class="mut"><a href="/network">The network page</a> draws the same ring with each edge&rsquo;s ' +
+    'live verdict and a button to re-check it. This page is the layer beneath: every hash and byte ' +
+    'the verdict rests on.</p>' +
     '<div style="max-width:22em">' + ringSVG(ringNodes, 'ringpane') + '</div>' +
     '<div class="inspect" id="ringpane"><span class="t">click a node in the diagram</span></div>');
 
