@@ -57,8 +57,8 @@
 <h1>Check a record</h1>
 <p class="mut">Paste a record and its inclusion proof, or fetch one by URL. Everything below is
 recomputed <b>in your browser</b> from the bytes you supply — the hashes, the Merkle path, and the
-signature on the checkpoint. Nothing is sent anywhere, and this node is not asked to confirm any of
-it.</p>
+signature on the checkpoint. The checking is entirely local and this node is never asked to confirm
+any of it; if you use the fetch box, your browser requests that URL and nothing else leaves it.</p>
 
 <div class="cols">
   <div>
@@ -152,7 +152,14 @@ async function check(){
       // The one that matters: the leaf commits to the payload's digest.
       bind('digest', d.digest, p.leaf.digest);
     }
-    bound = mismatched.length === 0;
+    // No data block at all is not a passing bind: there is nothing to tie the
+    // proof to, and reporting "the record shown matches" when no record is
+    // shown is the same false pass in a quieter form.
+    if (!d) {
+      bound = false;
+      mismatched.push('there is no record in this response to bind the proof to');
+    }
+    bound = bound && mismatched.length === 0;
     html += step(bound ? 'pass' : 'fail',
       bound ? 'The record shown is the one the proof covers'
             : 'The record shown is NOT the one the proof covers',
@@ -167,11 +174,26 @@ async function check(){
       'Rebuilt from entry type, namespace, registry, record name, version, digest, author and time — ' +
       'change any one of them and this hash changes.');
 
-    // 2. fold the path
-    const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, leaf);
+    // 2. the checkpoint, and what it commits to
     const note = parseNote(p.checkpoint);
     if (!note) throw new Error('the checkpoint is not a signed note');
     const cp = parseCheckpointBody(note.body);
+
+    // Reported BEFORE the fold, and not merely because it reads better: a
+    // malformed proof makes proofRoot throw, and a size step emitted after it
+    // would never render for exactly the envelopes it exists to describe.
+    //
+    // The checkpoint signs both size and root, so a proof claiming a different
+    // tree size is not bound to that signature however the roots compare.
+    // /browse has checked this since it was written; this page did not.
+    const sizeMatch = cp.size === p.tree_size;
+    html += step(sizeMatch ? 'pass' : 'fail',
+      sizeMatch ? 'The proof binds to the size the checkpoint signed'
+                : 'The proof does NOT bind to the size the checkpoint signed',
+      'proof says ' + num(p.tree_size) + ', the signed checkpoint says ' + num(cp.size) + '.');
+
+    // 3. fold the path
+    const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, leaf);
 
     const rootsMatch = eq(root, cp.root);
     html += step(rootsMatch ? 'pass' : 'fail',
@@ -181,7 +203,7 @@ async function check(){
       num(p.tree_size) + '. Computed <code>' + esc(b64e(root)) + '</code>' +
       (rootsMatch ? '' : ', but the checkpoint says <code>' + esc(cp.rootB64) + '</code>'));
 
-    // 3. the signature, if a key was supplied
+    // 4. the signature, if a key was supplied
     let sigState = 'absent';   // absent | unchecked | pass | fail
     const vkey = $('vkey').value.trim();
     if (!vkey) {
@@ -214,6 +236,10 @@ async function check(){
       cls = 'fail';
       head = '<b class="no">✗ That proof is not about this record.</b>';
       sub = 'Whatever the proof establishes, it establishes about a different entry.';
+    } else if (!sizeMatch) {
+      cls = 'fail';
+      head = '<b class="no">✗ That proof is not bound to the signed checkpoint.</b>';
+      sub = 'It claims a different tree size from the one the signature covers.';
     } else if (!rootsMatch) {
       cls = 'fail';
       head = '<b class="no">✗ This record is not in that log.</b>';

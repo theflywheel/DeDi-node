@@ -158,6 +158,41 @@ if (!sp.includes('not about this record')) {
   throw new Error('the splice was not reported: ' + sp.slice(0, 300));
 }
 
+// A proof claiming a different tree size than the checkpoint signed is not
+// bound to that checkpoint, however well the root happens to compare.
+{
+  const env = JSON.parse(GOOD);
+  env.proof.tree_size = env.proof.tree_size + 1;
+  document.getElementById('doc').value = JSON.stringify(env);
+  document.getElementById('vkey').value = VKEY;
+  await check();
+  const sz = out.innerHTML;
+  if (sz.includes('\u2713 This record is in the log')) {
+    throw new Error('a proof unbound from the signed size verified: ' + sz.slice(0, 300));
+  }
+  // The above passes even without the size check, because tree_size feeds the
+  // fold and a wrong one already breaks the root comparison. So assert the
+  // size step itself is reported — otherwise this test would be vacuous, which
+  // it was on its first run.
+  if (!sz.includes('does NOT bind to the size')) {
+    throw new Error('the size mismatch was not reported as its own step: ' + sz.slice(0, 400));
+  }
+}
+
+// An envelope with a proof and no record binds to nothing, and must not report
+// that the record shown matches — there is no record shown.
+{
+  const env = JSON.parse(GOOD);
+  delete env.data;
+  document.getElementById('doc').value = JSON.stringify(env);
+  await check();
+  const nd = out.innerHTML;
+  if (nd.includes('The record shown is the one the proof covers')) {
+    throw new Error('an envelope with no record claimed a matching bind: ' + nd.slice(0, 300));
+  }
+}
+
+document.getElementById('vkey').value = VKEY;
 document.getElementById('doc').value = BAD;
 await check();
 const badHTML = out.innerHTML;

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -24,19 +25,35 @@ func TestEverySurfaceUsesTheSharedNavTreatment(t *testing.T) {
 		"admin.html":    string(adminHTML),
 		"generated doc": (&Server{}).docLayout("t", "<p>b</p>"),
 	}
+	// Extract the nav rule and check its declarations, rather than matching a
+	// formatted string. The first version needed two spellings of the same rule
+	// to cope with line wrapping, which is a sign the assertion was about
+	// whitespace rather than about the design.
+	navRule := regexp.MustCompile(`(?s)\bnav \{(.*?)\}`)
+	selRule := regexp.MustCompile(`(?s)nav a\.sel \{(.*?)\}`)
+	decls := func(rule *regexp.Regexp, page string) string {
+		m := rule.FindStringSubmatch(page)
+		if m == nil {
+			return ""
+		}
+		return strings.Join(strings.Fields(m[1]), " ")
+	}
+
 	for name, page := range surfaces {
-		// The rule under the bar.
-		if !strings.Contains(page, "border-bottom: 1px solid #ccc;\n        padding-bottom: .5em") &&
-			!strings.Contains(page, "border-bottom: 1px solid #ccc; padding-bottom: .5em") {
-			t.Errorf("%s: the nav has no rule under it", name)
+		nav := decls(navRule, page)
+		if nav == "" {
+			t.Errorf("%s: no nav rule at all", name)
+			continue
 		}
-		// And the current page underlined against it, on the surfaces that mark one.
-		if strings.Contains(page, "nav a.sel") &&
-			!strings.Contains(page, "border-bottom: 2px solid #1a1a1a") {
-			t.Errorf("%s: the current page is not underlined in the nav", name)
+		for _, want := range []string{"flex-wrap: wrap", "border-bottom: 1px solid #ccc"} {
+			if !strings.Contains(nav, want) {
+				t.Errorf("%s: the nav rule lacks %q — it is %q", name, want, nav)
+			}
 		}
-		if !strings.Contains(page, "flex-wrap: wrap") {
-			t.Errorf("%s: the nav cannot wrap", name)
+		if sel := decls(selRule, page); sel != "" {
+			if !strings.Contains(sel, "border-bottom: 2px solid #1a1a1a") {
+				t.Errorf("%s: the current page is not underlined in the nav — %q", name, sel)
+			}
 		}
 	}
 }
