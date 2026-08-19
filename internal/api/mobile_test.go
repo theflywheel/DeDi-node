@@ -125,7 +125,10 @@ func TestEveryMultiColumnLayoutCollapsesOnAPhone(t *testing.T) {
 	}
 }
 
-var mediaRE = regexp.MustCompile(`@media[^{]*\((min|max)-width:\s*([0-9.]+)(px|em)\)`)
+var (
+	mediaRE = regexp.MustCompile(`@media[^{]*\((min|max)-width:\s*([0-9.]+)(px|em)\)`)
+	gridRE  = regexp.MustCompile(`grid-template-columns:\s*([^;}]+)`)
+)
 
 // effectiveGrids returns, per selector, the grid-template-columns that applies
 // at the given viewport width — later rules winning, and rules inside a query
@@ -159,7 +162,7 @@ func effectiveGrids(css string, viewportPx float64) map[string]string {
 			} else if strings.HasPrefix(sel, "@") {
 				scan(body, active) // @supports and friends: descend, do not filter
 			} else if active {
-				for _, d := range regexp.MustCompile(`grid-template-columns:\s*([^;}]+)`).FindAllStringSubmatch(body, -1) {
+				for _, d := range gridRE.FindAllStringSubmatch(body, -1) {
 					for _, one := range strings.Split(sel, ",") {
 						out[strings.TrimSpace(one)] = strings.TrimSpace(d[1])
 					}

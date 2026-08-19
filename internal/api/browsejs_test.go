@@ -135,8 +135,19 @@ globalThis.fetch = async (url) => {
       ? { ok: true, json: async () => JSON.parse(LOOKUP) }
       : { ok: false, status: LOOKUP_STATUS, json: async () => ({}) };
   if (url.includes('/.well-known/')) return { ok: true, json: async () => ({files: []}) };
-  if (url.includes('/dedi/query/'))
-    return { ok: true, json: async () => ({data:{registries:[], records: QUERY_RECORDS}}) };
+  if (url.includes('/dedi/query/')) {
+    // Paginate the way the server does, so a page that reads only the first
+    // batch is visibly short rather than accidentally complete.
+    const u = new URL(url, 'http://x');
+    const page = Number(u.searchParams.get('page') || 1);
+    const size = Math.min(Number(u.searchParams.get('page_size') || 25), 100);
+    const slice = QUERY_RECORDS.slice((page - 1) * size, page * size);
+    return { ok: true, json: async () => ({data:{
+      registries: [], records: slice,
+      total_records: QUERY_RECORDS.length, total_registries: 0,
+      page_number: page, page_size: size,
+    }}) };
+  }
   return { ok: false, status: 404, json: async () => ({}) };
 };
 const settle = () => new Promise(r => setTimeout(r, 50));
@@ -265,7 +276,7 @@ if (!/<a href="/.test(row)) throw new Error('a list row is not a link, so it can
 //     never gave the paragraph that id, so the guard ran, found nothing, and
 //     the false claim shipped anyway. The assertion is on the rendered text.
 VKEY = '';
-await loadCheckpoint();
+setBanner();
 const keyless = document.getElementById('banner').innerHTML;
 if (/signature[s]? are checked in your browser/.test(keyless))
   throw new Error('a node with no verifier key still claims it checks signatures: ' + keyless.slice(0, 300));
@@ -273,10 +284,28 @@ if (!/cannot be checked/.test(keyless))
   throw new Error('the keyless banner does not say signatures go unchecked: ' + keyless.slice(0, 300));
 
 VKEY = KEY;
-await loadCheckpoint();
+setBanner();
 const keyed = document.getElementById('banner').innerHTML;
 if (/cannot be checked/.test(keyed))
   throw new Error('a node WITH a key wrongly says signatures cannot be checked: ' + keyed.slice(0, 300));
+
+// And it must not depend on the checkpoint request working. Gating the
+// correction on a successful fetch left the STRONGER claim on screen in exactly
+// the case where least had been verified: the page unable to reach its own log,
+// still telling the reader it checks signatures.
+VKEY = '';
+const savedFetch = globalThis.fetch;
+globalThis.fetch = async () => { throw new Error('network down'); };
+document.getElementById('banner').innerHTML = '';
+setBanner();
+try { await loadCheckpoint(); } catch (e) {}
+const offline = document.getElementById('banner').innerHTML;
+globalThis.fetch = savedFetch;
+if (/signature[s]? are checked in your browser/.test(offline))
+  throw new Error('with the log unreachable and no key, the page still claims it checks signatures: ' + offline.slice(0, 300));
+if (!/cannot be checked/.test(offline))
+  throw new Error('the banner did not downgrade when the checkpoint fetch failed: ' + offline.slice(0, 300));
+VKEY = KEY;
 
 
 // 11. A STATE CLAIM MUST BE ABOUT THIS RECORD. render() starts the list and the
@@ -302,6 +331,20 @@ await loadRecord(P); await settle();
 const grounded = document.getElementById('nswhy').innerHTML;
 if (!/lists this record as <b>revoked<\/b>/.test(grounded))
   throw new Error('an authoritative state was not reported: ' + grounded.slice(0, 300));
+
+
+// 12. THE WHOLE LIST, NOT THE FIRST PAGE. /dedi/query defaults to 25 rows and
+//     caps a page at 100. Rendering page one as the list is silent truncation,
+//     and the records nobody was shown look exactly like records that do not
+//     exist. The live registry this was developed against holds ten, which is
+//     why only a reviewer found it.
+QUERY_RECORDS = [];
+for (let i = 0; i < 250; i++) QUERY_RECORDS.push({record_name: 'rec-' + i, state: 'live'});
+LOOKUP_STATUS = 200; VERSIONS_STATUS = 200;
+await loadList({ns:'flywheel', reg:'participants', rec:'', v:''}, ++SEQ);
+await settle(); await settle();
+if (ROWS.length !== 250)
+  throw new Error('the list holds ' + ROWS.length + ' of 250 records — the rest were dropped in silence');
 
 console.log('BROWSE-JS-OK');
 `
@@ -357,5 +400,46 @@ func TestBrowseWritesOnlyToElementsThatExist(t *testing.T) {
 			t.Errorf("the script writes to #%s, which nothing in the page ever defines — "+
 				"whatever that code does, it does to nobody", id)
 		}
+	}
+}
+
+// The banner correction must not sit behind a network call.
+//
+// Whether this node published a verifier key is in the markup; it takes no
+// request to find out. Running the correction at the end of loadCheckpoint
+// meant that a node which could not reach its own log kept the STRONGER claim
+// on screen — "inclusion proofs and the checkpoint signature are checked in
+// your browser" — in exactly the case where least had been checked.
+//
+// This is asserted on the source rather than by driving the page, because the
+// JS harness can only call setBanner() itself, which proves the function works
+// and says nothing about where it is called from. The first version of that
+// assertion passed with the call moved back inside loadCheckpoint, which is the
+// bug it was written for.
+func TestBrowseBannerDoesNotWaitOnTheNetwork(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(page)
+	if !strings.Contains(src, "function setBanner()") {
+		t.Fatal("no setBanner in the page, so this proves nothing")
+	}
+	// Blank out the body of loadCheckpoint, then look for the call in what is left.
+	start := strings.Index(src, "async function loadCheckpoint()")
+	if start < 0 {
+		t.Fatal("no loadCheckpoint in the page")
+	}
+	open := strings.Index(src[start:], "{") + start
+	end := matchingBrace(src, open)
+	if end < 0 {
+		t.Fatal("could not find the end of loadCheckpoint")
+	}
+	outside := src[:start] + src[end:]
+	// The definition itself contains the name; look for a call.
+	calls := regexp.MustCompile(`(?m)^\s*setBanner\(\);`).FindAllString(outside, -1)
+	if len(calls) == 0 {
+		t.Error("setBanner is only called from inside loadCheckpoint, so a node that cannot reach " +
+			"its own log keeps claiming it verifies checkpoint signatures")
 	}
 }

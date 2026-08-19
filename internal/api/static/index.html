@@ -124,7 +124,7 @@ checkpoint signature are checked in your browser; the server is trusted for neit
 <script src="/static/verify.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-let CK = null, CUR = null, ROWS = [], FILTER = '', SEQ = 0;
+let CK = null, CUR = null, ROWS = [], FILTER = '', SEQ = 0, SHORT = 0;
 let VKEY = document.querySelector('meta[name="dedi-verifier-key"]').content.trim();
 if (VKEY.startsWith('{{')) VKEY = '';
 
@@ -169,6 +169,28 @@ document.addEventListener('click', ev => {
 });
 addEventListener('popstate', render);
 
+// Pages through a /dedi/query listing to the end.
+//
+// The endpoint defaults to 25 rows and caps a page at 100, and the reply says
+// how many there are in total. Rendering the first page as though it were the
+// list is silent truncation: a registry of 300 records would show 25, say
+// nothing, and the records nobody was shown are indistinguishable from records
+// that do not exist. The witness listing already had to learn this server-side
+// (see witnessTargets); the same rule applies to the page reading it.
+async function queryAll(path, key, totalKey){
+  const rows = [];
+  let total = 0;
+  for(let page = 1; ; page++){
+    const j = await jget(path + (path.includes('?') ? '&' : '?') + 'page=' + page + '&page_size=100');
+    const d = j.data || {};
+    const batch = d[key] || [];
+    rows.push(...batch);
+    total = Number(d[totalKey] || rows.length);
+    if(!batch.length || rows.length >= total || page > 200) break;
+  }
+  return { rows, total };
+}
+
 async function jget(path){
   const r = await fetch(path);
   if(!r.ok){
@@ -177,6 +199,21 @@ async function jget(path){
     const e = new Error('HTTP ' + r.status); e.status = r.status; throw e;
   }
   return r.json();
+}
+
+// It runs at startup and not inside loadCheckpoint: whether this node
+// published a verifier key is known from the markup without asking the server
+// anything, and gating the correction on a successful checkpoint fetch left the
+// stronger claim on screen in precisely the case where least had been verified.
+function setBanner(){
+  const banner = $('banner');
+  if(!banner) return;
+  banner.innerHTML = VKEY
+    ? 'Public, read-only directory over a Merkle transparency log. Inclusion proofs and the ' +
+      'checkpoint signature are checked in your browser; the server is trusted for neither.'
+    : 'Public, read-only directory over a Merkle transparency log. Inclusion proofs are recomputed ' +
+      'in your browser. This node published no verifier key, so <b>checkpoint signatures cannot be ' +
+      'checked here</b> and nothing below establishes who signed them.';
 }
 
 // ---- the node's own line ----------------------------------------------
@@ -194,16 +231,6 @@ async function loadCheckpoint(){
     'tree size '+cb.size+', root '+esc(cb.rootB64.slice(0,20))+'&hellip; '+sig;
   // The standing claim at the top of the page is only true when there is a key
   // to check the signature against.
-  // The standing claim at the top of the page is only half true without a key,
-  // and it is made before the reader has opened anything. Written in both
-  // directions, so the sentence always matches the configuration.
-  const banner = $('banner');
-  if(banner) banner.innerHTML = VKEY
-    ? 'Public, read-only directory over a Merkle transparency log. Inclusion proofs and the ' +
-      'checkpoint signature are checked in your browser; the server is trusted for neither.'
-    : 'Public, read-only directory over a Merkle transparency log. Inclusion proofs are recomputed ' +
-      'in your browser. This node published no verifier key, so <b>checkpoint signatures cannot be ' +
-      'checked here</b> and nothing below establishes who signed them.';
 }
 
 // ---- breadcrumb --------------------------------------------------------
@@ -267,7 +294,9 @@ function paintRows(){
   const box = document.querySelector('.rows');
   if(!box) return;
   box.innerHTML = shown.length
-    ? shown.map(r => rowHTML(r, p)).join('')
+    ? shown.map(r => rowHTML(r, p)).join('') +
+      (SHORT ? '<li><span class="mut pad">this node reports ' + SHORT + ' in total and returned ' +
+        ROWS.length + '; the rest are not shown</span></li>' : '')
     : '<li><span class="mut pad">nothing matches &ldquo;'+esc(FILTER)+'&rdquo;</span></li>';
 }
 
@@ -314,13 +343,19 @@ function loadList(p, seq){
     : '/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg);
   const title = registryLevel ? 'registries in '+p.ns : 'records in '+p.reg;
   $('list').innerHTML = listBox(title, '<li><span class="mut pad">loading&hellip;</span></li>', false);
-  jget(path).then(j => {
+  const q = registryLevel
+    ? queryAll(path, 'registries', 'total_registries')
+    : queryAll(path, 'records', 'total_records');
+  q.then(({rows, total}) => {
     if(seq !== SEQ) return;
     ROWS = registryLevel
-      ? (j.data.registries || []).map(r => ({kind:'registry', name:r.registry_name, state:r.state,
+      ? rows.map(r => ({kind:'registry', name:r.registry_name, state:r.state,
           meta:(r.record_count||0)+' records'}))
-      : (j.data.records || []).map(r => ({kind:'record', name:r.record_name, state:r.state, meta:''}));
-    $('list').innerHTML = listBox(title, '', ROWS.length > 1);
+      : rows.map(r => ({kind:'record', name:r.record_name, state:r.state, meta:''}));
+    // If the server said there are more than arrived, say so rather than
+    // presenting a prefix as the whole.
+    SHORT = total > ROWS.length ? total : 0;
+    $('list').innerHTML = listBox(title + ' \u00b7 ' + ROWS.length, '', ROWS.length > 1);
     if(!ROWS.length){
       document.querySelector('.rows').innerHTML = '<li><span class="mut pad">nothing here.</span></li>';
       return;
@@ -595,6 +630,7 @@ function render(){
   }
 }
 
+setBanner();
 loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint error: '+esc(e.message)+'</span>');
 render();
 </script>
