@@ -27,8 +27,17 @@
   a { cursor: pointer; }
   .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
   #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
-  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
-  nav a { margin-right: 0; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* The tab bar from the design: a rule under the whole nav, and the current
+     page underlined against it rather than merely bolded. Wrapping is what
+     keeps it off the horizontal scrollbar on a phone. */
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
+  nav a { margin-right: 0; }
+  /* An eyebrow: the small uppercase label the design uses to head a block
+     without spending an h2 on it. */
+  .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
+             letter-spacing: .07em; margin: 1.4em 0 .3em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
 
   /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
      what actually push a table past the viewport. Letting them break inside the

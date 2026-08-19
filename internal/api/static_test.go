@@ -25,7 +25,10 @@ func TestOverviewServedAtRoot(t *testing.T) {
 		t.Fatalf("content-type %q", ct)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Is anyone checking it?") {
+	// Case-insensitive: the heading became a lowercase eyebrow when the design
+	// was applied, and an exact-string assertion turned a styling change into a
+	// test failure about routing.
+	if !strings.Contains(strings.ToLower(string(body)), "is anyone checking it") {
 		t.Fatal("the overview is not served at / — a stranger still lands on a namespace text box")
 	}
 	// unsubstituted placeholder must not leak when no key configured

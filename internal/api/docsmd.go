@@ -386,9 +386,11 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   /* A named family first: the bare monospace keyword triggers the browser's
      monospace font-size quirk and renders the page at 13px instead of 16px. */
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
-  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
   nav a { margin-right: 0; }
-  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+              border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.8em 0 .4em; }
   h3 { font-size: .98em; margin: 1.4em 0 .3em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; margin: .6em 0; }

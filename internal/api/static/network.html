@@ -21,9 +21,18 @@
   h1 { font-size: 1.3em; margin: 0 0 .2em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   h3 { font-size: .98em; margin: 1.1em 0 .3em; }
-  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
+  /* The tab bar from the design: a rule under the whole nav, and the current
+     page underlined against it rather than merely bolded. Wrapping is what
+     keeps it off the horizontal scrollbar on a phone. */
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
   nav a { margin-right: 0; }
-  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* An eyebrow: the small uppercase label the design uses to head a block
+     without spending an h2 on it. */
+  .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
+             letter-spacing: .07em; margin: 1.4em 0 .3em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
   /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
      what actually push a table past the viewport. Letting them break inside the
@@ -533,8 +542,8 @@ function renderCluster(c){
     return;
   }
   const ms = c.members || [];
-  let out = '<div class="mut" style="font-size:.85em;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4em">' +
-    'one identity &middot; one log &middot; ' + ms.length + ' copies</div><div class="inner">';
+  let out = '<div class="eyebrow" style="margin-top:0">one identity &middot; one log &middot; ' +
+    ms.length + ' copies</div><div class="inner">';
   for (const m of ms) {
     out += '<div class="m"><b>' + esc(m.id) + '</b>' + (m.self ? ' <span class="mut">(this)</span>' : '') +
       '<div class="mut" style="font-size:.9em">' + (m.leader ? 'leader &mdash; accepts writes'

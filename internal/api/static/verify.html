@@ -14,8 +14,17 @@
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink);
          max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
-  nav { display: flex; flex-wrap: wrap; gap: .35em 1em; margin-bottom: 1em; }
-  nav a { margin-right: 0; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* The tab bar from the design: a rule under the whole nav, and the current
+     page underlined against it rather than merely bolded. Wrapping is what
+     keeps it off the horizontal scrollbar on a phone. */
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
+  nav a { margin-right: 0; }
+  /* An eyebrow: the small uppercase label the design uses to head a block
+     without spending an h2 on it. */
+  .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
+             letter-spacing: .07em; margin: 1.4em 0 .3em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   h1 { font-size: 1.35em; margin-bottom: .2em; }
   h2 { font-size: 1.05em; margin: 2em 0 .5em; border-bottom: 1px solid var(--line); padding-bottom: .25em; }
   h3 { font-size: .95em; font-weight: normal; color: var(--mut); margin: 1.2em 0 .4em; }
