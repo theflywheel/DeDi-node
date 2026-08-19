@@ -35,16 +35,16 @@ func TestBrowserLeafPreimageMatchesTheNodes(t *testing.T) {
 	}
 
 	type row struct {
-		Name    string `json:"name"`
-		Type    string `json:"entry_type"`
-		NS      string `json:"namespace"`
-		Reg     string `json:"registry"`
-		Rec     string `json:"record_name"`
-		Ver     int32  `json:"version_num"`
-		Digest  string `json:"digest"`
-		By      string `json:"created_by"`
-		At      string `json:"created_at"`
-		WantHex string `json:"want"`
+		Name   string `json:"name"`
+		Type   string `json:"entry_type"`
+		NS     string `json:"namespace"`
+		Reg    string `json:"registry"`
+		Rec    string `json:"record_name"`
+		Ver    int32  `json:"version_num"`
+		Digest string `json:"digest"`
+		By     string `json:"created_by"`
+		At     string `json:"created_at"`
+		Want   string `json:"want"`
 	}
 
 	cases := []struct{ ns, reg, rec, by string }{
@@ -66,7 +66,7 @@ func TestBrowserLeafPreimageMatchesTheNodes(t *testing.T) {
 		rows = append(rows, row{
 			Name: c.rec, Type: "record", NS: c.ns, Reg: c.reg, Rec: c.rec, Ver: 7,
 			Digest: "abcd", By: c.by, At: at.UTC().Format(time.RFC3339Nano),
-			WantHex: string(want),
+			Want: string(want),
 		})
 	}
 	fixtures, err := json.Marshal(rows)

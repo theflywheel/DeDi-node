@@ -163,6 +163,22 @@ async function check(){
       bind('registry', d.registry_name || d.registry, p.leaf.registry);
       // The one that matters: the leaf commits to the payload's digest.
       bind('digest', d.digest, p.leaf.digest);
+
+      // The leaf commits to the author and the moment too, and both are on
+      // display — so an envelope could show a different publisher or a
+      // different time while everything else matched, and the earlier bind
+      // would have called that a match.
+      //
+      // Which DTO field to compare each against is not guessable, and getting
+      // it wrong fails every honest record with more than one version:
+      //
+      //   leaf.created_at  is data.UPDATED_at   (created_at is the genesis)
+      //   leaf.version_num is data.VERSION_COUNT (version is the sequence id)
+      //
+      // Checked against a live response rather than assumed.
+      bind('author', d.created_by, p.leaf.created_by);
+      bind('version', d.version_count, p.leaf.version_num);
+      bind('time', d.updated_at, p.leaf.created_at);
     }
     // No data block at all is not a passing bind: there is nothing to tie the
     // proof to, and reporting "the record shown matches" when no record is

@@ -184,6 +184,23 @@ if (!sp.includes('not about this record')) {
 // passing bind by having nothing to compare.
 // namespace is carried twice (namespace_id and namespace) and the bind falls
 // back between them, so removing one is not an omission — it takes both.
+// Every field the leaf commits to and the response displays must be bound.
+// The author and the moment are both on show, so altering either while the
+// rest matched used to collect a green bind.
+for (const [field, value] of [['created_by', 'publisher:someone-else'],
+                              ['updated_at', '2001-01-01T00:00:00Z'],
+                              ['version_count', 999]]) {
+  const env = JSON.parse(GOOD);
+  env.data[field] = value;
+  document.getElementById('doc').value = JSON.stringify(env);
+  document.getElementById('vkey').value = VKEY;
+  await check();
+  const alt = out.innerHTML;
+  if (alt.includes('\u2713 The record shown is the one the proof covers')) {
+    throw new Error('altering data.' + field + ' still passed the bind: ' + alt.slice(0, 260));
+  }
+}
+
 for (const fields of [['digest'], ['record_name'], ['namespace_id', 'namespace']]) {
   const field = fields.join('+');
   const env = JSON.parse(GOOD);
