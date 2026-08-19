@@ -23,17 +23,42 @@ function maxpow2(n){ let k=1; while((k<<1) < n) k<<=1; return k; } // largest po
 
 // Recursive RFC 6962 record-proof verification, matching x/mod/sumdb/tlog.
 async function proofRoot(path, t, n, leaf){
-  if(t===1){ if(path.length!==0) throw new Error('proof len'); return leaf; }
+  // The base case reached with a non-zero index means the index was never in
+  // the tree: every legitimate recursion subtracts k until n is 0 at a leaf.
+  // Without this a size-1 proof returned its leaf for ANY index, so an envelope
+  // could claim leaf_index 999 in a tree of 1 and still fold to the signed
+  // root. Go's tlog rejects that; this was the more permissive of the two.
+  if(t===1){
+    if(path.length!==0) throw new Error('proof len');
+    if(n!==0) throw new Error('leaf index ' + n + ' is not in a tree of size 1');
+    return leaf;
+  }
   if(path.length===0) throw new Error('empty path');
   const k = maxpow2(t), top = path[path.length-1], rest = path.slice(0,-1);
   if(n < k){ return nodeHash(await proofRoot(rest, k, n, leaf), top); }
   return nodeHash(top, await proofRoot(rest, t-k, n-k, leaf));
 }
 
-// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes. JSON.stringify
-// and Go json.Marshal agree for ASCII payloads (no <,>,& in these fields).
+// Canonical leaf preimage: MUST byte-match Go merkle.LeafBytes.
+//
+// The leaf preimage must be byte-identical to internal/merkle.LeafBytes, which
+// builds it with Go's encoding/json — and Go escapes <, > and & in strings by
+// default, plus U+2028 and U+2029. JSON.stringify escapes none of them.
+//
+// None of those characters is structural in JSON, so they can only appear
+// inside a string value and replacing them in the finished output is exact.
+//
+// The store accepts them in a namespace, registry, record name or author, so
+// without this a perfectly valid inclusion proof for a record named
+// "a&b.example" is reported as not folding to the root — the verifier calling
+// an honest node a liar.
+const GO_ESCAPES = { '<': '\\u003c', '>': '\\u003e', '&': '\\u0026',
+                     '\u2028': '\\u2028', '\u2029': '\\u2029' };
+function goJSON(v){
+  return JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, c => GO_ESCAPES[c]);
+}
 function leafBytes(L){
-  return te.encode(JSON.stringify([
+  return te.encode(goJSON([
     "dedi/v1/leaf", L.entry_type, L.namespace, L.registry, L.record_name,
     L.version_num, L.digest, L.created_by, L.created_at ]));
 }
@@ -99,13 +124,23 @@ async function verifyCheckpointSig(note, vkey){
 // derivation instead of a verdict. They exist because "verified ✓" is itself
 // just an assertion unless the reader can see which bytes were combined in what
 // order to get there. The untraced functions above remain the ones used for the
-// answer; these must agree with them, and a test asserts that they do.
+// answer; these must agree with them, and tests assert that they do — for
+// consistency proofs and, since one guard was added to only half of them, for
+// inclusion proofs as well.
 
 function b64e(u){ let s=''; for(const b of u) s += String.fromCharCode(b); return btoa(s); }
 
 // proofRootTraced mirrors proofRoot, appending {left, right, out} per step.
 async function proofRootTraced(path, t, n, leaf, steps){
-  if(t===1){ if(path.length!==0) throw new Error('proof len'); return leaf; }
+  // The same guard as the untraced version, and it has to be here too: this is
+  // the one /verify actually computes its inclusion verdict with, so guarding
+  // only the other left the page that shows every byte accepting an index the
+  // page that shows a tick rejected.
+  if(t===1){
+    if(path.length!==0) throw new Error('proof len');
+    if(n!==0) throw new Error('leaf index ' + n + ' is not in a tree of size 1');
+    return leaf;
+  }
   if(path.length===0) throw new Error('empty path');
   const k = maxpow2(t), top = path[path.length-1], rest = path.slice(0,-1);
   if(n < k){

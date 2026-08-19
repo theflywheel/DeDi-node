@@ -23,6 +23,9 @@ var networkPageHTML []byte
 //go:embed static/status.html
 var statusPageHTML []byte
 
+//go:embed static/check.html
+var checkPageHTML []byte
+
 //go:embed static/docs.html
 var docsHTML []byte
 
@@ -76,6 +79,19 @@ func (s *Server) explorer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) networkPage(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(networkPageHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
 	s.writePage(w, page, "/network")
+}
+
+// checkPage serves the record checker: paste a record and its inclusion proof
+// and have the browser recompute it.
+//
+// Separate from /verify, which is about WITNESS evidence — whether an
+// independent node has proved this log append-only. This one answers a
+// narrower, more common question: is this record really in the log its holder
+// says it is. Both are "check it yourself", at different scopes, and folding
+// them together would put a ring diagram in front of someone holding one
+// record.
+func (s *Server) checkPage(w http.ResponseWriter, r *http.Request) {
+	s.writePage(w, checkPageHTML, "/check")
 }
 
 // writePage substitutes the placeholders every page shares and sends it.

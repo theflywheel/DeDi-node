@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check a record</title>
+<style>
+  /* A named family first, deliberately. Bare `font-family: monospace` triggers
+     the browser's monospace font-size quirk: the page renders at the "default
+     fixed" size — 13px in Chrome and Safari — instead of 16px. */
+  /* One semantic palette, shared with every other page. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em;
+         margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.3em; margin: 0 0 .2em; }
+  h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
+  /* The tab bar from the design: a rule under the whole nav, and the current
+     page underlined against it rather than merely bolded. Wrapping is what
+     keeps it off the horizontal scrollbar on a phone. */
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
+  nav a { margin-right: 0; }
+  /* An eyebrow: the small uppercase label the design uses to head a block
+     without spending an h2 on it. */
+  .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
+             letter-spacing: .07em; margin: 1.4em 0 .3em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top;
+           overflow-wrap: anywhere; }
+  th { background: #f4f4f4; font-weight: normal; }
+  .tw { overflow-x: auto; }
+  pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 0 .2em; }
+  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
+  .warn { color: var(--warn); }
+  textarea { font-family: inherit; font-size: .92em; width: 100%; box-sizing: border-box;
+             min-height: 14em; padding: .5em; border: 1px solid #ccc; }
+  input { font-family: inherit; font-size: 1em; width: 100%; box-sizing: border-box;
+          padding: .25em .35em; border: 1px solid #ccc; }
+  button { font-family: inherit; font-size: 1em; padding: .3em .9em; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.6em; align-items: start; }
+  .step { border-left: 3px solid #ccc; padding-left: .8em; margin: .5em 0; }
+  .step.pass { border-left-color: var(--ok); }
+  .step.fail { border-left-color: var(--bad); }
+  .verdict { border: 1px solid #ccc; border-top-width: 3px; padding: .7em .9em; margin: .8em 0; }
+  .verdict.pass { border-color: var(--ok); }
+  .verdict.fail { border-color: var(--bad); }
+  .verdict.part { border-color: var(--warn); }
+  @media (max-width: 46em) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+{{NAV}}
+
+<h1>Check a record</h1>
+<p class="mut">Paste a record and its inclusion proof, or fetch one by URL. Everything below is
+recomputed <b>in your browser</b> from the bytes you supply — the hashes, the Merkle path, and the
+signature on the checkpoint. The checking is entirely local and this node is never asked to confirm
+any of it; if you use the fetch box, your browser requests that URL and nothing else leaves it.</p>
+
+<div class="cols">
+  <div>
+    <h2>What to check</h2>
+    <label for="src" class="mut">fetch it for me <span class="mut">(any node's lookup URL)</span></label>
+    <div style="display:flex;gap:.4em;margin-bottom:.6em">
+      <input id="src" placeholder="https://node.example/dedi/lookup/ns/registry/record?proof=inclusion" spellcheck="false">
+      <button id="fetch" style="white-space:nowrap">fetch</button>
+    </div>
+    <label for="doc" class="mut">or paste the whole response</label>
+    <textarea id="doc" spellcheck="false" placeholder='{"data": {...}, "proof": {"leaf_index": 0, "tree_size": 1, "checkpoint": "...", "path": [], "leaf": {...}}}'></textarea>
+    <label for="vkey" class="mut" style="display:block;margin-top:.6em">the signer's verifier key
+      <span class="mut">(optional — without it the signature is not checked)</span></label>
+    <input id="vkey" placeholder="node.example/log+7f3a1c9d+Aa4b…" spellcheck="false">
+    <p style="margin:.8em 0 0"><button id="go">check it</button></p>
+  </div>
+
+  <div>
+    <h2>What that establishes</h2>
+    <div id="out"><p class="mut">Nothing yet.</p></div>
+  </div>
+</div>
+
+<h2>What this cannot tell you</h2>
+<p class="mut">That the <b>content shown is the content that was hashed</b>. The leaf commits to a
+digest of the record&rsquo;s payload, and this page checks that the digest beside the record matches
+the one in the leaf — but a lookup response carries the payload as parsed fields, not as the bytes
+the digest was taken over, so your browser cannot recompute it. Someone who altered both the content
+and the digest together would pass this check.</p>
+<p class="mut">That the log is <b>append-only</b>. An inclusion proof says this record is in the tree
+the checkpoint describes; it says nothing about whether that tree is an extension of the one the node
+published yesterday. Only a party who kept yesterday's checkpoint can establish that, which is what
+<a href="/network">the ring</a> is for, and what <a href="/verify">the evidence page</a> shows in
+full.</p>
+
+<script src="/static/verify.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => Number(n).toLocaleString();
+
+function step(state, title, detail){
+  return '<div class="step ' + state + '"><b class="' + (state === 'pass' ? 'ok' : state === 'fail' ? 'no' : 'mut') +
+    '">' + (state === 'pass' ? '✓ ' : state === 'fail' ? '✗ ' : '· ') + esc(title) + '</b>' +
+    (detail ? '<div class="mut" style="font-size:.92em">' + detail + '</div>' : '') + '</div>';
+}
+
+// Every claim on this page is recomputed here, from the bytes in the textarea.
+// The one thing a browser cannot supply is custody: it did not hold yesterday's
+// checkpoint, so it can confirm this record is in THIS tree and nothing about
+// whether this tree is an honest continuation of an earlier one.
+async function check(){
+  const out = $('out');
+  let env;
+  try {
+    env = JSON.parse($('doc').value);
+  } catch (e) {
+    out.innerHTML = '<p class="no">That is not JSON: ' + esc(e.message) + '</p>';
+    return;
+  }
+  const p = env.proof, d = env.data;
+  if (!p || !p.leaf || !Array.isArray(p.path)) {
+    out.innerHTML = '<p class="no">No inclusion proof in that response.</p>' +
+      '<p class="mut">Ask for one by adding <code>?proof=inclusion</code> to the lookup URL. ' +
+      'A record without a proof is just this node&rsquo;s word for it.</p>';
+    return;
+  }
+
+  let html = '';
+  let bound = true;   // does the record shown match the leaf that was proved?
+  try {
+    // 0. Bind the displayed record to the leaf BEFORE proving anything about
+    //    the leaf.
+    //
+    //    Everything below proves things about p.leaf. Nothing about that says
+    //    the `data` block beside it is the same record — and a response is a
+    //    single blob a reader pastes, so one containing somebody else's genuine
+    //    leaf and proof next to a record of your choosing would verify
+    //    perfectly and display the wrong thing. The proof would be real, the
+    //    fold real, the signature real, and the answer a lie.
+    const mismatched = [];
+    // A field that is ABSENT is not a field that matched.
+    //
+    // Skipping the comparison when either side is undefined meant an envelope
+    // could simply omit data.digest — the one value that ties the record to the
+    // leaf — and collect the green bind. Deleting a field is easier than
+    // forging one, so the lenient branch was the cheaper attack, and it is the
+    // same mistake as treating a missing data block as a pass, one layer in.
+    const bind = (label, a, b) => {
+      const have = v => v !== undefined && v !== null && String(v) !== '';
+      if (!have(a) || !have(b)) {
+        mismatched.push(label + ' is missing, so nothing was compared');
+        return;
+      }
+      if (String(a) !== String(b)) {
+        mismatched.push(label + ' (' + esc(String(a)) + ' vs ' + esc(String(b)) + ')');
+      }
+    };
+    if (d) {
+      // The identity fields differ by entry type, and the endpoint serves
+      // proofs for all three. A namespace lookup returns record_name "" and
+      // carries its name as `name`, so binding it as a record reported
+      // "nothing was compared" and REFUSED a perfectly valid proof — a false
+      // rejection, which tells an honest reader their record is not in the log.
+      const kind = p.leaf.entry_type || 'record';
+
+      // The leaf must not get to choose which fields are compared.
+      //
+      // Taking `kind` from the leaf alone let an envelope pair a namespace
+      // proof — whose branch only binds the namespace — with record-shaped
+      // data, and the record's own name and registry were then never looked
+      // at. Picking the leaf picked the weakest branch.
+      //
+      // So the response's own shape is derived and required to agree. The DTOs
+      // are cleanly distinguishable: a record carries record_name, a registry
+      // carries registry_id without one, a namespace carries neither.
+      const dataKind = d.record_name !== undefined ? 'record'
+                     : d.registry_id !== undefined ? 'registry'
+                     : d.name !== undefined ? 'namespace'
+                     : 'unrecognised';
+      bind('entry type', dataKind, kind);
+
+      if (kind === 'namespace') {
+        bind('namespace', d.name || d.namespace_id || d.namespace, p.leaf.namespace);
+      } else if (kind === 'registry') {
+        bind('registry', d.name || d.registry_name, p.leaf.registry);
+        bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
+      } else {
+        bind('record name', d.record_name, p.leaf.record_name);
+        bind('namespace', d.namespace_id || d.namespace, p.leaf.namespace);
+        bind('registry', d.registry_name || d.registry, p.leaf.registry);
+      }
+      // The one that matters: the leaf commits to the payload's digest.
+      bind('digest', d.digest, p.leaf.digest);
+
+      // The leaf commits to the author and the moment too, and both are on
+      // display — so an envelope could show a different publisher or a
+      // different time while everything else matched, and the earlier bind
+      // would have called that a match.
+      //
+      // Which DTO field to compare each against is not guessable:
+      //
+      //   leaf.created_at is data.UPDATED_at   created_at is the genesis time
+      //   proof.leaf_index is data.VERSION     both are the log position
+      //
+      // version_count is NOT leaf.version_num. It is the total number of
+      // versions, equal to this entry's number only when you are looking at
+      // the newest one — so binding them rejected every honest historical
+      // proof. Verified against a real one: version_id=425 returns
+      // version_count 6 beside version_num 1.
+      //
+      // data.version is the stronger bind anyway. It is the sequence, so it
+      // ties the record shown to the exact log position being proved, which is
+      // what leaf_index names.
+      bind('author', d.created_by, p.leaf.created_by);
+      bind('log position', d.version, p.leaf_index);
+      bind('time', d.updated_at, p.leaf.created_at);
+    }
+    // No data block at all is not a passing bind: there is nothing to tie the
+    // proof to, and reporting "the record shown matches" when no record is
+    // shown is the same false pass in a quieter form.
+    if (!d) {
+      bound = false;
+      mismatched.push('there is no record in this response to bind the proof to');
+    }
+    bound = bound && mismatched.length === 0;
+    html += step(bound ? 'pass' : 'fail',
+      bound ? 'The record shown is the one the proof covers'
+            : 'The record shown is NOT the one the proof covers',
+      bound
+        ? 'Name, namespace, registry and payload digest all match the proved leaf.'
+        : 'Mismatched: ' + mismatched.join('; ') + '. Everything below proves something about the ' +
+          'leaf, not about the record displayed beside it.');
+
+    // 1. the leaf, rebuilt from the record's own fields
+    const leaf = await leafHash(leafBytes(p.leaf));
+    html += step('pass', 'The leaf hashes to what the proof assumes',
+      'Rebuilt from entry type, namespace, registry, record name, version, digest, author and time — ' +
+      'change any one of them and this hash changes.');
+
+    // 2. the checkpoint, and what it commits to
+    const note = parseNote(p.checkpoint);
+    if (!note) throw new Error('the checkpoint is not a signed note');
+    const cp = parseCheckpointBody(note.body);
+
+    // Reported BEFORE the fold, and not merely because it reads better: a
+    // malformed proof makes proofRoot throw, and a size step emitted after it
+    // would never render for exactly the envelopes it exists to describe.
+    //
+    // The checkpoint signs both size and root, so a proof claiming a different
+    // tree size is not bound to that signature however the roots compare.
+    // /browse has checked this since it was written; this page did not.
+    const sizeMatch = cp.size === p.tree_size;
+    html += step(sizeMatch ? 'pass' : 'fail',
+      sizeMatch ? 'The proof binds to the size the checkpoint signed'
+                : 'The proof does NOT bind to the size the checkpoint signed',
+      'proof says ' + num(p.tree_size) + ', the signed checkpoint says ' + num(cp.size) + '.');
+
+    // 3. fold the path
+    //
+    // The index is validated here as well as in proofRoot, so the reader gets
+    // a sentence about the envelope rather than a thrown error about the fold.
+    if (!Number.isInteger(p.leaf_index) || !Number.isInteger(p.tree_size) ||
+        p.tree_size < 1 || p.leaf_index < 0 || p.leaf_index >= p.tree_size) {
+      html += step('fail', 'The proof names a position that is not in the tree',
+        'leaf ' + esc(String(p.leaf_index)) + ' of a tree of ' + esc(String(p.tree_size)) + '.');
+      throw new Error('leaf_index ' + p.leaf_index + ' is not within a tree of size ' + p.tree_size);
+    }
+    const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, leaf);
+
+    const rootsMatch = eq(root, cp.root);
+    html += step(rootsMatch ? 'pass' : 'fail',
+      rootsMatch ? 'The path folds to the checkpoint&rsquo;s root'
+                 : 'The path does NOT fold to the checkpoint&rsquo;s root',
+      num(p.path.length) + ' sibling hashes, from leaf ' + num(p.leaf_index) + ' of ' +
+      num(p.tree_size) + '. Computed <code>' + esc(b64e(root)) + '</code>' +
+      (rootsMatch ? '' : ', but the checkpoint says <code>' + esc(cp.rootB64) + '</code>'));
+
+    // 4. the signature, if a key was supplied
+    let sigState = 'absent';   // absent | unchecked | pass | fail
+    const vkey = $('vkey').value.trim();
+    if (!vkey) {
+      html += step('', 'The checkpoint signature was not checked',
+        'No verifier key given. Without one, the checkpoint is unauthenticated: anyone can write a ' +
+        'root that a matching path folds to. Paste the signer&rsquo;s key to close that.');
+    } else {
+      const sig = await verifyCheckpointSig(p.checkpoint, vkey);
+      sigState = sig === null ? 'unchecked' : sig ? 'pass' : 'fail';
+      if (sig === null) {
+        html += step('', 'Your browser could not run the signature check',
+          'No Ed25519 in WebCrypto, or this page is not on a secure origin. Nothing is established ' +
+          'either way — this is a failure to check, not a finding.');
+      } else {
+        html += step(sig ? 'pass' : 'fail',
+          sig ? 'The checkpoint is signed by that key' : 'The checkpoint is NOT signed by that key',
+          'Origin <code>' + esc(cp.origin) + '</code>, ' + num(cp.size) + ' entries.');
+      }
+    }
+
+    // The headline may not be greener than the weakest step under it.
+    //
+    // An earlier version keyed it on rootsMatch alone, so a proof whose
+    // signature FAILED — or could not be checked at all — still carried
+    // "✓ This record is in the log" above a red line saying otherwise. A
+    // checkpoint nobody signed is not evidence: anyone can write a root that a
+    // matching path folds to, which is the whole reason the key is asked for.
+    let cls, head, sub;
+    if (!bound) {
+      cls = 'fail';
+      head = '<b class="no">✗ That proof is not about this record.</b>';
+      sub = 'Whatever the proof establishes, it establishes about a different entry.';
+    } else if (!sizeMatch) {
+      cls = 'fail';
+      head = '<b class="no">✗ That proof is not bound to the signed checkpoint.</b>';
+      sub = 'It claims a different tree size from the one the signature covers.';
+    } else if (!rootsMatch) {
+      cls = 'fail';
+      head = '<b class="no">✗ This record is not in that log.</b>';
+      sub = 'The path does not fold to the root the checkpoint states.';
+    } else if (sigState === 'fail') {
+      cls = 'fail';
+      head = '<b class="no">✗ That checkpoint is not signed by the key you gave.</b>';
+      sub = 'The path folds correctly, which establishes nothing on its own — an unsigned ' +
+        'checkpoint is a number anyone can write.';
+    } else if (sigState === 'pass') {
+      cls = 'pass';
+      head = '<b class="ok">✓ This record is in the log that checkpoint describes.</b>';
+      sub = 'And that checkpoint is signed by the key you gave.';
+    } else {
+      // absent or unchecked: the fold is real, the signer is not established.
+      cls = 'part';
+      head = '<b class="warn">Partly checked: the record is in <i>a</i> log.</b>';
+      sub = sigState === 'unchecked'
+        ? 'Your browser could not run the signature check, so nothing ties that checkpoint to a signer.'
+        : 'No verifier key was given, so nothing ties that checkpoint to a signer.';
+    }
+    html = '<div class="verdict ' + cls + '">' + head +
+      '<div class="mut" style="font-size:.92em">' + sub + '</div>' +
+      (d && d.record_name ? '<div class="mut">' + esc(d.record_name) + '</div>' : '') +
+      '</div>' + html;
+  } catch (e) {
+    html += step('fail', 'The proof could not be checked', esc(String(e && e.message || e)));
+  }
+  out.innerHTML = html;
+}
+
+async function fetchIt(){
+  const url = $('src').value.trim();
+  if (!url) return;
+  $('out').innerHTML = '<p class="mut">fetching…</p>';
+  try {
+    const u = new URL(url, location.origin);
+    if (!u.searchParams.has('proof')) u.searchParams.set('proof', 'inclusion');
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 8000);
+    const r = await fetch(u.toString(), { signal: c.signal });
+    clearTimeout(t);
+    const text = await r.text();
+    $('doc').value = text;
+    // The key belongs to whoever signed the checkpoint, so it cannot be
+    // inferred from the response — that would be asking the node to vouch for
+    // its own signature.
+    await check();
+  } catch (e) {
+    $('out').innerHTML = '<p class="no">Could not fetch that: ' + esc(String(e && e.message || e)) +
+      '</p><p class="mut">A node has to allow cross-origin reads for this to work from here; ' +
+      'every dedid node does. Otherwise paste the response instead.</p>';
+  }
+}
+
+$('go').onclick = check;
+$('fetch').onclick = fetchIt;
+</script>
+</body>
+</html>

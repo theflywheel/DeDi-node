@@ -6,22 +6,44 @@
 <title>Status</title>
 <meta name="dedi-external-status" content="{{STATUS_URL}}">
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
+  /* Shared palette; see TestEverySurfaceSharesTheTypeAndPalette. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
+  /* Named family first: the bare keyword triggers the 13px monospace quirk.
+     Enforced by TestEverySurfaceSharesTheTypeAndPalette. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.5; }
   h1 { font-size: 1.3em; margin: 0 0 .2em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
-  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* The tab bar from the design: a rule under the whole nav, and the current
+     page underlined against it rather than merely bolded. Wrapping is what
+     keeps it off the horizontal scrollbar on a phone. */
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
+  nav a { margin-right: 0; }
+  /* An eyebrow: the small uppercase label the design uses to head a block
+     without spending an h2 on it. */
+  .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
+             letter-spacing: .07em; margin: 1.4em 0 .3em; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
+     what actually push a table past the viewport. Letting them break inside the
+     cell is what keeps the page from scrolling sideways on a phone. */
+  th, td { overflow-wrap: anywhere; }
+  /* And a table with genuinely many columns scrolls inside its own box rather
+     than taking the page with it. */
+  .tw { overflow-x: auto; }
+
   th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
   th { background: #f4f4f4; font-weight: normal; }
   td.num { font-variant-numeric: tabular-nums; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: green; } .no { color: #b00; } .mut { color: #666; } .warn { color: #8a6d00; }
-  .wit { color: #1f4788; }
+  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); } .warn { color: var(--warn); }
+  .wit { color: var(--wit); }
   .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
   /* The one claim on this page that is not self-reported gets the colour the
      other pages reserve for exactly that. */
-  .checked { border: 1px solid #1f4788; border-left-width: 3px; padding: .5em .8em; margin: .8em 0; }
+  .checked { border: 1px solid var(--wit); border-left-width: 3px; padding: .5em .8em; margin: .8em 0; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: .5em; margin: .6em 0 1em; }
   .card { border: 1px solid #ccc; padding: .5em .7em; }
   .card .v { font-size: 1.25em; font-variant-numeric: tabular-nums; }
@@ -65,7 +87,7 @@ here, and that is decided by log position rather than by which half-hour a signa
   <div class="lbl" style="margin-top:.5em"><span class="mut">&nbsp;</span><span class="mut">entries written</span><span class="mut">&nbsp;</span></div>
   <div class="row act" id="row-act"></div>
   <div class="key">
-    <span><i class="sw" style="background:#1f4788"></i> signed</span>
+    <span><i class="sw" style="background:var(--wit)"></i> signed</span>
     <span><i class="sw" style="background:#ccc"></i> entries written</span>
     <span><i class="sw" style="background:#fff"></i> idle &mdash; nothing to sign</span>
     <span><i class="sw" style="background:#b00"></i> writes unsigned</span>
@@ -73,7 +95,7 @@ here, and that is decided by log position rather than by which half-hour a signa
 </div>
 <p class="mut" id="verdict" style="margin-top:.5em"></p>
 
-<h2>Right now</h2>
+<div class="eyebrow">right now</div>
 <table id="now"><tr><td class="mut">reading&hellip;</td></tr></table>
 
 <script>
@@ -150,7 +172,7 @@ function render(d){
         num(b.max_seq) + ' yet';
       unsigned++;
     } else if (signed) {
-      colour = '#1f4788';
+      colour = 'var(--wit)';
       title = when + ' — signed ' + num(b.checkpoints) + ' checkpoint(s)';
       signing++;
     } else if (wrote) {

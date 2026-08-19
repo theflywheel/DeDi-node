@@ -244,6 +244,10 @@ func buildDocs() {
 			return
 		}
 		body := mermaidFence.ReplaceAllString(out.String(), `<pre class="mermaid">$1</pre>`)
+		// goldmark emits a bare <table>; give each one a scroll container so a
+		// wide one cannot push the whole page sideways on a phone.
+		body = strings.ReplaceAll(body, "<table>", `<div class="tw"><table>`)
+		body = strings.ReplaceAll(body, "</table>", `</table></div>`)
 
 		d := &doc{
 			Slug:  strings.TrimSuffix(e.Name(), ".md"),
@@ -379,13 +383,23 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DeDi Node · ` + html.EscapeString(title) + `</title>
 <style>
-  body { font-family: monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
-  nav { margin-bottom: 1em; } nav a { margin-right: 1em; }
-  nav a.sel { color: inherit; font-weight: bold; text-decoration: none; }
+  /* A named family first: the bare monospace keyword triggers the browser's
+     monospace font-size quirk and renders the page at 13px instead of 16px. */
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 68em; margin: 1.5em auto; padding: 0 1em; line-height: 1.55; }
+  nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
+        border-bottom: 1px solid #ccc; padding-bottom: .5em; }
+  nav a { margin-right: 0; }
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+              border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   h1 { font-size: 1.3em; } h2 { font-size: 1.05em; margin: 1.8em 0 .4em; }
   h3 { font-size: .98em; margin: 1.4em 0 .3em; }
   table { border-collapse: collapse; width: 100%; font-size: .92em; margin: .6em 0; }
-  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top;
+           overflow-wrap: anywhere; }
+  /* A markdown table can have as many columns as its author felt like. It
+     scrolls inside its own box rather than taking the page sideways with it —
+     the same treatment pre blocks have had here since the plane was written. */
+  .tw { overflow-x: auto; }
   th { background: #f4f4f4; }
   /* Code and tables are the two things that overflow on a phone. Each scrolls
      inside its own box so the page itself never scrolls sideways. */
@@ -394,7 +408,8 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   code { background: #f4f4f4; padding: 0 .2em; }
   pre code { background: none; padding: 0; }
   blockquote { border-left: 3px solid #ccc; margin: .8em 0; padding: 0 0 0 .8em; color: #444; }
-  .mut { color: #666; }
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; }
+  .mut { color: var(--mut); }
   .back { margin-top: 2.5em; border-top: 1px solid #ddd; padding-top: .8em; }
   /* Contents beside the page, not under it. Nineteen documents with a reading
      order need navigation that is present rather than findable. */
@@ -406,7 +421,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
               margin: 1.1em 0 .3em; }
   .toc .sec:first-child { margin-top: 0; }
   .toc a, .toc .here { display: block; padding: .12em 0; }
-  .toc .here { font-weight: bold; border-left: 2px solid #1f4788; padding-left: .5em; margin-left: -.6em; }
+  .toc .here { font-weight: bold; border-left: 2px solid var(--wit); padding-left: .5em; margin-left: -.6em; }
   .pn { display: flex; justify-content: space-between; gap: 1em; margin-top: 2.5em;
         border-top: 1px solid #ddd; padding-top: .8em; font-size: .95em; }
   .pn span { flex: 1 1 0; }
