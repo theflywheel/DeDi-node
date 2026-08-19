@@ -47,6 +47,7 @@
   .verdict { border: 1px solid #ccc; border-top-width: 3px; padding: .7em .9em; margin: .8em 0; }
   .verdict.pass { border-color: var(--ok); }
   .verdict.fail { border-color: var(--bad); }
+  .verdict.part { border-color: var(--warn); }
   @media (max-width: 46em) { .cols { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -144,6 +145,7 @@ async function check(){
       (rootsMatch ? '' : ', but the checkpoint says <code>' + esc(cp.rootB64) + '</code>'));
 
     // 3. the signature, if a key was supplied
+    let sigState = 'absent';   // absent | unchecked | pass | fail
     const vkey = $('vkey').value.trim();
     if (!vkey) {
       html += step('', 'The checkpoint signature was not checked',
@@ -151,6 +153,7 @@ async function check(){
         'root that a matching path folds to. Paste the signer&rsquo;s key to close that.');
     } else {
       const sig = await verifyCheckpointSig(p.checkpoint, vkey);
+      sigState = sig === null ? 'unchecked' : sig ? 'pass' : 'fail';
       if (sig === null) {
         html += step('', 'Your browser could not run the signature check',
           'No Ed25519 in WebCrypto, or this page is not on a secure origin. Nothing is established ' +
@@ -162,11 +165,37 @@ async function check(){
       }
     }
 
-    const good = rootsMatch && $('vkey').value.trim() === '' ? null : rootsMatch;
-    html = '<div class="verdict ' + (rootsMatch ? 'pass' : 'fail') + '">' +
-      (rootsMatch
-        ? '<b class="ok">✓ This record is in the log that checkpoint describes.</b>'
-        : '<b class="no">✗ This record is not in that log.</b>') +
+    // The headline may not be greener than the weakest step under it.
+    //
+    // An earlier version keyed it on rootsMatch alone, so a proof whose
+    // signature FAILED — or could not be checked at all — still carried
+    // "✓ This record is in the log" above a red line saying otherwise. A
+    // checkpoint nobody signed is not evidence: anyone can write a root that a
+    // matching path folds to, which is the whole reason the key is asked for.
+    let cls, head, sub;
+    if (!rootsMatch) {
+      cls = 'fail';
+      head = '<b class="no">✗ This record is not in that log.</b>';
+      sub = 'The path does not fold to the root the checkpoint states.';
+    } else if (sigState === 'fail') {
+      cls = 'fail';
+      head = '<b class="no">✗ That checkpoint is not signed by the key you gave.</b>';
+      sub = 'The path folds correctly, which establishes nothing on its own — an unsigned ' +
+        'checkpoint is a number anyone can write.';
+    } else if (sigState === 'pass') {
+      cls = 'pass';
+      head = '<b class="ok">✓ This record is in the log that checkpoint describes.</b>';
+      sub = 'And that checkpoint is signed by the key you gave.';
+    } else {
+      // absent or unchecked: the fold is real, the signer is not established.
+      cls = 'part';
+      head = '<b class="warn">Partly checked: the record is in <i>a</i> log.</b>';
+      sub = sigState === 'unchecked'
+        ? 'Your browser could not run the signature check, so nothing ties that checkpoint to a signer.'
+        : 'No verifier key was given, so nothing ties that checkpoint to a signer.';
+    }
+    html = '<div class="verdict ' + cls + '">' + head +
+      '<div class="mut" style="font-size:.92em">' + sub + '</div>' +
       (d && d.record_name ? '<div class="mut">' + esc(d.record_name) + '</div>' : '') +
       '</div>' + html;
   } catch (e) {

@@ -45,6 +45,15 @@ func TestEverySurfaceSharesTheTypeAndPalette(t *testing.T) {
 		if !strings.Contains(page, "--ok:") {
 			t.Errorf("%s does not define the shared semantic palette", name)
 		}
+		// A token defined as itself is cyclic: it computes invalid and every
+		// use silently falls back to the inherited value. A blanket
+		// find-and-replace of the literal colour did exactly this to five
+		// pages, and nothing looked wrong in the source.
+		for _, tok := range []string{"ok", "bad", "mut", "wit", "warn"} {
+			if strings.Contains(page, "--"+tok+": var(--"+tok+")") {
+				t.Errorf("%s defines --%s as itself, so every use of it computes invalid", name, tok)
+			}
+		}
 		// The old literals must not creep back in beside the tokens.
 		for _, stale := range []string{"color: green;", "color: #b00;", "color: #666;"} {
 			if strings.Contains(page, stale) {

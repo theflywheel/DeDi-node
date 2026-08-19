@@ -5,13 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DeDi Node · Operator console</title>
 <style>
-  /* One semantic palette, shared with every other page.
-     These values came from /verify, which had the only considered set: the CSS
-     keyword `green` is a harsh pure hue and #b00 a harsh red, while these are
-     the same meanings at a saturation that reads on a screen. Four pages using
-     four values for "this verified" is the kind of drift a reader feels without
-     being able to name. */
-  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: var(--wit); --warn: #8a6d1f; }
+  /* Shared palette; see TestEverySurfaceSharesTheTypeAndPalette. */
+  :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
   /* A named family first, deliberately. Bare `font-family: monospace` triggers
      the browser's monospace font-size quirk: the page renders at the "default
      fixed" size — 13px in Chrome and Safari — instead of 16px. Every page here

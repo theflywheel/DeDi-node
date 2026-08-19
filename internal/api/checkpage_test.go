@@ -84,7 +84,15 @@ const fake = id => ({ id, innerHTML: '', value: '', textContent: '', onclick: nu
   addEventListener(){}, });
 globalThis.document = { getElementById: id => { if(!els.has(id)) els.set(id, fake(id)); return els.get(id); } };
 globalThis.location = { origin: 'http://node.example' };
-globalThis.crypto = (await import('node:crypto')).webcrypto;
+// Node 22 exposes globalThis.crypto as a getter-only property, so a plain
+// assignment throws before any assertion runs. defineProperty works on both,
+// and CI runs a newer Node than this laptop — which is why the test passed
+// locally and failed there.
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, 'crypto', {
+    value: (await import('node:crypto')).webcrypto, configurable: true,
+  });
+}
 globalThis.fetch = async () => ({ ok: true, text: async () => '' });
 const GOOD = fs.readFileSync(process.argv[2], 'utf8');
 const BAD  = fs.readFileSync(process.argv[3], 'utf8');
@@ -100,6 +108,31 @@ const okHTML = out.innerHTML;
 if (!okHTML.includes('is in the log')) throw new Error('a real proof did not verify: ' + okHTML.slice(0, 400));
 if (!okHTML.includes('signed by that key')) throw new Error('the signature was not checked: ' + okHTML.slice(0, 400));
 
+// A matching path with a WRONG key must not carry a green headline. The
+// verdict used to key on the fold alone, so a failed signature sat under
+// "\u2713 This record is in the log" — the false green this page exists to
+// avoid, in the page written to avoid it.
+document.getElementById('doc').value = GOOD;
+document.getElementById('vkey').value = 'other.example/log+11111111+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+await check();
+const wrongKey = out.innerHTML;
+if (wrongKey.includes('\u2713 This record is in the log')) {
+  throw new Error('a bad signature still produced a green verdict: ' + wrongKey.slice(0, 300));
+}
+
+// And with NO key the headline must not claim more than was established.
+document.getElementById('doc').value = GOOD;
+document.getElementById('vkey').value = '';
+await check();
+const noKey = out.innerHTML;
+if (noKey.includes('\u2713 This record is in the log')) {
+  throw new Error('an unsigned checkpoint produced a green verdict: ' + noKey.slice(0, 300));
+}
+if (!noKey.includes('Partly checked')) {
+  throw new Error('no-key case does not say what is missing: ' + noKey.slice(0, 300));
+}
+
+document.getElementById('vkey').value = VKEY;
 document.getElementById('doc').value = BAD;
 await check();
 const badHTML = out.innerHTML;
