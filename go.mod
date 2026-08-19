@@ -10,8 +10,9 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/yuin/goldmark v1.8.5
-	golang.org/x/crypto v0.7.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/mod v0.38.0
+	golang.org/x/net v0.58.0
 )
 
 require (
@@ -43,8 +44,8 @@ require (
 	github.com/rs/cors v1.8.2 // indirect
 	github.com/vedhavyas/go-subkey/v2 v2.0.0 // indirect
 	go.etcd.io/bbolt v1.3.5 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )

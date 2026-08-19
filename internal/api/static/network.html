@@ -519,10 +519,55 @@ function renderCluster(c){
         : 'follower &mdash; serves reads') + '</div></div>';
   }
   out += '</div>';
-  const q = Math.floor(ms.length / 2) + 1;
-  out += '<p class="mut" style="margin:.5em 0 0">A majority (' + q + ' of ' + ms.length + ') must agree before ' +
-    'a write is accepted, so ' + Math.floor((ms.length - 1) / 2) + ' can fail without the directory stopping. ' +
-    'Lag and last-contact are on <a href="/status">status</a>.</p>';
+  // A cluster with no leader is rejecting every write. Without this the page
+  // draws each member as "follower — serves reads" and prints the quorum
+  // arithmetic unchanged, so a set that is refusing writes looks like a healthy
+  // one. This warning existed on the old browse page and went out with it.
+  if (!c.leader_id) {
+    out += '<p class="no" style="margin:.5em 0 0">✗ <b>No leader right now</b> — an election is in ' +
+      'progress. Reads are unaffected; writes wait a second or two. If this persists, the set is ' +
+      'not accepting writes at all.</p>';
+  } else {
+    const q = Math.floor(ms.length / 2) + 1;
+    out += '<p class="mut" style="margin:.5em 0 0">Led by <b>' + esc(c.leader_id) + '</b> in election ' +
+      'term ' + num(c.term || 0) + '; the group has committed ' + num(c.commit_index || 0) + ' entries. ' +
+      'A majority (' + q + ' of ' + ms.length + ') must agree before a write is accepted, so ' +
+      Math.floor((ms.length - 1) / 2) + ' can fail without the directory stopping.</p>';
+    // A term climbing on every refresh is a flapping replica or a partition,
+    // and a single snapshot of "who leads" cannot show it.
+  }
+
+  // Lag, and the thing lag cannot see.
+  //
+  // A partitioned follower's commit index freezes along with its applied one,
+  // so it reads as perfectly caught up with a leader it stopped hearing from —
+  // which is why last-contact is here beside it rather than instead of it.
+  const lag = c.lag_entries, contact = c.last_contact_seconds;
+  if (lag !== undefined || contact !== undefined) {
+    const behind = (lag || 0) > 0;
+    // -1 is "never heard from a leader" (internal/cluster sets it when
+    // LastContact is zero), which is the WORST contact state, not the best. A
+    // numeric threshold reads it as -1 < 30 and renders the partition or
+    // failed-startup case in the calm colour, with the text "last heard from
+    // the leader -1s ago".
+    const never = contact !== undefined && contact < 0;
+    const outOfTouch = contact !== undefined && contact > 30;
+    let contactText = '';
+    if (never) {
+      contactText = '; <b>has never heard from a leader</b>';
+    } else if (contact !== undefined && contact > 0) {
+      contactText = '; last heard from the leader ' + num(Math.round(contact)) + 's ago';
+    }
+    out += '<p class="' + (behind || outOfTouch || never ? 'warn' : 'mut') + '" style="margin:.4em 0 0">' +
+      'This replica has applied ' + num(c.applied_index || 0) + ' of ' + num(c.commit_index || 0) +
+      ' committed entries' + (behind ? ' — <b>' + num(lag) + ' behind</b>' : '') +
+      contactText + '.</p>';
+  }
+
+  out += '<p class="mut" style="margin:.4em 0 0">These figures are each replica&rsquo;s own report. ' +
+    'Checking them against the replicas directly &mdash; which once caught one stuck at applied index ' +
+    '241 while the leader was at 281, both truthfully reporting zero lag &mdash; is not yet on this ' +
+    'page.</p>';
   $('cluster').innerHTML = out;
 }
 
