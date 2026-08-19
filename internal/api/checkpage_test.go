@@ -179,6 +179,27 @@ if (!sp.includes('not about this record')) {
   }
 }
 
+// Deleting a field is easier than forging one. An envelope that simply omits
+// the digest — the value that ties the record to the leaf — must not collect a
+// passing bind by having nothing to compare.
+// namespace is carried twice (namespace_id and namespace) and the bind falls
+// back between them, so removing one is not an omission — it takes both.
+for (const fields of [['digest'], ['record_name'], ['namespace_id', 'namespace']]) {
+  const field = fields.join('+');
+  const env = JSON.parse(GOOD);
+  for (const f of fields) delete env.data[f];
+  document.getElementById('doc').value = JSON.stringify(env);
+  document.getElementById('vkey').value = VKEY;
+  await check();
+  const om = out.innerHTML;
+  if (om.includes('\u2713 The record shown is the one the proof covers')) {
+    throw new Error('omitting data.' + field + ' still passed the bind: ' + om.slice(0, 260));
+  }
+  if (om.includes('\u2713 This record is in the log')) {
+    throw new Error('omitting data.' + field + ' still produced a green verdict');
+  }
+}
+
 // An envelope with a proof and no record binds to nothing, and must not report
 // that the record shown matches — there is no record shown.
 {

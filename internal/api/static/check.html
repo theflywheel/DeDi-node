@@ -140,8 +140,20 @@ async function check(){
     //    perfectly and display the wrong thing. The proof would be real, the
     //    fold real, the signature real, and the answer a lie.
     const mismatched = [];
+    // A field that is ABSENT is not a field that matched.
+    //
+    // Skipping the comparison when either side is undefined meant an envelope
+    // could simply omit data.digest — the one value that ties the record to the
+    // leaf — and collect the green bind. Deleting a field is easier than
+    // forging one, so the lenient branch was the cheaper attack, and it is the
+    // same mistake as treating a missing data block as a pass, one layer in.
     const bind = (label, a, b) => {
-      if (a !== undefined && b !== undefined && String(a) !== String(b)) {
+      const have = v => v !== undefined && v !== null && String(v) !== '';
+      if (!have(a) || !have(b)) {
+        mismatched.push(label + ' is missing, so nothing was compared');
+        return;
+      }
+      if (String(a) !== String(b)) {
         mismatched.push(label + ' (' + esc(String(a)) + ' vs ' + esc(String(b)) + ')');
       }
     };
