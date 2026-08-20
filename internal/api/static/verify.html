@@ -71,6 +71,14 @@
   .verdict { padding: .6em .8em; margin: .8em 0; border-left: 4px solid; border-radius: 4px; }
   .verdict.pass { border-color: var(--ok); background: var(--okbg); }
   .verdict.fail { border-color: var(--bad); background: var(--badbg); }
+  /* Partly checked: neither pass nor fail, and it must not look like either. */
+  .verdict.part { border-color: var(--warn); background: var(--warnbg); }
+  /* The caveat block. Bordered rather than muted: it is the one part of this
+     page a reader who believes everything above most needs to read. */
+  .caveat { border: 1px solid var(--line); border-left: 4px solid var(--warn);
+            padding: .7em .9em; margin: .6em 0; }
+  .caveat p { margin: .5em 0; }
+  .warn { color: var(--warn); }
 
   svg { max-width: 100%; height: auto; display: block; }
   svg text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -288,6 +296,26 @@ async function run(){
   const parts = [];
   const chips = [];
   let allOK = true;
+  // A check that did not run is not a check that passed.
+  //
+  // verifyCheckpointSig returns null when there is no key to check against —
+  // neither true nor false — and the append-only step reports the same when
+  // the target's log was empty at the first observation. Every one of those
+  // must reach `skips`, and the banner must never say the claim holds while
+  // any of them did. /check draws the same three-way distinction.
+  // Enforced by TestVerifyWillNotCallAnUncheckedSignatureAPass.
+  // The reason travels with the fact. Recording only THAT something was
+  // skipped left the banner explaining every partial result as a missing key —
+  // which is false for the append-only step, whose skip means the target's log
+  // was empty when it was first witnessed and both signatures may have
+  // verified perfectly. A tri-state verdict with a single-valued explanation
+  // is still telling the reader something untrue about why.
+  const skips = [];
+  // Markup, not text: these are fixed sentences written here, carrying their
+  // own entities. Nothing derived from a response may be passed in — run it
+  // through esc() first if that ever changes. Named for what it takes so the
+  // next caller has to think about it.
+  const skippedHTML = whyHTML => { skips.push(whyHTML); };
   const fail = m => { allOK = false; return no(m); };
 
   const net = (await trace('/dedi/network', 'json')).data;
@@ -334,6 +362,7 @@ async function run(){
   const selfSig = await verifyCheckpointSig(selfNote, VKEY);
   chips.push(['1 · this node&rsquo;s log is signed', selfSig === true ? 'pass' : selfSig === false ? 'fail' : 'skip', 's1']);
   if(selfSig === false) allOK = false;
+  else if(selfSig !== true) skippedHTML('this node publishes no verifier key, so nothing binds it to its own log');
 
   parts.push('<h2 id="s1">1. This node&rsquo;s own signed log</h2>' +
     '<p>A verdict is only worth something if it sits in a log this node cannot quietly edit. ' +
@@ -407,6 +436,7 @@ async function run(){
   if(reached){
     chips.push(['3 · the target signed its own log', targetSig === true ? 'pass' : targetSig === false ? 'fail' : 'skip', 's3']);
     if(targetSig === false) allOK = false;
+    else if(targetSig !== true) skippedHTML('no key is published for the target, so nothing binds its checkpoint to it');
     parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2>' +
       '<p>Fetched by <em>your browser</em> from <code>' + esc(targetBase) + '</code>. This node is ' +
       'not in that path and could not alter these bytes.</p>' +
@@ -427,7 +457,13 @@ async function run(){
   if(reached){
     let body = '', state = 'pass';
     if(w.size === 0){
+      // Not yet applicable is still not checked. The banner speaks for every
+      // step above it, so this has to reach the same tracker the signature
+      // steps use — otherwise "All checks recomputed" is printed over a step
+      // that explicitly did not run, which is the identical overclaim one
+      // element to the right.
       state = 'skip';
+      skippedHTML('the target&rsquo;s log was empty when it was first witnessed, so there is no earlier root to prove it has only been appended to');
       body = '<p class="mut">The target&rsquo;s log was empty when it was last witnessed, and the ' +
         'empty tree is contained in every tree, so there is no history to contradict yet. This ' +
         'check becomes meaningful once it has been witnessed at a non-empty size (it is at ' +
@@ -487,11 +523,69 @@ async function run(){
       '<pre>' + FETCHES.map(f => 'curl -s ' +
         esc(f.url.startsWith('http') ? f.url : location.origin + f.url)).join('\n') + '</pre>'));
 
-  const banner = allOK
-    ? '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
-        'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>'
-    : '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
-        'is evidence, not a glitch, and is worth capturing.') + '</div>';
+  // What none of this shows.
+  //
+  // The most important block on the page, and the last, because it is only
+  // meaningful once a reader has seen the chain hold. Every sentence is about
+  // THIS implementation:
+  //
+  //   - one witness per edge: Server.WitnessTarget is a single target, so the
+  //     ring gives one independent party on this edge, not a quorum;
+  //   - the witness keeps the previous root itself (witness.lastWitnessed) and
+  //     catches a same-size-different-root swap, recording it revoked with
+  //     "history was rewritten in place" — but that only ever proves the target
+  //     is append-only SINCE the first size the witness recorded;
+  //   - VerifyOnce runs its consistency check under `if have && last > 0`, so
+  //     the first observation checks nothing at all, and anything before it is
+  //     invisible;
+  //   - /dedi/log/proof/consistency proves from any `old` size of 1 or more
+  //     (logConsistency rejects 0, and the store rejects it again), so a
+  //     checkpoint a reader saved themselves works as the starting point —
+  //     unless they saved it while the log was still empty, which the copy
+  //     below says. Pinned by TestVerifyPromisesOnlyWhatTheProofEndpointDoes.
+  parts.push('<h2 id="s6">What none of this shows</h2>' +
+    '<div class="caveat">' +
+    '<p>That the root this witness recorded was ever the target&rsquo;s real history. ' +
+    // The opening clause has to survive all three verdicts. Written for the
+    // happy path and appended unconditionally, it told a reader "every step
+    // above verifies" underneath a FAILED banner, and underneath the partly-
+    // checked banner this change exists to introduce — reinstating, three
+    // paragraphs later, the overstatement the rest of the page had just
+    // stopped making.
+    (!allOK
+      ? 'Even had every step above verified, it would not have shown this: '
+      : skips.length
+      ? 'Even had the unperformed steps above run and passed, they would not have shown this: '
+      : 'Every step above verifies &mdash; and ') +
+    'a witness colluding with its target, or one that only ever saw the ' +
+    'same forged log, produces a chain that verifies in exactly the same way. There is <b>one</b> ' +
+    'witness on this edge. You are trusting that one party was independent.</p>' +
+    '<p>And nothing before the first verdict. This witness proves the target has only appended ' +
+    '<i>since the size it first recorded</i>; its very first look checks nothing, because there is ' +
+    'no earlier root to check against. A rewrite that happened before then is invisible to it, and ' +
+    'so to you.</p>' +
+    '<p><b>The fix is not more ticks on this page.</b> Save the target&rsquo;s checkpoint yourself, ' +
+    'today &mdash; the commands are in the list above &mdash; and on your next visit ask this node ' +
+    'for a consistency proof from <i>your</i> saved size and root. ' +
+    '<code>/dedi/log/proof/consistency?old=&lt;your size&gt;&amp;new=&lt;now&gt;</code> will prove ' +
+    'it from any size you saved, provided the log was not empty when you saved it &mdash; there is ' +
+    'nothing to prove from an empty tree, which is the same reason a witness&rsquo;s own first look ' +
+    'establishes nothing. Then the party holding yesterday&rsquo;s checkpoint is you, and none of ' +
+    'the above has to be taken on trust.</p></div>');
+
+
+  const banner = !allOK
+    ? '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
+        'is evidence, not a glitch, and is worth capturing.') + '</div>'
+    : skips.length
+    ? '<div class="verdict part"><b class="warn">Partly checked.</b> ' +
+      '<span class="mut">What was checked above holds. ' +
+      (skips.length === 1 ? 'One step could not run:' : skips.length + ' steps could not run:') +
+      '</span><ul class="mut">' + skips.map(w => '<li>' + w + '</li>').join('') + '</ul>' +
+      '<span class="mut">Until they do, this page has not shown you what it sets out to show ' +
+      '&mdash; the amber steps above are the ones in question.</span></div>'
+    : '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
+        'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>';
 
   const strip = '<div class="steps">' + chips.map(c =>
     '<div class="chip ' + c[1] + '" onclick="document.getElementById(\'' + c[2] +
