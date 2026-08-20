@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
@@ -143,5 +144,41 @@ func TestExternalStatusURLIsValidatedOrOmitted(t *testing.T) {
 	s := &Server{StatusURL: "https://status.example/"}
 	if s.externalStatusHref() != "https://status.example/" {
 		t.Errorf("a good URL was rejected: %q", s.externalStatusHref())
+	}
+}
+
+// The signing cadence travels only from the node that signs.
+//
+// A follower's checkpoints are the leader's, applied locally. A replica
+// reporting "signing every 60s" would be claiming a job it does not do — the
+// same class of error as a replica claiming it signed, which is why signs_here
+// travels with this data at all.
+//
+// This exists because the field had no server-side test: deleting the block
+// that sends it left the whole suite green, so the one property it was added
+// for was resting on nothing.
+func TestOnlyASignerReportsItsCheckpointCadence(t *testing.T) {
+	srv, _, _ := testServer(t)
+	d := getJSON(t, srv.URL+"/dedi/log/history", http.StatusOK)["data"].(map[string]any)
+	iv, ok := d["checkpoint_interval_seconds"]
+	if !ok {
+		t.Fatal("a node that signs does not report how often it signs")
+	}
+	if n, _ := iv.(float64); n <= 0 {
+		t.Errorf("checkpoint_interval_seconds = %v, want the configured interval", iv)
+	}
+
+	// A follower reports the same history and no cadence. Its Checkpointer is
+	// configured with an interval exactly as the leader's is — the point is
+	// that having one is not the same as running it.
+	follower, _, _ := followerServer(t, cluster.State{
+		Enabled: true, NodeID: "r1", Role: "follower", LeaderID: "r2",
+	})
+	fd := getJSON(t, follower.URL+"/dedi/log/history", http.StatusOK)["data"].(map[string]any)
+	if fd["signs_here"] != false {
+		t.Fatalf("the follower fixture reports signs_here=%v; this test proves nothing", fd["signs_here"])
+	}
+	if v, present := fd["checkpoint_interval_seconds"]; present {
+		t.Errorf("a follower reports a signing cadence of %v that it does not run", v)
 	}
 }

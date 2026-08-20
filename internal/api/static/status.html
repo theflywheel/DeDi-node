@@ -142,11 +142,16 @@ async function metrics(){
                         // one of them would come to disagree with the others
                         // about the exponent form.
                         'dedi_cluster_enabled', 'dedi_cluster_lag_entries',
-                        'dedi_cluster_last_contact_seconds']) {
+                        'dedi_cluster_last_contact_seconds', 'dedi_cluster_has_leader']) {
       // The exponent form is not optional: metrics.go formats with %g, which
       // switches to 1.03e+06 past a million, and a regex stopping at the 'e'
       // reads a twelve-day-old checkpoint as one second old.
-      const m = body.match(new RegExp('^' + name + '\\s+(-?[\\d.]+(?:[eE][+-]?\\d+)?)', 'm'));
+      // The label set is optional in this pattern because the cluster series
+      // carry one: metrics.go emits `dedi_cluster_lag_entries{node_id="n1"} 3`.
+      // A pattern anchored straight to whitespace matched none of them, so the
+      // replica card read "no reading" on every replicated node — and the -1
+      // "never heard from a leader" branch could not be reached at all.
+      const m = body.match(new RegExp('^' + name + '(?:\\{[^}]*\\})?\\s+(-?[\\d.]+(?:[eE][+-]?\\d+)?)', 'm'));
       if (m) out[name] = Number(m[1]);
     }
   } catch (e) { /* the cards say "—"; the chart above does not depend on this */ }
@@ -248,7 +253,10 @@ function render(d){
 // other on one page load, and the disagreement would be invisible.
 let NET = null;
 async function network(){
-  if (NET === null) NET = j('/dedi/network').then(r => r.data).catch(() => undefined);
+  // A failure is not memoised. Caching the rejection turned one aborted fetch
+  // into two permanently blank cards AND a blank ring check, with no second
+  // chance short of a reload.
+  if (NET === null) NET = j('/dedi/network').then(r => r.data).catch(() => { NET = null; return undefined; });
   return NET;
 }
 
@@ -346,15 +354,31 @@ function cards(d, shape, m, net){
   // seventy-two hours against a healthy idle cluster because an old checkpoint
   // over an unchanged log is correct, not late. What is a fault is a write
   // sitting above the last signature, and render() has already counted those.
+  // Whole-log, not window: entries above the signed tree size mean unsigned
+  // writes wherever they happened. shape.unsigned only sees the 24h window, so
+  // an unsigned write older than that would otherwise leave the card green
+  // while making a claim about the whole log. Both are position-based; neither
+  // consults the clock.
+  const total = m['dedi_log_entries'], signedSize = m['dedi_checkpoint_tree_size'];
+  const behind = (total !== undefined && signedSize !== undefined) ? total > signedSize : false;
+
   let ageCls = 'mut', ageSub;
-  if (shape && shape.unsigned > 0) {
+  if ((shape && shape.unsigned > 0) || behind) {
     ageCls = 'no';
     ageSub = '<span class="no">writes above the last signature</span>';
-  } else if (age !== undefined && age >= 0) {
+  } else if (age !== undefined && age < 0) {
+    // -1 is a reading, not a missing one: metrics.go uses it to say this node
+    // has never signed. Describing it as "no reading" made a present fact look
+    // like a failed scrape.
+    ageCls = d.signs_here === false ? 'mut' : 'no';
+    ageSub = d.signs_here === false
+      ? 'the leader signs; nothing replicated here yet'
+      : 'this node has never signed a checkpoint';
+  } else if (age !== undefined) {
     ageCls = 'ok';
     ageSub = d.signs_here === false
       ? 'the leader signs; replicated here'
-      : (iv ? 'signing every ' + ago(iv) : 'every write so far is covered');
+      : (iv ? 'signing every ' + ago(iv) : 'every write is covered');
   } else {
     ageSub = 'no reading';
   }
@@ -368,15 +392,20 @@ function cards(d, shape, m, net){
   else if (!net.witnessing) { wv = 'not witnessing'; wsub = 'this node watches nobody'; }
   else if (!wh)             { wv = '—';              wsub = 'no health reported'; }
   else if (wh.standby)      { wv = 'standby';        wsub = 'a follower does not witness'; }
+  // Never-succeeded BEFORE stale, because the server sets stale on both and
+  // distinguishes them by the absence of last_success_at — witnessHealth says
+  // so in as many words. Testing stale first collapsed the two, so a loop that
+  // has never once worked read the same as one that worked and then stopped:
+  // the very distinction the server takes care to preserve, lost in the page.
+  else if (!wh.last_success_at) { wv = 'never succeeded'; wcls = 'no';
+                              wsub = wh.last_error ? short(wh.last_error, 40) : 'no attempt has worked yet';
+                              wtitle = wh.last_error || ''; }
   else if (wh.stale)        { wv = 'stale'; wcls = 'no';
                               wsub = wh.last_error ? short(wh.last_error, 40) : 'no recent success';
                               wtitle = wh.last_error || ''; }
-  else if (wh.last_success_at) { wv = 'running'; wcls = 'ok';
+  else                      { wv = 'running'; wcls = 'ok';
                               wsub = 'last success ' + (wh.seconds_since_success === undefined
                                 ? 'unknown' : ago(wh.seconds_since_success) + ' ago'); }
-  else                      { wv = 'never succeeded'; wcls = 'no';
-                              wsub = wh.last_error ? short(wh.last_error, 40) : 'no attempt has worked yet';
-                              wtitle = wh.last_error || ''; }
 
   // PEERS. This node's own polls, and labelled as such: it is not a claim that
   // the peers are healthy, only that they answered.
@@ -412,7 +441,24 @@ function cards(d, shape, m, net){
          : contact < 0 ? '<span class="no">never heard from a leader</span>'
          : contact === 0 ? 'this node is the leader'
          : 'leader heard from ' + ago(contact) + ' ago';
-    lcls = (contact !== undefined && contact < 0) ? 'no' : (lag === 0 ? 'ok' : 'mut');
+    // Lag alone cannot see a partitioned follower — network.go says so
+    // outright: a replica cut off from the leader reports zero lag because it
+    // has nothing new to apply. Contact age is the channel that sees it, so
+    // green requires BOTH a recent contact and no lag.
+    //
+    // The partition signal is dedi_cluster_has_leader, not a clock threshold.
+    //
+    // I first wrote this against a dedi_cluster_heartbeat_seconds that does not
+    // exist — the branch degraded to never firing, so it would have been dead
+    // code claiming to catch the one state the card is for. has_leader is
+    // emitted, is about Raft's own view rather than about how long feels long,
+    // and is exactly "this replica currently knows of no leader".
+    const leaderless = m['dedi_cluster_has_leader'] === 0;
+    lcls = (contact !== undefined && contact < 0) || leaderless ? 'no'
+         : (lag === 0 && contact !== undefined ? 'ok' : 'mut');
+    if (leaderless && contact >= 0) {
+      lsub = '<span class="no">this replica knows of no leader</span>';
+    }
   }
 
   return card('checkpoint age', age === undefined ? '—' : age < 0 ? 'never' : ago(age) + ' ago', ageCls, ageSub) +
@@ -466,13 +512,17 @@ function cards(d, shape, m, net){
     const shape = render(d);
 
     const m = await metrics();
-    const age = m['dedi_checkpoint_age_seconds'];
     const up = m['dedi_uptime_seconds'];
     const net = await network();
     $('cards').innerHTML = cards(d, shape, m, net);
     $('now').innerHTML =
       '<tr><td class="mut" style="width:34%">signed through</td><td class="num">' +
         (d.signed_through < 0 ? 'nothing signed yet' : 'entry ' + num(d.signed_through)) + '</td></tr>' +
+      '<tr><td class="mut">tree size</td><td class="num">' +
+        (m['dedi_checkpoint_tree_size'] === undefined ? '&mdash;' : num(m['dedi_checkpoint_tree_size'])) +
+        '</td></tr>' +
+      '<tr><td class="mut">entries in the log</td><td class="num">' +
+        (m['dedi_log_entries'] === undefined ? '&mdash;' : num(m['dedi_log_entries'])) + '</td></tr>' +
       '<tr><td class="mut">entries in window</td><td class="num">' + num(d.entries || 0) + '</td></tr>' +
       '<tr><td class="mut">checkpoints in window</td><td class="num">' + num(d.checkpoints || 0) + '</td></tr>' +
       '<tr><td class="mut">process uptime</td><td class="mut">' +
