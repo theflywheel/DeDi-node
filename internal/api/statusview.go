@@ -101,6 +101,16 @@ func (s *Server) logHistory(w http.ResponseWriter, r *http.Request) {
 		data["cluster_enabled"] = false
 		data["signs_here"] = true
 	}
+	// How often this node signs, so the page can say "signing every 60s"
+	// instead of leaving a reader to infer a cadence from two timestamps.
+	//
+	// Sent only when this node is the one doing the signing. On a follower the
+	// interval belongs to the leader, and a replica reporting a cadence it does
+	// not run is the same class of error as a replica claiming it signed —
+	// which is why signs_here travels with the data at all.
+	if signs, _ := data["signs_here"].(bool); signs && s.CP != nil && s.CP.Interval > 0 {
+		data["checkpoint_interval_seconds"] = int64(s.CP.Interval.Seconds())
+	}
 	ok(w, "History retrieved successfully", data)
 }
 
