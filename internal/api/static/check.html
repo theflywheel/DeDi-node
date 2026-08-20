@@ -47,6 +47,13 @@
   .verdict.pass { border-color: var(--ok); }
   .verdict.fail { border-color: var(--bad); }
   .verdict.part { border-color: var(--warn); }
+  /* The rail is the token; the tint is a page-local surface colour, which is
+     not a semantic token and must not become one. --line and --warnbg are
+     verify.html's page-local names and are undefined here — using them would
+     have computed invalid and silently left the callout unstyled, which is the
+     same shape as branching on a metric the node never emits. */
+  .callout { border: 1px solid #ccc; border-left: 3px solid var(--warn);
+             background: #fbf5e3; padding: .6em .8em; margin: .8em 0 0; }
   @media (max-width: 46em) { .cols { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -70,14 +77,33 @@ any of it; if you use the fetch box, your browser requests that URL and nothing 
     <label for="doc" class="mut">or paste the whole response</label>
     <textarea id="doc" spellcheck="false" placeholder='{"data": {...}, "proof": {"leaf_index": 0, "tree_size": 1, "checkpoint": "...", "path": [], "leaf": {...}}}'></textarea>
     <label for="vkey" class="mut" style="display:block;margin-top:.6em">the signer's verifier key
-      <span class="mut">(optional — without it the signature is not checked)</span></label>
+      <span class="warn">(optional &mdash; without it the best verdict here is amber)</span></label>
     <input id="vkey" placeholder="node.example/log+7f3a1c9d+Aa4b…" spellcheck="false">
-    <p style="margin:.8em 0 0"><button id="go">check it</button></p>
+    <!-- The primary treatment goes to the local check, not to "fetch".
+         Fetch is the one control here that leans on this node, and the shared
+         sheet makes emphasis opt-in precisely so a page has to choose its one
+         loudest action. A black "fetch" would visually recommend the trusting
+         path on the page whose whole argument is the other one. -->
+    <p style="margin:.8em 0 0"><button id="go" class="btn-primary">check it</button></p>
   </div>
 
   <div>
     <h2>What that establishes</h2>
-    <div id="out"><p class="mut">Nothing yet.</p></div>
+    <div id="out"><p class="mut">Nothing yet.</p>
+      <!-- What a reader who never presses the button should still know.
+           The design's wording for this — "without a key, the third step does
+           not run" — is wrong twice: the signature is the FIFTH step of a run,
+           and it does run, rendering an explicit non-finding. Copying it would
+           have put two false statements on the page that exists to be precise
+           about what was established. -->
+      <div class="callout">
+        <p style="margin:0 0 .3em"><b class="warn">Without a key, the signature check cannot pass.</b></p>
+        <p class="mut" style="margin:0">The hashes and the Merkle path are checked either way. But an
+        unauthenticated checkpoint establishes nothing on its own &mdash; anyone can write a root that a
+        matching path folds to. With no key the best verdict this page can reach is amber:
+        <i>partly checked, the record is in <b>a</b> log</i>. The signer&rsquo;s key is what closes that.</p>
+      </div>
+    </div>
   </div>
 </div>
 

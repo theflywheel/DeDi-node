@@ -217,3 +217,35 @@ func TestEveryEmbeddedPageCarriesExactlyOnePlaceholder(t *testing.T) {
 		t.Fatal("walked no pages at all, so this test proves nothing")
 	}
 }
+
+// A page may not style itself with a token nothing defines.
+//
+// An undefined custom property computes invalid and silently falls back, so the
+// rule it was written for just does not happen and nothing says so. This has
+// now bitten twice: a callout reaching for --warnbg and --line, which are
+// another page's local names, and a status card branching on a metric the node
+// never emits. Both degraded quietly, which is what makes the class worth a
+// test rather than a habit.
+func TestNoPageUsesATokenNothingDefines(t *testing.T) {
+	use := regexp.MustCompile(`var\((--[a-z-]+)\)`)
+	def := regexp.MustCompile(`(--[a-z-]+)\s*:`)
+	for name, page := range servedPages(t) {
+		css := withoutComments(page)
+		// Everything defined anywhere in what this page is served: the shared
+		// sheet plus whatever the page adds for itself.
+		defined := map[string]bool{}
+		for _, m := range def.FindAllStringSubmatch(css, -1) {
+			defined[m[1]] = true
+		}
+		if len(defined) == 0 {
+			t.Errorf("%s defines no custom properties at all; the shared sheet did not reach it", name)
+			continue
+		}
+		for _, m := range use.FindAllStringSubmatch(css, -1) {
+			if !defined[m[1]] {
+				t.Errorf("%s styles with %s, which nothing defines for this page — it computes "+
+					"invalid and falls back, so whatever rule it carried does not happen", name, m[1])
+			}
+		}
+	}
+}
