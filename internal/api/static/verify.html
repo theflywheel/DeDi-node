@@ -310,8 +310,14 @@ async function run(){
   // /check has always drawn this distinction — pass, fail, and "Partly checked:
   // the record is in *a* log". This page, whose whole subject is evidence, did
   // not.
-  let anySkipped = false;
-  const skipped = () => { anySkipped = true; };
+  // The reason travels with the fact. Recording only THAT something was
+  // skipped left the banner explaining every partial result as a missing key —
+  // which is false for the append-only step, whose skip means the target's log
+  // was empty when it was first witnessed and both signatures may have
+  // verified perfectly. A tri-state verdict with a single-valued explanation
+  // is still telling the reader something untrue about why.
+  const skips = [];
+  const skipped = why => { skips.push(why); };
   const fail = m => { allOK = false; return no(m); };
 
   const net = (await trace('/dedi/network', 'json')).data;
@@ -357,7 +363,8 @@ async function run(){
   const selfCP = parseCheckpointBody(parseNote(selfNote).body);
   const selfSig = await verifyCheckpointSig(selfNote, VKEY);
   chips.push(['1 · this node&rsquo;s log is signed', selfSig === true ? 'pass' : selfSig === false ? 'fail' : 'skip', 's1']);
-  if(selfSig === false) allOK = false; else if(selfSig !== true) skipped();
+  if(selfSig === false) allOK = false;
+  else if(selfSig !== true) skipped('this node publishes no verifier key, so nothing binds it to its own log');
 
   parts.push('<h2 id="s1">1. This node&rsquo;s own signed log</h2>' +
     '<p>A verdict is only worth something if it sits in a log this node cannot quietly edit. ' +
@@ -430,7 +437,8 @@ async function run(){
 
   if(reached){
     chips.push(['3 · the target signed its own log', targetSig === true ? 'pass' : targetSig === false ? 'fail' : 'skip', 's3']);
-    if(targetSig === false) allOK = false; else if(targetSig !== true) skipped();
+    if(targetSig === false) allOK = false;
+    else if(targetSig !== true) skipped('no key is published for the target, so nothing binds its checkpoint to it');
     parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2>' +
       '<p>Fetched by <em>your browser</em> from <code>' + esc(targetBase) + '</code>. This node is ' +
       'not in that path and could not alter these bytes.</p>' +
@@ -456,7 +464,8 @@ async function run(){
       // steps use — otherwise "All checks recomputed" is printed over a step
       // that explicitly did not run, which is the identical overclaim one
       // element to the right.
-      state = 'skip'; skipped();
+      state = 'skip';
+      skipped('the target&rsquo;s log was empty when it was first witnessed, so there is no earlier root to prove it has only been appended to');
       body = '<p class="mut">The target&rsquo;s log was empty when it was last witnessed, and the ' +
         'empty tree is contained in every tree, so there is no history to contradict yet. This ' +
         'check becomes meaningful once it has been witnessed at a non-empty size (it is at ' +
@@ -554,12 +563,13 @@ async function run(){
   const banner = !allOK
     ? '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
         'is evidence, not a glitch, and is worth capturing.') + '</div>'
-    : anySkipped
+    : skips.length
     ? '<div class="verdict part"><b class="warn">Partly checked.</b> ' +
-      '<span class="mut">The proofs above fold, but at least one signature check could not run &mdash; ' +
-      'no key was published to check it against. Nothing here binds these checkpoints to whoever ' +
-      'signed them, so the append-only result rests on bytes this node handed over unvouched. ' +
-      'The amber steps say which.</span></div>'
+      '<span class="mut">What was checked above holds. ' +
+      (skips.length === 1 ? 'One step could not run:' : skips.length + ' steps could not run:') +
+      '</span><ul class="mut">' + skips.map(w => '<li>' + w + '</li>').join('') + '</ul>' +
+      '<span class="mut">Until they do, this page has not shown you what it sets out to show ' +
+      '&mdash; the amber steps above are the ones in question.</span></div>'
     : '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
         'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>';
 

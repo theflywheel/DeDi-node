@@ -46,7 +46,7 @@ func TestVerifyWillNotCallAnUncheckedSignatureAPass(t *testing.T) {
 	after := src[strings.Index(src, "verify.js"):]
 	js := after[strings.Index(after, "<script>")+len("<script>"):]
 	js = js[:strings.Index(js, "</script>")]
-	if !strings.Contains(js, "anySkipped") {
+	if !strings.Contains(js, "skips.push") {
 		t.Fatal("the page no longer tracks skipped checks; it or this test has moved")
 	}
 
@@ -102,10 +102,11 @@ await run().catch(e => { console.log('RUN-ERROR: ' + e.message); process.exit(2)
 const out = document.getElementById('out').innerHTML;
 const banner = out.slice(0, out.indexOf('class="steps"') + 1) || out.slice(0, 1500);
 const holds = /witness claim holds/.test(banner);
+const reason = (banner.match(/<li>([\s\S]*?)<\/li>/g) || []).map(x => x.replace(/<[^>]*>/g,'')).join(' | ');
 const partly = /Partly checked/.test(banner);
 const skipChip = /class="chip skip"/.test(out);
 const chips=[...out.matchAll(/<div class="chip (pass|fail|skip)"[^>]*>([^<]*)/g)].map(m=>m[1]+":"+m[2].replace(/&[a-z]+;/g,""));
-console.log(JSON.stringify({ holds, partly, skipChip, chips, banner: banner.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,220) }));
+console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: banner.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,220) }));
 `
 	run := filepath.Join(dir, "run.mjs")
 	if err := os.WriteFile(run, []byte(harness+string(vjs)+js+checks), 0o600); err != nil {
@@ -118,9 +119,6 @@ console.log(JSON.stringify({ holds, partly, skipChip, chips, banner: banner.repl
 	no := exec1("")
 	// With every key present no step may be left unperformed, or the banner's
 	// "All checks recomputed" is printed over one that was.
-	if strings.Contains(strings.Join(nil, ""), "") {
-		_ = 0
-	}
 	if !no.SkipChip {
 		t.Fatal("with no verifier key nothing was reported as skipped; this test proves nothing")
 	}
@@ -177,6 +175,20 @@ console.log(JSON.stringify({ holds, partly, skipChip, chips, banner: banner.repl
 	}
 	if !z.Partly {
 		t.Error("a run with an unperformed step does not say it was only partly checked")
+	}
+	// And it must say WHY that step could not run. Both signatures verified
+	// here, so explaining the partial result as a missing key would be telling
+	// the reader something false about the one thing they came to check.
+	if strings.Contains(z.Reason, "verifier key") || strings.Contains(z.Reason, "no key is published") {
+		t.Errorf("the empty-log case is explained as a missing key, which it is not: %q", z.Reason)
+	}
+	if !strings.Contains(z.Reason, "empty when it was first witnessed") {
+		t.Errorf("the empty-log case does not say why the step could not run: %q", z.Reason)
+	}
+
+	// The missing-key case must give its own reason, not the empty-log one.
+	if !strings.Contains(no.Reason, "key") {
+		t.Errorf("a run with no keys does not say a key was missing: %q", no.Reason)
 	}
 }
 
@@ -252,7 +264,10 @@ func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, vkey s
 	return blob
 }
 
-type verdict struct{ Holds, Partly, SkipChip bool }
+type verdict struct {
+	Holds, Partly, SkipChip bool
+	Reason                  string
+}
 
 func runPage(t *testing.T, script, fx, base, key string) verdict {
 	t.Helper()
