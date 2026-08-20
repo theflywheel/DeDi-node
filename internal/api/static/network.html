@@ -104,6 +104,7 @@ wrong conclusion.</p>
 <div id="cluster" class="repl"><span class="mut">&hellip;</span></div>
 
 <script src="/static/verify.js"></script>
+<script src="/static/verdict.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -174,12 +175,27 @@ async function collect(){
     n.src = base + '/dedi/witness';
     try {
       const d = (await j(n.src)).data;
+      // Answered means answered with something readable. Setting the flag
+      // before the envelope was checked meant a 200 carrying {} threw after the
+      // peer had already been marked as answering: its card rendered the normal
+      // path, its reason never showed, and the coverage sentence counted it
+      // among the nodes that replied. A peer we could not read looked like a
+      // healthy one.
+      if (!d || !Array.isArray(d.targets)) throw new Error('unreadable /dedi/witness response');
       n.answered = true;
-      n.targetCount = (d.targets || []).length;
-      for (const t of (d.targets || [])) {
+      n.targetCount = d.targets.length;
+      for (const t of d.targets) {
         // No name patch: an entry we already hold keeps the operator's display
         // name rather than having it overwritten with the raw log origin.
-        add(t.origin, { origin: t.origin });
+        // A target with no origin cannot be placed. add() returns null and the
+        // edge used to be pushed anyway, so the arrow was silently dropped at
+        // draw time and the Watches list printed the string "undefined" — while
+        // the card still counted it. Counted and undrawable is the gap this
+        // page exists to make visible, so it is recorded rather than lost.
+        if (!add(t.origin, { origin: t.origin })) {
+          n.unnamedTargets = (n.unnamedTargets || 0) + 1;
+          continue;
+        }
         edges.push({ from: n.key, to: t.origin, t, src: n.src,
                      verdictURL: n.src + '/' + encodeURIComponent(t.origin) });
       }
@@ -242,41 +258,6 @@ function trim(from, to){
 // has been failing for hours still shows a last verdict reading consistency_ok.
 // The health beside it is the only thing separating those, so a stale witness
 // never renders green however good its last verdict was.
-function stale(t){
-  const h = t && t.health;
-  if (!h || h.standby) return false;   // a follower is not witnessing on purpose
-  return h.stale === true || h.checking === false;
-}
-// One classifier for one verdict, used by every surface that draws it.
-//
-// This is a THREE-state answer — caught, sound, or not established — and the
-// third is the one that gets lost. Each surface used to test only for the
-// failure case, so a verdict arriving with consistency_ok absent fell through
-// to the affirmative branch: a solid arrow, a ✓ badge, and a green
-// "verified" cell over a bit nobody had asserted.
-//
-// That matters here more than anywhere else on this page, because these
-// verdicts are fetched cross-origin from peers of arbitrary version. Omitting
-// a JSON field is not an attack that takes effort — an older build does it by
-// accident — and the affirmative reading was free.
-//
-// Three surfaces drew this from three copies of the same test. They now share
-// one function: fixing this in edgeClass alone would have left the detail
-// panel still saying "verified".
-function verdictState(t){
-  if (!t) return 'none';
-  if (t.consistency_ok === false) return 'caught';
-  if (t.witnessed !== true) return 'never';
-  // Affirmative requires the affirmative value. Anything else — absent, a
-  // string, null — is not established.
-  if (t.consistency_ok !== true) return 'unstated';
-  // A verdict whose witness loop reports nothing about its own liveness is not
-  // a verdict known to be current. stale() answered false for a missing health
-  // block, which folded "liveness unreported" into the clean branch.
-  if (!t.health) return 'unwatched';
-  if (stale(t)) return 'stale';
-  return 'sound';
-}
 function edgeClass(t){
   const st = verdictState(t);
   if (st === 'caught') return 'bad';
@@ -289,6 +270,7 @@ function edgeLabel(t){
     case 'caught':   return '✗ caught';
     case 'never':    return 'not yet verified';
     case 'unstated': return '? not established';
+    case 'unsized':  return '? states no tree size';
     case 'unwatched': return '⚠ ' + num(t.size) + ' — liveness unreported';
     case 'stale':    return '⚠ ' + num(t.size) + ' — not rechecked';
     default:         return '✓ ' + num(t.size);
@@ -331,7 +313,8 @@ function draw(){
     d.innerHTML = '<div class="nm">' + esc(n.name) + (n.self ? ' <span class="mut">(this node)</span>' : '') +
       '</div>' + originLine + '<div class="mut" style="font-size:.9em">' +
       (n.answered
-         ? seen + (n.targetCount === 0 ? ' · witnesses nobody' : '')
+         ? seen + (n.targetCount === 0 ? ' · witnesses nobody' : '') +
+           (n.unnamedTargets ? ' · ' + n.unnamedTargets + ' target(s) it could not name' : '')
          : esc(n.reason || 'not asked')) + '</div>';
     d.onclick = ev => { ev.stopPropagation(); select({ kind: 'node', n }); };
     stage.appendChild(d);
@@ -387,6 +370,11 @@ function verdictTable(t){
     return '<p><b>Set up, but never successfully verified.</b></p>' +
       '<p class="mut">There is no verdict to read. That is not the same as a clean one.</p>';
   }
+  if (st === 'unsized') {
+    return '<p><b>This verdict names no tree size.</b></p>' +
+      '<p class="mut">It says a check happened and does not say what was checked, so there is nothing ' +
+      'here to prove anything from.</p>';
+  }
   if (st === 'unstated') {
     return '<p><b>This verdict does not state a result.</b></p>' +
       '<p class="mut">The node that holds it says it witnessed this target and did not say what it ' +
@@ -405,13 +393,13 @@ function verdictTable(t){
 }
 
 function healthNote(t){
-  const h = t && t.health;
-  // Nothing reported is not nothing wrong. A verdict with no health block used
-  // to render with no caveat at all, which is the same as claiming the loop is
-  // fine — the one thing the comment above this section says must never happen.
-  if (!h) return '<p class="warn" style="margin:.4em 0 0">⚠ The node holding this verdict reports ' +
+  // The SAME predicate the classifier uses. Asking a different question here —
+  // `if (t.health)` against the classifier's shape check — is how the page
+  // would come to grade a verdict one way and caption it another.
+  if (!hasHealth(t)) return '<p class="warn" style="margin:.4em 0 0">⚠ The node holding this verdict reports ' +
     'nothing about whether its witness loop is still running, so there is no way to tell a verdict ' +
     'confirmed a minute ago from one nothing has revisited in weeks.</p>';
+  const h = t.health;
   if (h.standby) return '<p class="mut" style="margin:.4em 0 0">This replica is on standby &mdash; the ' +
     'cluster leader does the witnessing and the verdict is replicated here.</p>';
   if (h.checking === false) return '<p class="warn" style="margin:.4em 0 0">⚠ This witness is not running. ' +
@@ -438,6 +426,20 @@ function healthNote(t){
 // while a verdict's target_url already includes /dedi (internal/witness sets
 // TargetURL to the base "including /dedi"). Everything below builds on the
 // value this returns, so the difference is handled once.
+// The URL to PRINT, as opposed to the one to fetch.
+//
+// apiBase returns a relative '/dedi' for this node, which is right for fetch()
+// and useless in a command: the page was telling a reader to run
+// `curl -s /dedi/log/checkpoint`, which is not a command, on every edge whose
+// target is this node — one of the three in the shipped ring. The page's whole
+// argument is "run it yourself", so an unrunnable line is worse than none.
+function absBase(node, t){
+  if (node && node.self) return location.origin + '/dedi';
+  const b = apiBase(node, t);
+  if (!b) return null;
+  return b.startsWith('http') ? b : location.origin + b;
+}
+
 function apiBase(node, t){
   if (node && node.self) return '/dedi';
   if (node && node.url) return node.url.replace(/\/$/, '') + '/dedi';
@@ -541,21 +543,34 @@ function select(sel){
     // the NEW root, so a browser checking against it passes — and would print a
     // green tick beside the alarm. The browser never held the pre-rewrite root
     // and structurally cannot reproduce the catch.
-    const caught = !!(t && t.consistency_ok === false);
+    // Both the decision and its explanation come from the one classifier.
+    // These were two more hand-rolled copies of the verdict test — the change
+    // centralised three and left these — and because the ladder had no arm for
+    // a verdict with no tree size, that case fell through to "neither node
+    // publishes a URL for the target" while the curl line directly below it
+    // printed that very URL. The page stated a false reason for its own refusal.
+    const st = verdictState(t);
+    const caught = st === 'caught';
     const target = apiBase(b, t);
-    const canCheck = !!(t && !caught && t.witnessed === true && t.size !== undefined &&
-                        t.target_key && target);
+    const absTarget = absBase(b, t);
+    const canCheck = !!(st === 'sound' && t.target_key && target);
     let why = '';
     if (!canCheck) {
       why = caught
         ? esc(a.name) + ' caught this target rewriting history. Your browser never held the root from ' +
           'before the rewrite, so it cannot reproduce that catch — and a check against the rewritten ' +
           'root would pass while proving nothing.'
-        : (!t || t.witnessed !== true) ? 'There is no verdict to re-check.'
+        : (st === 'none' || st === 'never') ? 'There is no verdict to re-check.'
+        : st === 'unstated' ? esc(a.name) + ' does not say what it concluded, so there is no result ' +
+          'here to re-check.'
+        : st === 'unsized' ? esc(a.name) + ' does not say what tree size it witnessed, so there is ' +
+          'nothing to prove consistency from.'
         : !t.target_key ? esc(a.name) + ' does not publish the target’s verifier key, so your browser ' +
           'has nothing to check the target’s signature against.'
-        : 'Neither this node nor ' + esc(a.name) + ' publishes a URL for the target, so your browser has ' +
-          'nowhere to fetch its checkpoint from.';
+        : !target ? 'Neither this node nor ' + esc(a.name) + ' publishes a URL for the target, so your ' +
+          'browser has nowhere to fetch its checkpoint from.'
+        : esc(a.name) + ' reports nothing about whether its witness loop is still running, so this ' +
+          'verdict cannot be taken as current — the check below is still worth running.';
     }
     el.innerHTML = '<h3 style="margin-top:0">' + esc(a.name) + ' <span class="wit">watches</span> ' + esc(b.name) + '</h3>' +
       '<p class="mut" style="margin:0 0 .5em">This edge is drawn because <b>' + esc(a.name) + '</b> said so. ' +
@@ -577,9 +592,9 @@ function select(sel){
       // on this page differ — a node's url carries no path and a verdict's
       // target_url already ends in /dedi — and concatenating the second form
       // yields /dedi/dedi.
-      (target
+      (absTarget
         ? '<p class="eyebrow" style="margin:.9em 0 .2em">Or by hand</p>' +
-          '<pre>curl -s ' + esc(target) + '/log/checkpoint</pre>' +
+          '<pre>curl -s ' + esc(absTarget) + '/log/checkpoint</pre>' +
           (t && t.target_key
             ? '<p class="mut" style="margin:.2em 0 0">Check that checkpoint against the key ' +
               esc(a.name) + ' publishes for it: ' +

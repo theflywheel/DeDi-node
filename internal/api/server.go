@@ -205,6 +205,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /verify", s.verify)
 	mux.HandleFunc("GET /verify/{$}", s.verify)
 	mux.HandleFunc("GET /static/verify.js", s.verifyScript)
+	mux.HandleFunc("GET /static/verdict.js", s.verdictScript)
 	mux.HandleFunc("GET /docs", s.docs)
 	mux.HandleFunc("GET /docs/{$}", s.docs)
 	// Every markdown document in docs/, rendered from the copy embedded in this

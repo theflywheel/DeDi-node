@@ -43,6 +43,14 @@ var verifyHTML []byte
 //go:embed static/verify.js
 var verifyJS []byte
 
+// verdictJS is the one reading of a witness verdict, shared by every page that
+// draws one. Served rather than inlined for the reason verify.js is: the pages
+// that disagreed about what a verdict meant are exactly how this bug reached
+// five of them.
+//
+//go:embed static/verdict.js
+var verdictJS []byte
+
 // componentsCSS is the one definition of the semantic palette and the shared
 // controls. It is spliced into each page rather than linked; the reasoning is
 // written at the top of the file itself.
@@ -168,6 +176,11 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 func (s *Server) verifyScript(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Write(verifyJS)
+}
+
+func (s *Server) verdictScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Write(verdictJS)
 }
 
 // docs serves the embedded explainer page (sequence diagrams + test cases).

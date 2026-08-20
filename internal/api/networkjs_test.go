@@ -34,9 +34,16 @@ func TestNetworkWillNotDrawAnUnstatedVerdictAsClean(t *testing.T) {
 	src := string(page)
 	js := src[strings.LastIndex(src, "<script>")+len("<script>"):]
 	js = js[:strings.Index(js, "</script>")]
-	if !strings.Contains(js, "function verdictState") {
-		t.Fatal("the page no longer classifies verdicts in one place; it or this test has moved")
+	if !strings.Contains(src, "/static/verdict.js") {
+		t.Fatal("the page no longer loads the shared verdict classifier; it or this test has moved")
 	}
+	// The classifier is loaded, not copied. Prepending it here is what the
+	// browser does with the <script src>.
+	shared, err := os.ReadFile(filepath.Join("static", "verdict.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	js = string(shared) + js
 
 	// The wire shape this node really produces for a sound verdict.
 	srv, s, _ := testServer(t)
@@ -71,6 +78,13 @@ func TestNetworkWillNotDrawAnUnstatedVerdictAsClean(t *testing.T) {
 		return string(b)
 	}
 	cases := map[string]string{
+		// health as a truthy non-object: the classifier type-checks
+		// consistency_ok and a truthiness guard on the very next line would
+		// hand this one straight back to the affirmative branch.
+		"healthstring": variant(func(m map[string]any) { m["health"] = "yes" }),
+		"healthtrue":   variant(func(m map[string]any) { m["health"] = true }),
+		// a verdict that names no tree size printed "✓ NaN" under a green tick
+		"nosize": variant(func(m map[string]any) { delete(m, "size") }),
 		"sound":     variant(func(m map[string]any) {}),
 		"absent":    variant(func(m map[string]any) { delete(m, "consistency_ok") }),
 		"string":    variant(func(m map[string]any) { m["consistency_ok"] = "false" }),
@@ -138,7 +152,7 @@ console.log(JSON.stringify(out));
 		!strings.Contains(c.Panel, "verified") {
 		t.Fatalf("the sound verdict no longer renders as sound (%+v); this test proves nothing", c)
 	}
-	for _, name := range []string{"absent", "string", "nohealth", "caught", "nowitness"} {
+	for _, name := range []string{"absent", "string", "nohealth", "healthstring", "healthtrue", "nosize", "caught", "nowitness"} {
 		c := got[name]
 		if c.Cls == "" {
 			t.Errorf("%s: drawn with the same class as a sound verdict", name)
@@ -154,8 +168,16 @@ console.log(JSON.stringify(out));
 	if p := got["string"].Panel; !strings.Contains(p, "does not state a result") {
 		t.Errorf("a non-boolean result reads as: %q", p)
 	}
-	if h := got["nohealth"].Health; !strings.Contains(h, "reports nothing") {
-		t.Errorf("a verdict with no liveness reported carries no caveat: %q", h)
+	for _, name := range []string{"nohealth", "healthstring", "healthtrue"} {
+		if h := got[name].Health; !strings.Contains(h, "reports nothing") {
+			t.Errorf("%s: a verdict with no readable liveness carries no caveat: %q", name, h)
+		}
+	}
+	// A number the page cannot state must never be drawn at all.
+	for name, c := range got {
+		if strings.Contains(c.Label, "NaN") || strings.Contains(c.Panel, "NaN") {
+			t.Errorf("%s: renders NaN — %q / %q", name, c.Label, c.Panel)
+		}
 	}
 }
 
@@ -205,5 +227,55 @@ func TestReplicationCannotBeReadAsWitnessing(t *testing.T) {
 	// The page as a whole must keep saying the thing outright.
 	if !strings.Contains(page, "three parties verified") {
 		t.Error("the page no longer names the misreading it exists to prevent")
+	}
+}
+
+// No page may conclude a verdict is sound from the absence of a failure.
+//
+// This bug reached five pages because each open-coded the same test as
+// "not explicitly false", and the rule for reading a verdict lived in a comment
+// on one page the others never saw.
+//
+// The rule this asserts is the defect, not a house style. Testing
+// `consistency_ok === true` is CORRECT and two pages already did it — an
+// earlier version of this test banned that spelling too and flagged both of
+// them, which was the test being wrong about the domain rather than the pages
+// being wrong about verdicts. What must never appear is soundness inferred
+// from `!== false`, and any page drawing a FULL verdict — where liveness and
+// tree size also decide what may be claimed — must ask the shared classifier
+// rather than assemble its own.
+func TestNoPageInfersASoundVerdictFromTheAbsenceOfFailure(t *testing.T) {
+	pages, err := filepath.Glob(filepath.Join("static", "*.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) == 0 {
+		t.Fatal("found no pages, so this proves nothing")
+	}
+	// The pages that render a verdict as a whole, rather than one field of one.
+	full := map[string]bool{"network.html": true, "status.html": true, "overview.html": true}
+	checked := 0
+	for _, p := range pages {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := withoutComments(string(b))
+		if !strings.Contains(src, "consistency_ok") {
+			continue
+		}
+		checked++
+		name := filepath.Base(p)
+		if strings.Contains(src, "consistency_ok !== false") ||
+			strings.Contains(src, "consistency_ok != false") {
+			t.Errorf("%s treats a verdict that is not explicitly a failure as a sound one", name)
+		}
+		if full[name] && !strings.Contains(src, "/static/verdict.js") {
+			t.Errorf("%s draws whole verdicts without the shared classifier, so its reading of "+
+				"liveness and tree size can drift from every other page's", name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no page reads consistency_ok, so this proves nothing")
 	}
 }
