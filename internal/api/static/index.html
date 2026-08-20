@@ -6,7 +6,7 @@
 <meta name="dedi-verifier-key" content="{{VERIFIER_KEY}}">
 <title>DeDi Node Explorer</title>
 <style>
-  /* Shared palette; see TestEverySurfaceSharesTheTypeAndPalette. */
+  /* Shared palette and controls; see TestEverySurfaceSharesTheTypeAndPalette. */
   {{SHARED_CSS}}
   /* Named family first: the bare keyword triggers the 13px monospace quirk.
      Enforced by TestEverySurfaceSharesTheTypeAndPalette. */
@@ -14,30 +14,89 @@
   h1 { font-size: 1.3em; }
   h2 { font-size: 1.05em; margin: 1.6em 0 .4em; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-  ul { margin: .3em 0; padding-left: 1.4em; }
-  li { margin: .15em 0; }
   a { cursor: pointer; }
   .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
-  #proof { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
-  /* The tab bar from the design: a rule under the whole nav, and the current
-     page underlined against it rather than merely bolded. Wrapping is what
-     keeps it off the horizontal scrollbar on a phone. */
   nav { display: flex; flex-wrap: wrap; gap: .35em 1.1em; margin-bottom: 1.5em;
         border-bottom: 1px solid #ccc; padding-bottom: .5em; }
   nav a { margin-right: 0; }
-  /* An eyebrow: the small uppercase label the design uses to head a block
-     without spending an h2 on it. */
+  nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
+              border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
   .eyebrow { font-size: .82em; color: var(--mut); text-transform: uppercase;
-             letter-spacing: .07em; margin: 1.4em 0 .3em; } nav a.sel { color: inherit; font-weight: bold; text-decoration: none;
-             border-bottom: 2px solid #1a1a1a; padding-bottom: .45em; margin-bottom: -.55em; }
+             letter-spacing: .07em; margin: 1.4em 0 .3em; }
 
-  /* Long unbroken tokens — a base64 root, a log origin, a verifier key — are
-     what actually push a table past the viewport. Letting them break inside the
+  /* Long unbroken tokens — a base64 root, a log origin, a digest — are what
+     actually push a table past the viewport. Letting them break inside the
      cell is what keeps the page from scrolling sideways on a phone. */
   th, td { overflow-wrap: anywhere; }
   /* And a table with genuinely many columns scrolls inside its own box rather
      than taking the page with it. */
   .tw { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { border: 1px solid #ccc; padding: .3em .5em; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; font-weight: normal; color: var(--mut); }
+
+  /* The two-column reading layout from the design: the list of things on the
+     left, the selected thing on the right.
+
+     Single column is the DEFAULT and the wide layout is the exception, rather
+     than the other way round. This page has shipped a horizontal-scroll bug on
+     a phone twice — a nav with no break opportunities, and tables of digests —
+     and both times the cause was a wide layout that narrow screens had to undo.
+     A narrow screen here never executes a multi-column rule at all. */
+  .cols { display: grid; gap: 1.2em; grid-template-columns: 1fr; }
+  @media (min-width: 46em) { .cols { grid-template-columns: 1fr 1.5fr; align-items: start; } }
+
+  /* The breadcrumb replaces the old free-text-only entry. It wraps rather than
+     scrolling, for the same reason the nav does. */
+  .crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3em .5em;
+           border-bottom: 1px solid #ccc; padding-bottom: .5em; margin-bottom: 1.2em; }
+  .crumb .sep { color: var(--mut); }
+  .crumb .here { font-weight: bold; }
+  .crumb form { display: flex; flex-wrap: wrap; gap: .4em; align-items: baseline; }
+
+  /* The bordered list box: a header row naming what is in it, a filter, and the
+     rows themselves. */
+  .box { border: 1px solid #ccc; }
+  .box > header { background: #f4f4f4; border-bottom: 1px solid #ccc; padding: .4em .6em;
+                  display: flex; flex-wrap: wrap; gap: .4em; align-items: baseline;
+                  justify-content: space-between; }
+  .box > header .t { font-size: .85em; color: var(--mut); text-transform: uppercase; letter-spacing: .07em; }
+  .box > header input { font-size: .85em; width: 9em; max-width: 100%; }
+  .rows { list-style: none; margin: 0; padding: 0; }
+  /* The list scrolls inside itself only once the two columns exist. On a phone
+     the column is full-width and a capped, inner-scrolling box beside the
+     page's own scroll is a trap: a drag either moves the wrong thing or
+     nothing. */
+  @media (min-width: 46em) { .rows { max-height: 26em; overflow-y: auto; } }
+  .rows li { border-bottom: 1px solid #eee; }
+  .rows li:last-child { border-bottom: 0; }
+  .rows a { display: flex; flex-wrap: wrap; gap: .3em .6em; justify-content: space-between;
+            padding: .35em .6em; text-decoration: none; }
+  .rows a:hover { background: #f4f4f4; }
+  /* The selected row is marked by a bar and a weight change, not by colour
+     alone — the same reason the pills carry a word. */
+  .rows a.sel { background: #f4f4f4; font-weight: bold; box-shadow: inset 3px 0 0 var(--wit); }
+  .rows .meta { color: var(--mut); font-weight: normal; font-size: .9em; }
+  /* A record name is an unbroken token as often as a digest is, and the rows
+     are the one place this page puts them outside a table cell. The guard that
+     covers th/td does not reach here. */
+  .rows .nm, .crumb, h2 { overflow-wrap: anywhere; }
+  .rows a:focus-visible, .crumb a:focus-visible { outline: 2px solid var(--wit); outline-offset: -2px; }
+  .pad { display: block; padding: .35em .6em; }
+  .hrow { display: flex; flex-wrap: wrap; gap: .5em; align-items: baseline; }
+  /* Available to a screen reader, absent from the page. */
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+  /* The proof panel. It is a permanent part of a record view, so it has a
+     resting frame rather than appearing only once something has happened. */
+  .panel { border: 1px solid #ccc; border-left-width: 3px; padding: .6em .8em; margin: .9em 0; }
+  .panel.good { border-left-color: var(--ok); }
+  .panel.bad  { border-left-color: var(--bad); }
+  .panel.idle { border-left-color: #ccc; }
+  .panel > .h { display: flex; flex-wrap: wrap; gap: .5em; align-items: baseline;
+                justify-content: space-between; margin-bottom: .5em; }
+  .panel ul { margin: .4em 0 0; padding-left: 1.3em; }
 </style>
 </head>
 <body>
@@ -45,43 +104,119 @@
 {{NAV}}
 <h1>Browse the directory</h1>
 <p id="node" class="mut">loading...</p>
-<p id="stats" class="mut">requests served: <span id="served">...</span></p>
-<p class="mut">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
+<p class="mut" id="banner">Public, read-only directory over a Merkle transparency log. Inclusion proofs and the
 checkpoint signature are checked in your browser; the server is trusted for neither.</p>
 
-<p class="mut">This node's peers, what it witnesses, and its replica set are on
-<a href="/network">the network page</a> — with every witness edge fetched from the node that claims
-it, and a button to re-check any of them in your browser.</p>
+<div class="crumb" id="crumb"></div>
 
-<hr>
-
-<form onsubmit="return browse()">
-  namespace:
-  <input id="ns" value="beckn-testnet" spellcheck="false" size="24">
-  <button type="submit">browse</button>
-</form>
-
-<div id="registries"></div>
-<div id="records"></div>
-<div id="record"></div>
+<div class="cols">
+  <div id="list"></div>
+  <div id="detail"></div>
+</div>
 
 <hr>
 <p class="mut">API: <code>/dedi/lookup</code> &middot; <code>/dedi/query</code> &middot;
 <code>/dedi/versions</code> &middot; <code>/dedi/log/checkpoint</code> &middot; <code>/dedi/network</code></p>
+<p class="mut">This node's peers, what it witnesses, and its replica set are on
+<a href="/network">the network page</a>. To check a record you already hold against this log, use
+<a href="/check">the record checker</a>.</p>
 
 <script src="/static/verify.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-let CK = null, CUR = null;
+let CK = null, CUR = null, ROWS = [], FILTER = '', SEQ = 0, SHORT = 0;
 let VKEY = document.querySelector('meta[name="dedi-verifier-key"]').content.trim();
 if (VKEY.startsWith('{{')) VKEY = '';
 
-// ---- data ----
+function esc(s){ return String(s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---- where we are -----------------------------------------------------
+//
+// Position lives in the URL, so a record view is a link, the back button walks
+// back up, and a reload lands where you were.
+function here(){
+  const q = new URLSearchParams(location.search);
+  return { ns: q.get('ns') || '', reg: q.get('reg') || '', rec: q.get('rec') || '', v: q.get('v') || '' };
+}
+function hrefFor(p){
+  const q = new URLSearchParams();
+  for (const k of ['ns','reg','rec','v']) if (p[k]) q.set(k, p[k]);
+  const qs = q.toString();
+  return location.pathname + (qs ? '?' + qs : '');
+}
+// Every internal link is a real href on a real anchor, and navigation is one
+// delegated listener.
+//
+// The first version built `onclick='goTo(' + JSON.stringify(...) + ')'` inside
+// a single-quoted attribute. JSON.stringify escapes " but not ', so a namespace
+// or record name — or a query parameter, which anyone can put in a link — could
+// close the attribute and add a handler, on the page whose entire job is to be
+// trusted less than the server. Anchors with hrefs have no such seam, and they
+// are reachable from a keyboard, which the onclick version was not.
+function nav(p, text, cls){
+  return '<a href="' + esc(hrefFor(p)) + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</a>';
+}
+document.addEventListener('click', ev => {
+  const a = ev.target.closest && ev.target.closest('a[href]');
+  if(!a) return;
+  const href = a.getAttribute('href');
+  if(!href || !href.startsWith(location.pathname)) return;  // leave real links alone
+  if(ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button) return;  // let open-in-new-tab work
+  ev.preventDefault();
+  if(href !== location.pathname + location.search) history.pushState(null, '', href);
+  render();
+});
+addEventListener('popstate', render);
+
+// Pages through a /dedi/query listing to the end.
+//
+// The endpoint defaults to 25 rows and caps a page at 100, and the reply says
+// how many there are in total. Rendering the first page as though it were the
+// list is silent truncation: a registry of 300 records would show 25, say
+// nothing, and the records nobody was shown are indistinguishable from records
+// that do not exist. The witness listing already had to learn this server-side
+// (see witnessTargets); the same rule applies to the page reading it.
+async function queryAll(path, key, totalKey){
+  const rows = [];
+  let total = 0;
+  for(let page = 1; ; page++){
+    const j = await jget(path + (path.includes('?') ? '&' : '?') + 'page=' + page + '&page_size=100');
+    const d = j.data || {};
+    const batch = d[key] || [];
+    rows.push(...batch);
+    total = Number(d[totalKey] || rows.length);
+    if(!batch.length || rows.length >= total || page > 200) break;
+  }
+  return { rows, total };
+}
+
 async function jget(path){
   const r = await fetch(path);
-  if(!r.ok) throw new Error('HTTP '+r.status);
+  if(!r.ok){
+    // The status travels with the error. Matching on the text of a message is
+    // how "HTTP 404" in a namespace typo came to be reported as a revocation.
+    const e = new Error('HTTP ' + r.status); e.status = r.status; throw e;
+  }
   return r.json();
 }
+
+// It runs at startup and not inside loadCheckpoint: whether this node
+// published a verifier key is known from the markup without asking the server
+// anything, and gating the correction on a successful checkpoint fetch left the
+// stronger claim on screen in precisely the case where least had been verified.
+function setBanner(){
+  const banner = $('banner');
+  if(!banner) return;
+  banner.innerHTML = VKEY
+    ? 'Public, read-only directory over a Merkle transparency log. Inclusion proofs and the ' +
+      'checkpoint signature are checked in your browser; the server is trusted for neither.'
+    : 'Public, read-only directory over a Merkle transparency log. Inclusion proofs are recomputed ' +
+      'in your browser. This node published no verifier key, so <b>checkpoint signatures cannot be ' +
+      'checked here</b> and nothing below establishes who signed them.';
+}
+
+// ---- the node's own line ----------------------------------------------
 async function loadCheckpoint(){
   const txt = await (await fetch('/dedi/log/checkpoint')).text();
   const p = parseNote(txt); if(!p) throw new Error('bad checkpoint');
@@ -89,106 +224,418 @@ async function loadCheckpoint(){
   const sigOK = await verifyCheckpointSig(txt, VKEY);
   CK = {...cb, note:txt, sigOK};
   let sig;
-  if(sigOK === true) sig = '<span class="ok">signature verified &check;</span>';
-  else if(sigOK === false) sig = '<span class="no">signature INVALID</span>';
-  else sig = '<span class="mut">signature unchecked</span>';
-  $('node').innerHTML = 'node: <b>'+cb.origin.replace('/log','')+'</b> &middot; '+
-    'checkpoint: tree size '+cb.size+', root '+cb.rootB64.slice(0,20)+'... ('+sig+')';
+  if(sigOK === true) sig = '<span class="pill pill-ok">&check; signature verified</span>';
+  else if(sigOK === false) sig = '<span class="pill pill-bad">&#10007; signature INVALID</span>';
+  else sig = '<span class="pill">signature unchecked</span>';
+  $('node').innerHTML = 'node: <b>'+esc(cb.origin.replace('/log',''))+'</b> &middot; '+
+    'tree size '+cb.size+', root '+esc(cb.rootB64.slice(0,20))+'&hellip; '+sig;
+  // The standing claim at the top of the page is only true when there is a key
+  // to check the signature against.
 }
 
-// Served-request counter. Polls /dedi/stats, which is itself excluded from the
-// count server-side so this poll does not inflate the number it displays.
-async function loadStats(){
-  const j = await jget('/dedi/stats');
-  const d = j.data, by = d.by_status_class || {};
-  let out = Number(d.requests_served).toLocaleString();
-  const errs = (by['4xx']||0) + (by['5xx']||0);
-  if(errs) out += ' <span class="mut">('+errs.toLocaleString()+' errors)</span>';
-  if(d.uptime_seconds != null) out += ' <span class="mut">&middot; up '+fmtDur(d.uptime_seconds)+'</span>';
-  $('served').innerHTML = out;
+// ---- breadcrumb --------------------------------------------------------
+function crumb(p){
+  let out = '';
+  if(!p.ns){
+    out = '<form onsubmit="return submitNS()"><label for="ns">namespace</label>' +
+          '<input id="ns" spellcheck="false" size="20">' +
+          '<button class="btn-primary" type="submit">browse</button></form>';
+  } else {
+    out += nav({ns:p.ns}, esc(p.ns));
+    if(p.reg){
+      out += '<span class="sep">/</span>' + nav({ns:p.ns, reg:p.reg}, esc(p.reg));
+      if(p.rec) out += '<span class="sep">/</span><span class="here">'+esc(p.rec)+'</span>';
+    }
+    out += '<span class="sep">&middot;</span>' + nav({}, 'change namespace', 'mut');
+  }
+  $('crumb').innerHTML = out;
 }
-function fmtDur(s){
-  s = Math.floor(s);
-  if(s < 60) return s+'s';
-  if(s < 3600) return Math.floor(s/60)+'m';
-  if(s < 86400) return Math.floor(s/3600)+'h';
-  return Math.floor(s/86400)+'d';
-}
-
-function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function jarg(s){ return String(s).replace(/'/g,"\\'"); }
-
-function browse(){
-  const ns = $('ns').value.trim();
-  $('records').innerHTML = ''; $('record').innerHTML = '';
-  $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">loading...</p>';
-  jget('/dedi/query/'+encodeURIComponent(ns)).then(j => {
-    const regs = j.data.registries || [];
-    if(!regs.length){ $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="mut">none.</p>'; return; }
-    $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><ul>' + regs.map(r =>
-      '<li><a onclick="loadRecords(\''+jarg(ns)+'\',\''+jarg(r.registry_name)+'\')">'+esc(r.registry_name)+
-      '</a> <span class="mut">('+(r.record_count||0)+' records, '+esc(r.state||'?')+')</span></li>').join('') + '</ul>';
-  }).catch(e => $('registries').innerHTML = '<h2>Registries in '+esc(ns)+'</h2><p class="no">'+e.message+'</p>');
+function submitNS(){
+  const v = $('ns').value.trim();
+  if(v){ history.pushState(null, '', hrefFor({ns:v})); render(); }
   return false;
 }
 
-function loadRecords(ns, reg){
-  $('record').innerHTML = '';
-  $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">loading...</p>';
-  jget('/dedi/query/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)).then(j => {
-    const recs = j.data.records || [];
-    if(!recs.length){ $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="mut">none.</p>'; return; }
-    $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><ul>' + recs.map(r =>
-      '<li><a onclick="loadRecord(\''+jarg(ns)+'\',\''+jarg(reg)+'\',\''+jarg(r.record_name)+'\')">'+esc(r.record_name)+
-      '</a> <span class="mut">('+esc(r.state||'?')+')</span></li>').join('') + '</ul>';
-  }).catch(e => $('records').innerHTML = '<h2>Records in '+esc(reg)+'</h2><p class="no">'+e.message+'</p>');
+// ---- the list column ---------------------------------------------------
+function listBox(title, rowsHTML, filterable){
+  return '<div class="box"><header><span class="t" id="listtitle">'+esc(title)+'</span>' +
+    (filterable ? '<label class="vh" for="filter">filter this list</label>' +
+      '<input id="filter" placeholder="filter" spellcheck="false" value="'+esc(FILTER)+'" oninput="onFilter(this.value)">' : '') +
+    '</header><ul class="rows" aria-labelledby="listtitle">'+rowsHTML+'</ul></div>';
+}
+function onFilter(v){
+  FILTER = v;
+  paintRows();
+  const f = $('filter');
+  if(f){ f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
 }
 
-function loadRecord(ns, reg, rec){
-  $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="mut">loading...</p>';
-  jget('/dedi/lookup/'+encodeURIComponent(ns)+'/'+encodeURIComponent(reg)+'/'+encodeURIComponent(rec)+'?proof=inclusion').then(j => {
+// A row states its state in words. A revoked record must not be told apart
+// from a live one by colour alone: --ok and --bad are nearly the same
+// luminance, so hue is the one channel that does not survive greyscale.
+function rowHTML(r, p){
+  const st = String(r.state||'').toLowerCase();
+  // Registries carry a state as well, and /dedi/query returns it. Hiding it for
+  // registries meant a reader descended into one without being told.
+  const revoked = st !== '' && st !== 'live' && st !== 'active';
+  const to = r.kind === 'registry' ? {ns:p.ns, reg:r.name} : {ns:p.ns, reg:p.reg, rec:r.name};
+  const selected = (r.kind === 'registry' ? p.reg : p.rec) === r.name;
+  const tag = revoked
+    ? '<span class="pill pill-bad">&#10007; '+esc(r.state||'unknown')+'</span>'
+    : (r.meta ? '<span class="meta">'+esc(r.meta)+'</span>' : '');
+  return '<li>' + nav(to,
+      '<span class="nm">'+esc(r.name)+'</span>' + tag + (selected ? '<span class="vh"> — selected</span>' : ''),
+      selected ? 'sel' : '') + '</li>';
+}
+function paintRows(){
+  const p = here();
+  const f = FILTER.trim().toLowerCase();
+  const shown = ROWS.filter(r => !f || r.name.toLowerCase().includes(f));
+  const box = document.querySelector('.rows');
+  if(!box) return;
+  box.innerHTML = shown.length
+    ? shown.map(r => rowHTML(r, p)).join('') +
+      (SHORT ? '<li><span class="mut pad">this node reports ' + SHORT + ' in total and returned ' +
+        ROWS.length + '; the rest are not shown</span></li>' : '')
+    : '<li><span class="mut pad">nothing matches &ldquo;'+esc(FILTER)+'&rdquo;</span></li>';
+}
+
+// The root state.
+//
+// The design descends from a list of namespaces. There is no endpoint that
+// lists them, but the node's signed manifest names every namespace it publishes
+// files for, so that is offered for what it is — a list drawn from the
+// manifest, which is not necessarily every namespace this node holds — with the
+// field kept for anything not on it.
+function loadRoot(seq){
+  $('list').innerHTML = '<div class="box"><header><span class="t">namespaces</span></header>' +
+    '<ul class="rows"><li><span class="mut pad">reading this node&rsquo;s manifest&hellip;</span></li></ul></div>';
+  jget('/.well-known/dedi.index.json').then(j => {
+    if(seq !== SEQ) return;
+    const seen = [];
+    for(const f of (j.files || [])){
+      const m = String(f.url || '').match(/\/dedi-files\/([^\/]+)\//);
+      if(m && !seen.includes(decodeURIComponent(m[1]))) seen.push(decodeURIComponent(m[1]));
+    }
+    if(!seen.length){ $('list').innerHTML = rootHint('This node&rsquo;s manifest names no namespaces.'); return; }
+    ROWS = seen.map(n => ({kind:'namespace', name:n, state:'live', meta:''}));
+    $('list').innerHTML = '<div class="box"><header><span class="t">namespaces in this node&rsquo;s manifest</span></header><ul class="rows">' +
+      seen.map(n => '<li>' + nav({ns:n}, '<span class="nm">'+esc(n)+'</span>') + '</li>').join('') +
+      '</ul></div><p class="mut">Drawn from the signed manifest at ' +
+      '<code>/.well-known/dedi.index.json</code>, which names the namespaces this node publishes files ' +
+      'for. That is not necessarily every namespace it holds; the field above reaches any of them.</p>';
+  }).catch(() => {
+    if(seq !== SEQ) return;
+    $('list').innerHTML = rootHint('This node serves no signed manifest, so there is no list of its ' +
+      'namespaces to offer.');
+  });
+}
+function rootHint(why){
+  return '<p class="mut">'+why+' Name one above. Every record in it is a leaf in this node&rsquo;s ' +
+    'log, and every one of them can be checked here.</p>';
+}
+
+function loadList(p, seq){
+  if(!p.ns){ loadRoot(seq); return; }
+  const registryLevel = !p.reg;
+  const path = registryLevel
+    ? '/dedi/query/'+encodeURIComponent(p.ns)
+    : '/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg);
+  const title = registryLevel ? 'registries in '+p.ns : 'records in '+p.reg;
+  $('list').innerHTML = listBox(title, '<li><span class="mut pad">loading&hellip;</span></li>', false);
+  const q = registryLevel
+    ? queryAll(path, 'registries', 'total_registries')
+    : queryAll(path, 'records', 'total_records');
+  q.then(({rows, total}) => {
+    if(seq !== SEQ) return;
+    ROWS = registryLevel
+      ? rows.map(r => ({kind:'registry', name:r.registry_name, state:r.state,
+          meta:(r.record_count||0)+' records'}))
+      : rows.map(r => ({kind:'record', name:r.record_name, state:r.state, meta:''}));
+    // If the server said there are more than arrived, say so rather than
+    // presenting a prefix as the whole.
+    SHORT = total > ROWS.length ? total : 0;
+    $('list').innerHTML = listBox(title + ' \u00b7 ' + ROWS.length, '', ROWS.length > 1);
+    if(!ROWS.length){
+      document.querySelector('.rows').innerHTML = '<li><span class="mut pad">nothing here.</span></li>';
+      return;
+    }
+    paintRows();
+  }).catch(e => {
+    if(seq !== SEQ) return;
+    $('list').innerHTML = listBox(title, '<li><span class="no pad">'+esc(e.message)+'</span></li>', false);
+  });
+}
+
+// ---- the detail column -------------------------------------------------
+function kv(rows){
+  return '<div class="tw"><table>' + rows.map(([k,v]) =>
+    '<tr><th scope="row">'+esc(k)+'</th><td>'+v+'</td></tr>').join('') + '</table></div>';
+}
+
+function loadRecord(p, seq){
+  seq = seq === undefined ? ++SEQ : seq;
+  $('detail').innerHTML = '<h2>'+esc(p.rec)+'</h2><p class="mut">loading&hellip;</p>';
+  const base = '/dedi/lookup/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)+'/'+encodeURIComponent(p.rec);
+  const url = base + '?proof=inclusion' + (p.v ? '&version_id='+encodeURIComponent(p.v) : '');
+  return jget(url).then(j => {
+    if(seq !== SEQ) return;
     CUR = j;
-    const d = j.data, nm = (d.network_memberships||[]).join(', ') || 'none';
-    $('record').innerHTML = '<h2>'+esc(rec)+'</h2>' +
-      '<p class="mut">version '+esc(d.version)+' &middot; state '+esc(d.state)+' &middot; networks '+esc(nm)+
-      '<br>digest '+esc(d.digest)+'</p>' +
+    const d = j.data;
+    const live = String(d.state||'').toLowerCase() === 'live';
+    const statePill = live
+      ? '<span class="pill pill-ok">&check; live</span>'
+      : '<span class="pill pill-bad">&#10007; '+esc(d.state||'unknown')+'</span>';
+    const nm = (d.network_memberships||[]).join(', ') || 'none';
+    $('detail').innerHTML =
+      '<h2 class="hrow">'+esc(p.rec)+' '+statePill+'</h2>' +
+      kv([
+        ['version', esc(d.version)],
+        ['networks', esc(nm)],
+        ['digest', esc(d.digest||'')],
+        ['updated', esc(d.updated_at||'')],
+      ]) +
+      '<div id="proofpanel"></div>' +
+      '<p class="eyebrow">The record</p>' +
       '<pre>'+esc(JSON.stringify(d.details, null, 2))+'</pre>' +
-      '<button onclick="verifyInclusion()">verify inclusion proof</button>' +
-      '<div id="proof"></div>';
-  }).catch(e => $('record').innerHTML = '<h2>'+esc(rec)+'</h2><p class="no">'+e.message+'</p>');
+      '<div id="history"></div>';
+    verifyInclusion();
+    loadHistory(p, seq);
+  }).catch(e => {
+    if(seq !== SEQ) return;
+    if(e.status === 404 && !p.v){ notServed(p, seq); return; }
+    $('detail').innerHTML = '<h2>'+esc(p.rec)+'</h2><p class="no">'+esc(e.message)+'</p>';
+  });
 }
 
+// A name this node does not answer for.
+//
+// Revocation is one reason for it and the interesting one: the entry stops
+// being served while every version it ever had stays in the log, resolvable by
+// version_id and still carrying a proof. But a missing namespace, a missing
+// registry and a typo return the identical 404, so the page must not announce
+// "revoked, nothing was erased" until it has grounds. It says only what it can
+// show: the list's own word for this row if there is one, and the history only
+// once the log has actually returned some.
+function notServed(p, seq){
+  $('detail').innerHTML = '<h2 class="hrow">'+esc(p.rec)+' <span class="pill">not answered</span></h2>' +
+    '<div class="panel idle" id="nspanel"><p id="nswhy">This node does not answer for this name. ' +
+    'That may be because it was revoked, or because no such record, registry or namespace exists ' +
+    'here &mdash; the log returns the same 404 for all of them, so this page will not guess between ' +
+    'them.</p><p class="mut" id="nshist">looking for earlier versions&hellip;</p></div>' +
+    '<div id="history"></div>';
+
+  // The registry's own listing, fetched for THIS namespace and registry.
+  //
+  // An earlier version read the state out of the ROWS cache, but render() starts
+  // the list and the record load at the same time, so on a deep link ROWS is
+  // either empty or still holds the previous registry — and a record of the same
+  // name in a different registry would have had its state reported for this one.
+  // An ungrounded state claim is the thing this whole panel was rewritten to
+  // stop making; taking it from a cache that may be about something else is the
+  // same mistake wearing a different hat.
+  // Drains the pages, like the list does. Reading only the first page meant a
+  // revoked record beyond row 25 fell back to the neutral copy even though its
+  // own registry names it — failing safe, but inconsistently.
+  queryAll('/dedi/query/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg), 'records', 'total_records').then(({rows}) => {
+    if(seq !== SEQ) return;
+    const row = rows.find(r => r.record_name === p.rec);
+    if(!row || !row.state) return;
+    const h2 = document.querySelector('#detail h2'), why = $('nswhy');
+    if(h2) h2.innerHTML = esc(p.rec) + ' <span class="pill pill-bad">&#10007; '+esc(row.state)+'</span>';
+    if(why) why.innerHTML = 'This node lists this record as <b>'+esc(row.state)+'</b> and does not ' +
+      'serve a current version of it.';
+  }).catch(() => {});
+
+  jget('/dedi/versions/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)+'/'+encodeURIComponent(p.rec))
+    .then(j => {
+      if(seq !== SEQ) return;
+      const vs = (j.data && j.data.versions) || [];
+      const h = $('nshist');
+      if(!h) return;
+      h.innerHTML = vs.length
+        ? 'The log still holds ' + vs.length + ' version' + (vs.length === 1 ? '' : 's') + ' of it. ' +
+          'Nothing was erased &mdash; open one below to read it and check its own proof.'
+        : 'The log holds no versions under this name either.';
+      if(vs.length) renderHistory(p, vs, '');
+    })
+    .catch(() => {
+      if(seq !== SEQ) return;
+      const h = $('nshist');
+      if(h) h.innerHTML = 'This node returned no version history for that name.';
+    });
+}
+
+// The proof is checked on arrival rather than behind a button: the lookup
+// already asks for ?proof=inclusion and the checkpoint is already fetched, so
+// the only work that moves is the hashing. What changes is that the answer
+// stops being opt-in.
 async function verifyInclusion(){
-  const box = $('proof'); box.innerHTML = '<span class="mut">verifying...</span>';
+  const box = $('proofpanel');
+  if(!box) return;
+  const frame = (cls, head, body) =>
+    '<div class="panel '+cls+'"><div class="h"><span class="eyebrow" style="margin:0">Inclusion proof</span>'+
+    head+'</div>'+body+'</div>';
+  box.innerHTML = frame('idle', '<span class="mut">checking in your browser&hellip;</span>', '');
+
+  // A verifier that did not load is not a proof that failed. Without this the
+  // page renders a red FAILED headline whose only detail is a ReferenceError.
+  if(typeof leafHash !== 'function' || typeof proofRoot !== 'function'){
+    box.innerHTML = frame('idle', '<span class="pill">not checked</span>',
+      '<p class="mut">The verifier script did not load, so nothing on this page has been checked.</p>');
+    return;
+  }
   try {
-    const p = CUR.proof;
-    if(!p){ box.innerHTML = '<span class="no">no proof returned</span>'; return; }
+    const p = CUR && CUR.proof;
+    if(!p){
+      box.innerHTML = frame('idle', '<span class="pill">no proof</span>',
+        '<p class="mut">This node returned no inclusion proof for this record, so nothing here has ' +
+        'been verified. The request that should carry one is <code>?proof=inclusion</code>.</p>');
+      return;
+    }
     const lh = await leafHash(leafBytes(p.leaf));
     const root = await proofRoot(p.path.map(b64d), p.tree_size, p.leaf_index, lh);
     const cb = parseCheckpointBody(parseNote(p.checkpoint).body);
     const rootMatch = eq(root, cb.root);
     const sizeMatch = cb.size === p.tree_size;
     const sigOK = await verifyCheckpointSig(p.checkpoint, VKEY);
-    const allOK = rootMatch && sizeMatch && sigOK !== false;
-    let out = '<p class="'+(allOK?'ok':'no')+'"><b>'+(allOK?'&check; verified against the signed tree':'&#10007; verification failed')+'</b></p><ul>';
-    out += li(rootMatch, 'leaf '+p.leaf_index+' is included in the tree of size '+p.tree_size, 'recomputed root does not match checkpoint');
-    out += li(sizeMatch, 'proof binds to checkpoint size '+cb.size, 'proof size / checkpoint size mismatch');
-    if(sigOK === true) out += li(true, 'checkpoint signed by '+esc(cb.origin.replace('/log','')), '');
-    else if(sigOK === false) out += li(false, '', 'checkpoint signature invalid');
-    else out += '<li class="mut">checkpoint signature unchecked (no key / unsupported browser)</li>';
-    box.innerHTML = out + '</ul>';
-  } catch(e){ box.innerHTML = '<span class="no">&#10007; '+esc(e.message)+'</span>'; }
+
+    // Three states, not two.
+    //
+    // sigOK is null when there is no verifier key or no WebCrypto — neither
+    // true nor false. Folding null in with true (`sigOK !== false`) puts a
+    // green tick on a proof whose checkpoint nobody authenticated, which is the
+    // false green this page exists to avoid. /check already draws this
+    // distinction; this page did not, and its verdict is the more prominent of
+    // the two.
+    const verdict = (!rootMatch || !sizeMatch || sigOK === false) ? 'bad'
+                  : (sigOK === true) ? 'good' : 'partial';
+
+    const same = CK && cb.size === CK.size && cb.rootB64 === CK.rootB64;
+    const summary = kv([
+      ['leaf', 'leaf '+p.leaf_index+' of a tree of size '+p.tree_size],
+      ['checkpoint', esc(cb.origin.replace('/log',''))+', size '+cb.size +
+        (CK ? (same
+          ? ' <span class="pill pill-ok">&check; same one this page fetched</span>'
+          : ' <span class="pill">a different checkpoint from the one in the header (size '+CK.size+')</span>')
+        : '')],
+      ['path', p.path.length+' hashes'],
+    ]);
+    let items = '<ul>';
+    items += li(rootMatch, 'the recomputed root matches the checkpoint this node returned',
+                'the recomputed root does NOT match the checkpoint');
+    items += li(sizeMatch, 'the proof binds to checkpoint size '+cb.size,
+                'the proof size and the checkpoint size disagree');
+    if(sigOK === true) items += li(true, 'that checkpoint is signed by '+cb.origin.replace('/log',''), '');
+    else if(sigOK === false) items += li(false, '', 'the checkpoint signature is invalid');
+    else items += '<li class="mut">the checkpoint signature was NOT checked &mdash; ' +
+      (VKEY ? 'this browser has no WebCrypto' : 'this node published no verifier key') + '.</li>';
+    items += '</ul>';
+
+    let head, note;
+    if(verdict === 'good'){
+      head = '<span class="pill pill-ok">&check; checked in your browser</span>';
+      note = 'Recomputed here from the leaf and the path, against a checkpoint signed by that key.';
+    } else if(verdict === 'partial'){
+      head = '<span class="pill">partly checked &mdash; signature not verified</span>';
+      // Said plainly, because the two checks above are both against fields of
+      // the same response. Without a signature they show the answer is
+      // internally consistent, not that it came from the real log.
+      note = 'The two checks above are both against the checkpoint this node returned, so together ' +
+        'they show only that its answer is self-consistent &mdash; not that it came from the real ' +
+        'log. A node inventing a leaf, a path and a checkpoint to match would pass both.';
+    } else {
+      head = '<span class="pill pill-bad">&#10007; verification FAILED</span>';
+      note = 'This does not check out. Do not trust this record on the strength of this page.';
+    }
+    if(!same && CK) note += ' It is also not the checkpoint shown at the top of this page.';
+    box.innerHTML = frame(verdict === 'good' ? 'good' : verdict === 'bad' ? 'bad' : 'idle',
+      head, summary + items + '<p class="mut">' + note +
+      ' <button onclick="verifyInclusion()">check again</button></p>');
+  } catch(e){
+    box.innerHTML = frame('bad', '<span class="pill pill-bad">&#10007; verification FAILED</span>',
+      '<p class="no">'+esc(e.message)+'</p>');
+  }
 }
 function li(ok, okMsg, noMsg){
   return '<li class="'+(ok?'ok':'no')+'">'+(ok?'&check; '+esc(okMsg):'&#10007; '+esc(noMsg))+'</li>';
 }
 
-loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint error: '+esc(e.message)+'</span>');
-const statsFail = () => $('served').innerHTML = '<span class="mut">unavailable</span>';
-loadStats().catch(statsFail);
-setInterval(() => loadStats().catch(statsFail), 5000);
+// History.
+//
+// /dedi/versions returns version identifiers and nothing else — no per-version
+// timestamp and no payload (buildVersionsDTO, and the frozen `versions:
+// [string]` shape in the OpenAPI spec). So this says what the API can back:
+// which versions exist, which one is on screen, and a way to open any of them.
+// It does not claim what changed between two of them, because the node does not
+// say and guessing is the one thing this page must never do.
+function loadHistory(p, seq){
+  const box = $('history');
+  if(!box) return;
+  box.innerHTML = '<p class="eyebrow">History</p><p class="mut">loading&hellip;</p>';
+  jget('/dedi/versions/'+encodeURIComponent(p.ns)+'/'+encodeURIComponent(p.reg)+'/'+encodeURIComponent(p.rec))
+    .then(j => {
+      if(seq !== SEQ) return;
+      // The version being read comes from the request, not from a global that
+      // a later response could have replaced.
+      const shown = p.v || ((CUR && CUR.data && CUR.data.version) || '');
+      renderHistory(p, (j.data && j.data.versions) || [], shown);
+    })
+    .catch(e => {
+      if(seq !== SEQ) return;
+      box.innerHTML = '<p class="eyebrow">History</p><p class="no">'+esc(e.message)+'</p>';
+    });
+}
+function renderHistory(p, vs, shown){
+  const box = $('history');
+  if(!box) return;
+  const rows = vs.map((v, i) => {
+    const isCur = String(v) === String(shown);
+    return '<tr><td>' +
+      (isCur ? '<b>'+esc(v)+'</b> <span class="pill">on screen</span>'
+             : nav({ns:p.ns, reg:p.reg, rec:p.rec, v:v}, esc(v))) +
+      '</td><td class="mut">'+(i+1)+' of '+vs.length+'</td></tr>';
+  }).join('');
+  box.innerHTML = '<p class="eyebrow">History</p><div class="tw"><table>' +
+    '<tr><th scope="col">version</th><th scope="col">position</th></tr>' + rows + '</table></div>' +
+    '<p class="mut">The history <i>is</i> the record: every version above is still a leaf in the log ' +
+    'and still provable. Open one to read it and check its own proof. This node&rsquo;s versions ' +
+    'endpoint returns identifiers only, so there is no per-version timestamp to show here and no ' +
+    'diff between them to report.</p>';
+}
 
-browse();
+// ---- render ------------------------------------------------------------
+//
+// Every load carries the sequence number it started with and drops its result
+// if another navigation has happened since. Without it, clicking record A then
+// record B could paint A's detail — and A's green verdict — over B.
+let LISTED = '';
+function render(){
+  const seq = ++SEQ;
+  const p = here();
+  // A filter belongs to the list it was typed into. Carrying it across meant
+  // landing on a different registry already narrowed by a word from the last
+  // one, with the box looking half-empty for no visible reason.
+  const listKey = p.ns + '\u0000' + p.reg;
+  if(listKey !== LISTED){ FILTER = ''; LISTED = listKey; }
+  crumb(p);
+  loadList(p, seq);
+  if(p.ns && p.reg && p.rec){
+    loadRecord(p, seq);
+    if(!matchMedia('(min-width: 46em)').matches){
+      requestAnimationFrame(() => { const d = $('detail'); if(d) d.scrollIntoView({behavior:'smooth', block:'start'}); });
+    }
+  } else {
+    CUR = null;
+    $('detail').innerHTML = p.ns
+      ? '<p class="mut">Pick '+(p.reg ? 'a record' : 'a registry')+' to see it, with its inclusion proof checked here in your browser.</p>'
+      : '';
+  }
+}
+
+setBanner();
+loadCheckpoint().catch(e => $('node').innerHTML = '<span class="no">checkpoint error: '+esc(e.message)+'</span>');
+render();
 </script>
 </body>
 </html>

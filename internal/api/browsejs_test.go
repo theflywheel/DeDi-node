@@ -1,0 +1,460 @@
+package api
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// The browser must show the proof verdict without being asked, and must say so
+// loudly when the proof does not check out.
+//
+// Running the shipped page's own JS is the only assertion that means anything
+// here. A test that looked at the markup would happily pass on a page that
+// renders the panel frame and never folds a path — which is precisely the
+// failure the panel exists to make impossible.
+func TestBrowseChecksTheProofOnArrivalAndRefusesABadOne(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	srv, s, vkey := testServer(t)
+	seedBasic(t, s)
+
+	get := func(path string) []byte {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d — %s", path, resp.StatusCode, b)
+		}
+		return b
+	}
+
+	good := get("/dedi/lookup/flywheel/participants/bap.example.com?proof=inclusion")
+	versions := get("/dedi/versions/flywheel/participants/bap.example.com")
+	ckpt := get("/dedi/log/checkpoint")
+
+	// Tampered: flip the leaf digest. Everything else — the path, the
+	// checkpoint, the signature — stays genuine, so only the fold can catch it.
+	var bad map[string]any
+	if err := json.Unmarshal(good, &bad); err != nil {
+		t.Fatal(err)
+	}
+	leaf := bad["proof"].(map[string]any)["leaf"].(map[string]any)
+	leaf["digest"] = strings.Repeat("0", len(leaf["digest"].(string)))
+	badJSON, _ := json.Marshal(bad)
+
+	// A response carrying no proof at all. Distinct from a failure: nothing was
+	// checked, rather than something was checked and did not hold.
+	var noproof map[string]any
+	json.Unmarshal(good, &noproof)
+	delete(noproof, "proof")
+	noProofJSON, _ := json.Marshal(noproof)
+
+	page, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vjs, err := os.ReadFile(filepath.Join("static", "verify.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := string(page)
+	pageJS := full[strings.LastIndex(full, "<script>")+len("<script>"):]
+	pageJS = pageJS[:strings.Index(pageJS, "</script>")]
+
+	// Fixtures travel as files. Marshalled JSON pasted into a template literal
+	// has its \n escapes turned into real newlines and stops being JSON, which
+	// once made this harness "fail to verify" a proof that was perfectly good.
+	dir := t.TempDir()
+	for name, b := range map[string][]byte{
+		"good.json": good, "bad.json": badJSON, "noproof.json": noProofJSON,
+		"versions.json": versions, "ckpt.txt": ckpt,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	harness := `
+import fs from 'node:fs';
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, 'crypto', {
+    value: (await import('node:crypto')).webcrypto, configurable: true,
+  });
+}
+const GOOD = fs.readFileSync(process.argv[2], 'utf8');
+const BAD  = fs.readFileSync(process.argv[3], 'utf8');
+const NOPROOF = fs.readFileSync(process.argv[4], 'utf8');
+const VERSIONS = fs.readFileSync(process.argv[5], 'utf8');
+const CKPT = fs.readFileSync(process.argv[6], 'utf8');
+const KEY = process.argv[7];
+
+const els = new Map();
+const mk = id => ({ id, innerHTML: '', value: '', focus(){}, setSelectionRange(){},
+                    scrollIntoView(){}, addEventListener(){} });
+globalThis.document = {
+  getElementById: id => { if(!els.has(id)) els.set(id, mk(id)); return els.get(id); },
+  querySelector: sel => {
+    if (sel.startsWith('meta')) return { content: KEY };
+    if (sel === '.rows') return mk('rows');
+    if (sel === '#detail h2') return mk('detailh2');
+    return null;
+  },
+  addEventListener(){},
+};
+globalThis.location = { origin: 'http://node.example', pathname: '/browse', search: '' };
+globalThis.history = { pushState(){} };
+globalThis.addEventListener = () => {};
+globalThis.matchMedia = () => ({ matches: true });
+globalThis.requestAnimationFrame = fn => fn();
+
+// The fetch stub answers what the record view actually asks for, and is
+// swapped per case below.
+let LOOKUP = GOOD;
+let LOOKUP_STATUS = 200;
+let VERSIONS_STATUS = 200;
+let QUERY_RECORDS = [];
+globalThis.fetch = async (url) => {
+  if (url.includes('/dedi/log/checkpoint')) return { ok: true, text: async () => CKPT };
+  if (url.includes('/dedi/versions/'))
+    return VERSIONS_STATUS === 200
+      ? { ok: true, json: async () => JSON.parse(VERSIONS) }
+      : { ok: false, status: VERSIONS_STATUS, json: async () => ({}) };
+  if (url.includes('/dedi/lookup/'))
+    return LOOKUP_STATUS === 200
+      ? { ok: true, json: async () => JSON.parse(LOOKUP) }
+      : { ok: false, status: LOOKUP_STATUS, json: async () => ({}) };
+  if (url.includes('/.well-known/')) return { ok: true, json: async () => ({files: []}) };
+  if (url.includes('/dedi/query/')) {
+    // Paginate the way the server does, so a page that reads only the first
+    // batch is visibly short rather than accidentally complete.
+    const u = new URL(url, 'http://x');
+    const page = Number(u.searchParams.get('page') || 1);
+    const size = Math.min(Number(u.searchParams.get('page_size') || 25), 100);
+    const slice = QUERY_RECORDS.slice((page - 1) * size, page * size);
+    return { ok: true, json: async () => ({data:{
+      registries: [], records: slice,
+      total_records: QUERY_RECORDS.length, total_registries: 0,
+      page_number: page, page_size: size,
+    }}) };
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+const settle = () => new Promise(r => setTimeout(r, 50));
+const P = { ns: 'flywheel', reg: 'participants', rec: 'bap.example.com', v: '' };
+`
+
+	checks := `
+// 1. The verdict is present WITHOUT anything being clicked. loadRecord is the
+//    only thing called; nothing touches a button.
+LOOKUP = GOOD;
+await loadRecord(P); await settle();
+const arrival = document.getElementById('proofpanel').innerHTML;
+if (!arrival.includes('checked in your browser'))
+  throw new Error('a valid proof was not verified on arrival: ' + arrival.slice(0, 500));
+if (arrival.includes('FAILED'))
+  throw new Error('a valid proof reported failure: ' + arrival.slice(0, 500));
+
+// 2. A tampered leaf must produce a LOUD failure, not a quiet one and not a
+//    blank panel. This is the page's most important possible output.
+LOOKUP = BAD;
+await loadRecord(P); await settle();
+const tampered = document.getElementById('proofpanel').innerHTML;
+if (!tampered.includes('FAILED'))
+  throw new Error('a tampered proof did not report failure: ' + tampered.slice(0, 500));
+if (!tampered.includes('does NOT match'))
+  throw new Error('the failure did not say what failed: ' + tampered.slice(0, 500));
+
+// 3. No proof offered is its own state. "Nothing was checked" must not look
+//    like "checked and fine", and must not look like "checked and failed".
+LOOKUP = NOPROOF;
+await loadRecord(P); await settle();
+const none = document.getElementById('proofpanel').innerHTML;
+if (!none.includes('no inclusion proof'))
+  throw new Error('a missing proof was not reported: ' + none.slice(0, 500));
+if (none.includes('checked in your browser') || none.includes('FAILED'))
+  throw new Error('a missing proof was reported as a verdict: ' + none.slice(0, 500));
+
+// 4. Every state the reader is asked to act on carries a WORD, not just a
+//    colour. --ok green and --bad red are nearly the same luminance, so a page
+//    that distinguishes them by hue alone says nothing in greyscale.
+LOOKUP = GOOD;
+await loadRecord(P); await settle();
+const detail = document.getElementById('detail').innerHTML;
+if (!/pill-(ok|bad)/.test(detail)) throw new Error('the state pill is missing from the record detail');
+// Strip entities BEFORE looking for a word. The first version of this check
+// tested the raw text, and "&nbsp;" satisfied /[a-z]/ on the strength of the
+// entity name — so a pill with no visible word at all passed. The assertion
+// has to be about what a reader sees.
+const pills = [...detail.matchAll(/<span class="pill[^"]*">([^<]*)</g)].map(m => m[1]);
+if (!pills.length) throw new Error('no pills rendered at all, so this proves nothing');
+for (const p of pills) {
+  const visible = p.replace(/&[a-zA-Z]+;|&#\d+;/g, '').trim();
+  if (!/[a-z]/i.test(visible))
+    throw new Error('a pill carries no word a reader can see, only colour: ' + JSON.stringify(p));
+}
+
+// 5. The history table lists the versions the API actually returned, and does
+//    not invent a "what changed" column the endpoint cannot back.
+const hist = document.getElementById('history').innerHTML;
+const want = JSON.parse(VERSIONS).data.versions || [];
+if (!want.length) throw new Error('the fixture has no versions, so this proves nothing');
+for (const v of want) {
+  if (!hist.includes(v)) throw new Error('version ' + v + ' missing from the history table: ' + hist.slice(0, 400));
+}
+if (/what changed/i.test(hist)) throw new Error('the history table claims a diff the API cannot back');
+
+
+// 6. THE FALSE GREEN. With no verifier key the signature cannot be checked at
+//    all, and verifyCheckpointSig returns null — neither pass nor fail. Folding
+//    null in with true puts a green tick on a proof whose checkpoint nobody
+//    authenticated. /check already refuses to do this; this page must too.
+VKEY = '';
+LOOKUP = GOOD; LOOKUP_STATUS = 200;
+await loadRecord(P); await settle();
+const nokey = document.getElementById('proofpanel').innerHTML;
+if (nokey.includes('checked in your browser'))
+  throw new Error('an UNVERIFIED signature still produced the green verdict: ' + nokey.slice(0, 400));
+if (!nokey.includes('partly checked'))
+  throw new Error('the unchecked signature was not reported as partial: ' + nokey.slice(0, 400));
+if (!/NOT checked/.test(nokey))
+  throw new Error('the panel does not say the signature went unchecked: ' + nokey.slice(0, 400));
+// And it must not overstate what the two remaining checks establish.
+if (!/self-consistent|internally consistent/.test(nokey))
+  throw new Error('the panel implies the root check proves origin: ' + nokey.slice(0, 400));
+
+// 7. A 404 must not be announced as a revocation. Namespace typos, missing
+//    registries and revoked records all return the same status, so the page may
+//    only report what it can show.
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 404;
+ROWS.length = 0;                        // nothing in the list claims a state
+await loadRecord(P); await settle();
+const missing = document.getElementById('detail').innerHTML + ' ' + document.getElementById('nshist').innerHTML;
+if (/nothing was erased|still provable/i.test(missing))
+  throw new Error('a bare 404 was announced as a revocation: ' + missing.slice(0, 400));
+if (!/does not answer for this name/.test(missing))
+  throw new Error('a 404 was not explained at all: ' + missing.slice(0, 400));
+
+// 8. When the log DOES still hold versions, say so — that is the real revoked
+//    case and the one worth showing.
+VERSIONS_STATUS = 200;
+await loadRecord(P); await settle();
+// The surviving-versions sentence is written into #nshist once the versions
+// call returns, so read that element rather than the parent's markup: this
+// fake DOM does not parse HTML, and the parent's string was built before.
+const revoked = document.getElementById('nshist').innerHTML;
+if (!/Nothing was erased/.test(revoked))
+  throw new Error('a name with surviving versions did not report them: ' + revoked.slice(0, 400));
+
+// 9. Navigation must be real links, not handlers: reachable by keyboard, and
+//    with no seam where a name can close an attribute and add script.
+LOOKUP_STATUS = 200; VKEY = KEY;
+ROWS.length = 0;
+ROWS.push({kind:'record', name:"evil' onmouseover='alert(1)", state:'live', meta:''});
+const row = rowHTML(ROWS[0], P);
+if (/onmouseover/.test(row) && !/&#39;/.test(row))
+  throw new Error('a record name escaped its attribute and added a handler: ' + row);
+if (!/<a href="/.test(row)) throw new Error('a list row is not a link, so it cannot be reached by keyboard: ' + row);
+
+
+// 10. THE STANDING CLAIM AT THE TOP OF THE PAGE. It says inclusion proofs AND
+//     the checkpoint signature are checked in your browser. On a node that
+//     published no verifier key the second half is false, and it is stated
+//     before the reader has opened anything.
+//
+//     This is here because the first version of the fix rewrote #banner and
+//     never gave the paragraph that id, so the guard ran, found nothing, and
+//     the false claim shipped anyway. The assertion is on the rendered text.
+VKEY = '';
+setBanner();
+const keyless = document.getElementById('banner').innerHTML;
+if (/signature[s]? are checked in your browser/.test(keyless))
+  throw new Error('a node with no verifier key still claims it checks signatures: ' + keyless.slice(0, 300));
+if (!/cannot be checked/.test(keyless))
+  throw new Error('the keyless banner does not say signatures go unchecked: ' + keyless.slice(0, 300));
+
+VKEY = KEY;
+setBanner();
+const keyed = document.getElementById('banner').innerHTML;
+if (/cannot be checked/.test(keyed))
+  throw new Error('a node WITH a key wrongly says signatures cannot be checked: ' + keyed.slice(0, 300));
+
+// And it must not depend on the checkpoint request working. Gating the
+// correction on a successful fetch left the STRONGER claim on screen in exactly
+// the case where least had been verified: the page unable to reach its own log,
+// still telling the reader it checks signatures.
+VKEY = '';
+const savedFetch = globalThis.fetch;
+globalThis.fetch = async () => { throw new Error('network down'); };
+document.getElementById('banner').innerHTML = '';
+setBanner();
+try { await loadCheckpoint(); } catch (e) {}
+const offline = document.getElementById('banner').innerHTML;
+globalThis.fetch = savedFetch;
+if (/signature[s]? are checked in your browser/.test(offline))
+  throw new Error('with the log unreachable and no key, the page still claims it checks signatures: ' + offline.slice(0, 300));
+if (!/cannot be checked/.test(offline))
+  throw new Error('the banner did not downgrade when the checkpoint fetch failed: ' + offline.slice(0, 300));
+VKEY = KEY;
+
+
+// 11. A STATE CLAIM MUST BE ABOUT THIS RECORD. render() starts the list and the
+//     record load together, so on a deep link the row cache is empty or still
+//     holds the previous registry. Reporting a state out of it would attach one
+//     record's status to a different record that happens to share a name — an
+//     ungrounded claim of exactly the kind this panel was rewritten to stop.
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 404;
+ROWS.length = 0;
+ROWS.push({kind:'record', name:'bap.example.com', state:'revoked', meta:''});  // stale: another registry
+QUERY_RECORDS = [];                       // the authority for THIS registry lists nothing
+await loadRecord(P); await settle();
+// Match the CLAIM, not the word. The neutral copy legitimately contains
+// "revoked" while explaining that it will not guess, and an earlier version of
+// this assertion failed on that sentence.
+const stale = document.getElementById('detail').innerHTML + document.getElementById('nswhy').innerHTML;
+if (/lists this record as/.test(stale) || /pill-bad/.test(stale))
+  throw new Error('a state was claimed from a stale list cache: ' + stale.slice(0, 400));
+
+// And when the registry's own listing DOES name it, the state is reported.
+QUERY_RECORDS = [{record_name: 'bap.example.com', state: 'revoked'}];
+await loadRecord(P); await settle();
+const grounded = document.getElementById('nswhy').innerHTML;
+if (!/lists this record as <b>revoked<\/b>/.test(grounded))
+  throw new Error('an authoritative state was not reported: ' + grounded.slice(0, 300));
+
+
+// 12. THE WHOLE LIST, NOT THE FIRST PAGE. /dedi/query defaults to 25 rows and
+//     caps a page at 100. Rendering page one as the list is silent truncation,
+//     and the records nobody was shown look exactly like records that do not
+//     exist. The live registry this was developed against holds ten, which is
+//     why only a reviewer found it.
+QUERY_RECORDS = [];
+for (let i = 0; i < 250; i++) QUERY_RECORDS.push({record_name: 'rec-' + i, state: 'live'});
+LOOKUP_STATUS = 200; VERSIONS_STATUS = 200;
+await loadList({ns:'flywheel', reg:'participants', rec:'', v:''}, ++SEQ);
+await settle(); await settle();
+if (ROWS.length !== 250)
+  throw new Error('the list holds ' + ROWS.length + ' of 250 records — the rest were dropped in silence');
+
+
+// 13. The grounding query must drain pages too. A revoked record sitting past
+//     the first page of its registry would otherwise fall back to the neutral
+//     copy while its own registry names it — safe, but inconsistent with the
+//     list beside it, which does page.
+QUERY_RECORDS = [];
+for (let i = 0; i < 120; i++) QUERY_RECORDS.push({record_name: 'filler-' + i, state: 'live'});
+QUERY_RECORDS.push({record_name: 'bap.example.com', state: 'revoked'});   // row 121
+LOOKUP_STATUS = 404; VERSIONS_STATUS = 200;
+document.getElementById('nswhy').innerHTML = '';
+await loadRecord(P); await settle(); await settle();
+const deep = document.getElementById('nswhy').innerHTML;
+if (!/lists this record as <b>revoked<\/b>/.test(deep))
+  throw new Error('a record past the first page was not grounded: ' + deep.slice(0, 300));
+
+console.log('BROWSE-JS-OK');
+`
+
+	script := filepath.Join(dir, "run.mjs")
+	if err := os.WriteFile(script, []byte(harness+string(vjs)+pageJS+checks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", script,
+		filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json"),
+		filepath.Join(dir, "noproof.json"), filepath.Join(dir, "versions.json"),
+		filepath.Join(dir, "ckpt.txt"), vkey)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "BROWSE-JS-OK") {
+		t.Fatalf("browse page JS: %v\n%s", err, out)
+	}
+}
+
+// Every element the script writes to must actually exist.
+//
+// This exists because of a bug the JS harness structurally cannot see. The page
+// downgrades its "signatures are checked in your browser" claim on a node with
+// no verifier key by rewriting #banner — and the paragraph had no id="banner",
+// so the guard ran, found nothing, and the false claim shipped. The fake DOM in
+// the test above manufactures an element for any id asked of it, so it reported
+// the downgrade working while the real page never did it.
+//
+// A test whose fake is more forgiving than the browser will certify a page that
+// does not work. This one reads the file instead.
+func TestBrowseWritesOnlyToElementsThatExist(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(page)
+
+	// Ids that exist: written into the static markup, or into markup the script
+	// itself builds (both are id="..." in this file).
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`id="([A-Za-z0-9_-]+)"`).FindAllStringSubmatch(src, -1) {
+		defined[m[1]] = true
+	}
+	// Ids that are read.
+	read := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\$\('([A-Za-z0-9_-]+)'\)`).FindAllStringSubmatch(src, -1) {
+		read[m[1]] = true
+	}
+	if len(read) == 0 {
+		t.Fatal("found no element lookups at all, so this proves nothing")
+	}
+	for id := range read {
+		if !defined[id] {
+			t.Errorf("the script writes to #%s, which nothing in the page ever defines — "+
+				"whatever that code does, it does to nobody", id)
+		}
+	}
+}
+
+// The banner correction must not sit behind a network call.
+//
+// Whether this node published a verifier key is in the markup; it takes no
+// request to find out. Running the correction at the end of loadCheckpoint
+// meant that a node which could not reach its own log kept the STRONGER claim
+// on screen — "inclusion proofs and the checkpoint signature are checked in
+// your browser" — in exactly the case where least had been checked.
+//
+// This is asserted on the source rather than by driving the page, because the
+// JS harness can only call setBanner() itself, which proves the function works
+// and says nothing about where it is called from. The first version of that
+// assertion passed with the call moved back inside loadCheckpoint, which is the
+// bug it was written for.
+func TestBrowseBannerDoesNotWaitOnTheNetwork(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(page)
+	if !strings.Contains(src, "function setBanner()") {
+		t.Fatal("no setBanner in the page, so this proves nothing")
+	}
+	// Blank out the body of loadCheckpoint, then look for the call in what is left.
+	start := strings.Index(src, "async function loadCheckpoint()")
+	if start < 0 {
+		t.Fatal("no loadCheckpoint in the page")
+	}
+	open := strings.Index(src[start:], "{") + start
+	end := matchingBrace(src, open)
+	if end < 0 {
+		t.Fatal("could not find the end of loadCheckpoint")
+	}
+	outside := src[:start] + src[end:]
+	// The definition itself contains the name; look for a call.
+	calls := regexp.MustCompile(`(?m)^\s*setBanner\(\);`).FindAllString(outside, -1)
+	if len(calls) == 0 {
+		t.Error("setBanner is only called from inside loadCheckpoint, so a node that cannot reach " +
+			"its own log keeps claiming it verifies checkpoint signatures")
+	}
+}
