@@ -115,11 +115,12 @@ await run().catch(e => { console.log('RUN-ERROR: ' + e.message); process.exit(2)
 const out = document.getElementById('out').innerHTML;
 const banner = out.slice(0, out.indexOf('class="steps"') + 1) || out.slice(0, 1500);
 const holds = /witness claim holds/.test(banner);
+const caveat = (out.match(/What none of this shows[\s\S]*?<\/div>/) || [''])[0].replace(/<[^>]*>/g,' ');
 const reason = (banner.match(/<li>([\s\S]*?)<\/li>/g) || []).map(x => x.replace(/<[^>]*>/g,'')).join(' | ');
 const partly = /Partly checked/.test(banner);
 const skipChip = /class="chip skip"/.test(out);
 const chips=[...out.matchAll(/<div class="chip (pass|fail|skip)"[^>]*>([^<]*)/g)].map(m=>m[1]+":"+m[2].replace(/&[a-z]+;/g,""));
-console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: banner.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,220) }));
+console.log(JSON.stringify({ holds, partly, skipChip, reason, caveat: caveat.slice(0, 200), chips, banner: banner.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,220) }));
 `
 	run := filepath.Join(dir, "run.mjs")
 	if err := os.WriteFile(run, []byte(harness+string(vjs)+js+checks), 0o600); err != nil {
@@ -194,6 +195,27 @@ console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: ban
 	if !strings.Contains(no.Reason, "key") {
 		t.Errorf("a run with no keys does not say a key was missing: %q", no.Reason)
 	}
+
+	// The caveat sits below the verdict and has to read true under all three of
+	// them. Written for the happy path and appended unconditionally, it told a
+	// reader "every step above verifies" underneath a partly-checked banner —
+	// reinstating the overstatement the rest of this change removes, three
+	// paragraphs further down.
+	for _, c := range []struct {
+		name string
+		v    verdict
+	}{{"no keys", no}, {"empty log", z}} {
+		if strings.Contains(c.v.Caveat, "Every step above verifies") {
+			t.Errorf("with %s the caveat still claims every step above verifies: %q",
+				c.name, c.v.Caveat)
+		}
+		if !strings.Contains(c.v.Caveat, "would not have shown this") {
+			t.Errorf("with %s the caveat does not adapt to the verdict: %q", c.name, c.v.Caveat)
+		}
+	}
+	if !strings.Contains(yes.Caveat, "Every step above verifies") {
+		t.Errorf("with everything checked the caveat no longer says so: %q", yes.Caveat)
+	}
 }
 
 // verifyFixtures captures exactly the responses /verify fetches, produced by
@@ -222,7 +244,7 @@ func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero
 		size, rootB64 = 0, ""
 	}
 	verdict, _ := json.Marshal(map[string]any{
-		"target": "https://" + targetOrigin, "size": size, "root": rootB64,
+		"target": "https://" + targetOrigin + "/dedi", "size": size, "root": rootB64,
 		"consistency_ok": true,
 	})
 	seedVerdict(t, s, targetOrigin, string(verdict), "live")
@@ -254,7 +276,7 @@ func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero
 	}
 	netJSON, _ := json.Marshal(map[string]any{"data": map[string]any{
 		"witnessing":  targetOrigin,
-		"witness_url": "https://" + targetOrigin,
+		"witness_url": "https://" + targetOrigin + "/dedi",
 		"witness_key": "__KEY__",
 		"nodes": []map[string]any{
 			{"name": "this node", "self": true, "reachable": true, "origin": "test.dedi.local/log"},
@@ -273,6 +295,7 @@ func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero
 type verdict struct {
 	Holds, Partly, SkipChip bool
 	Reason                  string
+	Caveat                  string
 }
 
 func runPage(t *testing.T, script, fx, base, key string) verdict {
