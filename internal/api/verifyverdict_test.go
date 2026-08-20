@@ -216,6 +216,28 @@ console.log(JSON.stringify({ holds, partly, skipChip, reason, caveat: caveat.sli
 	if !strings.Contains(yes.Caveat, "Every step above verifies") {
 		t.Errorf("with everything checked the caveat no longer says so: %q", yes.Caveat)
 	}
+
+	// And the third verdict: a step that actually failed. The caveat's opening
+	// has its own wording there, and nothing covered it — the comment above
+	// claimed three states and the table checked two.
+	srv3, st3, vkey3 := testServer(t)
+	seedBasic(t, st3)
+	fxFork := verifyFixturesTuned(t, srv3, st3, false, true)
+	forkPath := filepath.Join(dir, "fx-fork.json")
+	if err := os.WriteFile(forkPath, fxFork, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := runPage(t, run, forkPath, srv3.URL, vkey3)
+	if f.Holds || f.Partly {
+		t.Fatalf("the equivocation fixture did not fail (holds=%v partly=%v); it proves nothing",
+			f.Holds, f.Partly)
+	}
+	if strings.Contains(f.Caveat, "Every step above verifies") {
+		t.Errorf("under a failed verdict the caveat still claims every step verifies: %q", f.Caveat)
+	}
+	if !strings.Contains(f.Caveat, "Even had every step above verified") {
+		t.Errorf("the failed verdict's caveat does not adapt to it: %q", f.Caveat)
+	}
 }
 
 // verifyFixtures captures exactly the responses /verify fetches, produced by
@@ -231,6 +253,12 @@ func verifyFixtures(t *testing.T, srv *httptest.Server, s *store.Store) []byte {
 // The verifier key is deliberately absent here: the fixtures are the node's
 // bytes, and which key the page checks them with is the variable under test.
 func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero bool) []byte {
+	return verifyFixturesTuned(t, srv, s, atZero, false)
+}
+
+// verifyFixturesTuned can also record a verdict whose root disagrees with the
+// target's, which is the equivocation case: same size, different root.
+func verifyFixturesTuned(t *testing.T, srv *httptest.Server, s *store.Store, atZero, forkRoot bool) []byte {
 	t.Helper()
 	const targetOrigin = "target.example/log"
 
@@ -242,6 +270,10 @@ func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero
 	size, rootB64 := parseNoteSizeRoot(t, cpNote)
 	if atZero {
 		size, rootB64 = 0, ""
+	}
+	if forkRoot {
+		// Same size, a different root: the target rewrote history in place.
+		rootB64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	}
 	verdict, _ := json.Marshal(map[string]any{
 		"target": "https://" + targetOrigin + "/dedi", "size": size, "root": rootB64,
