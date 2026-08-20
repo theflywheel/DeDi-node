@@ -128,9 +128,12 @@ func exampleSpec(r Role) Spec {
 		s.ParentURL, s.ParentKey, s.EnrolToken = "https://parent.example", "parent+key", "token"
 	}
 	if needs["witness_target"] {
+		// URL and key only. The target's origin is optional — envPairs emits it
+		// only when set, and Validate does not ask for it — so advertising it
+		// would name a variable a real configuration often will not carry, and
+		// which the console has no field to supply.
 		s.WitnessTargetURL = "https://target.example"
 		s.WitnessTargetKey = "target+key"
-		s.WitnessTargetOrigin = "target.example/log"
 	}
 	if needs["cluster"] {
 		s.ClusterID, s.ClusterPeers = "set-1", "a=10.0.0.1:7000,b=10.0.0.2:7000"

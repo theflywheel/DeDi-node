@@ -152,7 +152,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div>
   <div class="hrow"><h2>Participants</h2>
     <span><label class="vh" for="p-filter">filter participants</label>
-    <input id="p-filter" placeholder="filter" spellcheck="false" oninput="paintParticipants()"></span></div>
+    <input id="p-filter" placeholder="filter" spellcheck="false" oninput="filterParticipants()"></span></div>
   <div id="participants"><p class="mut">loading...</p></div>
   <div id="detail"></div>
 
@@ -251,6 +251,12 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   To create another, use <a onclick="show('addnode')">Add a node</a>.</div>
 
   <h3>Delegated so far</h3>
+  <!-- Revoking a child reports HERE, in the view the control lives in.
+       The Add-a-node split moved the only output box to the other tab, so a
+       signed revocation wrote its result — including its failures — into
+       markup show('children') keeps hidden: the operator pressed revoke, the
+       write went out, and the page said nothing either way. -->
+  <div id="out-child-revoke"></div>
   <div id="children-list"><p class="mut">loading...</p></div>
   <div id="children-tree"></div>
 </div>
@@ -385,11 +391,14 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
 function onAction(root, action, fn){
   root.addEventListener('click', e => {
     const el = e.target.closest('[data-action="' + action + '"]');
-    if(el && root.contains(el)) fn(el.dataset.rec);
+    if(el && root.contains(el)){ e.preventDefault(); fn(el.dataset.rec); }
   });
 }
+// href="#" is what makes these reachable by keyboard: an <a> with no href is
+// not in the tab order, so every action on this page was mouse-only. The
+// delegated handler calls preventDefault, so the fragment never navigates.
 const actionLink = (action, rec, label) =>
-  '<a data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
+  '<a href="#" data-action="' + action + '" data-rec="' + esc(rec) + '">' + esc(label) + '</a>';
 // The sections the tab strip switches between. rotate/revoke are no longer
 // among them: they are panels inside the participants section, revealed by
 // selecting a participant, because that is where the operator already is.
@@ -604,6 +613,15 @@ function reload(){
 // queryAllRecords pages to the end, so the set being filtered is the whole
 // registry and a filter that finds nothing means there is nothing — not that
 // the match was on a page nobody fetched.
+// Narrowing the list abandons whatever was selected in it: leaving a rotate
+// panel open below a table that no longer shows its row is how an operator
+// loses track of which record they are about to write to.
+function filterParticipants(){
+  hideLifecycle();
+  $('detail').innerHTML = '';
+  paintParticipants();
+}
+
 function paintParticipants(){
   const box = $('participants');
   if(!box) return;
@@ -614,6 +632,11 @@ function paintParticipants(){
       .some(v => String(v || '').toLowerCase().includes(f));
   });
   if(!PARTS.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
+  if(!shown.length){
+    box.innerHTML = '<p class="mut">Nothing in this registry matches \u201c' + esc(f) + '\u201d. ' +
+      'All ' + PARTS.length + ' participant(s) are still there; only the view is narrowed.</p>';
+    return;
+  }
   box.innerHTML = '<div class="tw"><table><tr><th>subscriber</th><th>role</th><th>domain</th>' +
     '<th>key id</th><th>valid until</th><th>state</th><th>v</th><th>do</th></tr>' +
     shown.map(r => {
@@ -634,8 +657,13 @@ function paintParticipants(){
         // record; neither writes anything. The panel is the confirmation step:
         // it names the record in its heading, requires a reason, and only its
         // own button issues the signed conditional write.
-        '<td class="rowacts">' + actionLink('rotate', r.name, 'rotate') + ' \u00b7 ' +
-          actionLink('revoke', r.name, 'revoke') + '</td></tr>';
+        // A revoked participant offers neither action. Rotating one publishes a
+        // new live version — reinstating it — which is a decision, not a
+        // key rotation, and must not be one click away from a row that says
+        // "revoked". Revoking it again would be a no-op version.
+        '<td class="rowacts">' + (live
+          ? actionLink('rotate', r.name, 'rotate') + ' \u00b7 ' + actionLink('revoke', r.name, 'revoke')
+          : '<span class="mut">\u2014</span>') + '</td></tr>';
     }).join('') + '</table></div>' +
     '<p class="mut">' + (f ? shown.length + ' of ' + PARTS.length : PARTS.length + ' participant(s)') +
     '. Click a subscriber for its version history. Revoked rows stay in the table \u2014 revocation ' +
@@ -964,8 +992,9 @@ function renderRoleDetail(){
     ((r.sets && r.sets.length)
       ? '<p class="eyebrow" style="margin:.8em 0 .2em">Sets</p>' +
         '<div class="tw"><pre class="sets">' + esc(r.sets.join('\n')) + '</pre></div>' +
-        '<p class="mut">Variable names only. The values are filled in from the fields below when ' +
-        'you render the configuration.</p>'
+        '<p class="mut">Variable names only, and only the ones this role requires. Some take their ' +
+        'value from the fields below; the rest take a node default you can change in the rendered ' +
+        'file. Optional configuration \u2014 witnessing a peer, for one \u2014 adds more.</p>'
       : '');
 
   // Only the fields this role actually needs. The list comes from the node
@@ -1235,7 +1264,7 @@ async function createChild(){
 // been misled by the UI, not by the mechanism.
 async function revokeChild(child){
   if(!SIGNER){
-    return fail('out-children', ['Load a publisher key first — revoking is a signed write.']);
+    return fail('out-child-revoke', ['Load a publisher key first — revoking is a signed write.']);
   }
   const prompt = CHILD_STATE[child] === 'offered'
     // Nobody redeemed this one, so there is no other operator to affect and
@@ -1249,20 +1278,20 @@ async function revokeChild(child){
       'The child node keeps running, keeps its key and keeps its own log — revoking here ' +
       'cannot and does not shut it down.';
   if(!confirm(prompt)) return;
-  const box = $('out-children');
+  const box = $('out-child-revoke');
   box.innerHTML = '<p class="mut">revoking...</p>';
   try {
     const resp = await signedFetch('POST',
       '/admin/namespaces/' + p(parentNS()) + '/children/' + p(child) + '/revoke',
       { reason: 'revoked from the admin console' });
     const j = await resp.json();
-    if(!resp.ok){ return fail('out-children', [j.error || ('HTTP ' + resp.status)]); }
+    if(!resp.ok){ return fail('out-child-revoke', [j.error || ('HTTP ' + resp.status)]); }
     box.innerHTML = '<p class="ok">' + esc(child) + ' revoked &check;</p>' +
       '<p class="mut">' + esc((j.data && j.data.note) || '') + '</p>' +
       '<p class="mut">The namespace can be delegated again from the form above.</p>';
     loadChildren();
   } catch(e){
-    fail('out-children', [e.message]);
+    fail('out-child-revoke', [e.message]);
   }
 }
 

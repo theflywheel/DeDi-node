@@ -94,33 +94,82 @@ prefill('bob');
 if (document.getElementById('r-sign').value !== '') {
   console.log('FAIL: bob\'s rotate panel still holds alice\'s signing key'); process.exit(1);
 }
-if (document.getElementById('r-rec').value !== 'bob' ||
-    document.getElementById('r-rec-name').textContent !== 'bob') {
-  console.log('FAIL: the panel is not bound to bob'); process.exit(1);
+if (document.getElementById('r-rec').value !== 'bob') {
+  console.log('FAIL: the rotate request would name ' + document.getElementById('r-rec').value); process.exit(1);
+}
+if (document.getElementById('r-rec-name').textContent !== 'bob') {
+  console.log('FAIL: the rotate panel is not headed bob'); process.exit(1);
+}
+if (document.getElementById('r-from').value !== '') {
+  console.log('FAIL: bob\'s rotate panel still holds alice\'s validity window'); process.exit(1);
 }
 if (REQUESTS !== 0) { console.log('FAIL: opening a panel issued ' + REQUESTS + ' request(s)'); process.exit(1); }
 
-// 5. The same for revoke, and the panel must be the one on screen — opening
-//    revoke closes rotate, so an operator cannot fill one and submit the other.
+// 5. The same for revoke — and it must be the SAME assertions, not weaker ones.
+//    The first version of this test checked that rotate cleared its fields and
+//    that revoke merely showed the right heading. That is the guard-one-of-two-
+//    parallel-paths bug appearing inside the test written to prevent it:
+//    deleting prefillRevoke's clearing line left the suite green while
+//    genRevoke sent alice's reason on bob's revocation, and the no-key branch
+//    stamped alice's subscriber_id onto bob's record.
+prefillRevoke('alice');
+document.getElementById('v-sub').value = 'alice.example';
+document.getElementById('v-reason').value = 'ALICE REASON';
 prefillRevoke('bob');
+for (const id of ['v-sub', 'v-reason']) {
+  if (document.getElementById(id).value !== '') {
+    console.log('FAIL: bob\'s revoke panel still holds alice\'s ' + id); process.exit(1);
+  }
+}
+// The heading is what the operator reads; #v-rec is what the write reads. An
+// assertion on the label alone would pass a panel headed "revoking bob" that
+// revokes alice, with a valid signature and a correct precondition.
+if (document.getElementById('v-rec').value !== 'bob') {
+  console.log('FAIL: the revoke request would name ' + document.getElementById('v-rec').value); process.exit(1);
+}
+if (document.getElementById('v-rec-name').textContent !== 'bob') {
+  console.log('FAIL: the revoke panel is not headed bob'); process.exit(1);
+}
 if (document.getElementById('view-revoke').hidden) { console.log('FAIL: revoke panel not shown'); process.exit(1); }
 if (!document.getElementById('view-key').hidden)  { console.log('FAIL: rotate panel left open beside revoke'); process.exit(1); }
-if (document.getElementById('v-rec-name').textContent !== 'bob') {
-  console.log('FAIL: the revoke panel is not bound to bob'); process.exit(1);
-}
 if (REQUESTS !== 0) { console.log('FAIL: opening revoke issued ' + REQUESTS + ' request(s)'); process.exit(1); }
 
-// 6. The filter is display-only and never hides what a row IS. A revoked
+// 6a. A revoked participant offers no rotate link. Rotating one publishes a
+//     new live version — that reinstates it, which is a decision and must not
+//     sit one click from a row reading "revoked".
+const bobRow = table.slice(table.indexOf('bob.example'));
+if (/data-action="rotate"/.test(bobRow.slice(0, bobRow.indexOf('</tr>')))) {
+  console.log('FAIL: a revoked participant can be rotated back to life from its row'); process.exit(1);
+}
+const aliceRow = table.slice(table.indexOf('alice.example'));
+if (!/data-action="rotate"/.test(aliceRow.slice(0, aliceRow.indexOf('</tr>')))) {
+  console.log('FAIL: a live participant lost its rotate action'); process.exit(1);
+}
+// 6b. Every action is keyboard reachable. An <a> with no href is not in the
+//     tab order, which made every action on this page mouse-only.
+if (/<a data-action=/.test(table)) {
+  console.log('FAIL: an action link has no href, so it cannot be tabbed to'); process.exit(1);
+}
+
+// 7. The filter is display-only and never hides what a row IS. A revoked
 //    participant that vanished under a filter would be indistinguishable from
 //    one that never existed.
 document.getElementById('p-filter').value = 'bob';
-paintParticipants();
+filterParticipants();
 const filtered = document.getElementById('participants').innerHTML;
 if (!filtered.includes('bob.example')) { console.log('FAIL: filter dropped a matching row'); process.exit(1); }
 if (filtered.includes('alice.example')) { console.log('FAIL: filter did not narrow'); process.exit(1); }
 if (!/revoked/.test(filtered)) { console.log('FAIL: the filtered revoked row lost its state'); process.exit(1); }
+// A filter matching nothing must say the participants are still there, rather
+// than rendering an empty table that reads like an empty registry.
+document.getElementById('p-filter').value = 'zzz-no-such';
+filterParticipants();
+const none = document.getElementById('participants').innerHTML;
+if (!/still there/.test(none)) {
+  console.log('FAIL: a zero-match filter looks like an empty registry: ' + none.slice(0, 200)); process.exit(1);
+}
 document.getElementById('p-filter').value = '';
-paintParticipants();
+filterParticipants();
 if (!document.getElementById('participants').innerHTML.includes('alice.example')) {
   console.log('FAIL: clearing the filter did not restore the list'); process.exit(1);
 }
