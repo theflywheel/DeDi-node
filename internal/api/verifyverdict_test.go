@@ -43,9 +43,21 @@ func TestVerifyWillNotCallAnUncheckedSignatureAPass(t *testing.T) {
 	src := string(page)
 	// The program script, which follows the verify.js include — not the first
 	// <script> on the page and not any later mention of the word in a comment.
-	after := src[strings.Index(src, "verify.js"):]
-	js := after[strings.Index(after, "<script>")+len("<script>"):]
-	js = js[:strings.Index(js, "</script>")]
+	inc := strings.Index(src, "verify.js")
+	if inc < 0 {
+		t.Fatal("the page no longer includes verify.js; it or this test has moved")
+	}
+	after := src[inc:]
+	open := strings.Index(after, "<script>")
+	if open < 0 {
+		t.Fatal("no program script after the verify.js include")
+	}
+	js := after[open+len("<script>"):]
+	end := strings.Index(js, "</script>")
+	if end < 0 {
+		t.Fatal("the program script is unterminated")
+	}
+	js = js[:end]
 	if !strings.Contains(js, "skips.push") {
 		t.Fatal("the page no longer tracks skipped checks; it or this test has moved")
 	}
@@ -59,7 +71,7 @@ func TestVerifyWillNotCallAnUncheckedSignatureAPass(t *testing.T) {
 	// the page's own crypto does the deciding.
 	srv, st, vkey := testServer(t)
 	seedBasic(t, st) // a non-empty log, so step 4 is a real check and not "not yet applicable"
-	fx := verifyFixtures(t, srv, st, vkey)
+	fx := verifyFixtures(t, srv, st)
 	dir := t.TempDir()
 	fxPath := filepath.Join(dir, "fx.json")
 	if err := os.WriteFile(fxPath, fx, 0o600); err != nil {
@@ -160,7 +172,7 @@ console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: ban
 	// reporting itself unperformed underneath an "All checks recomputed"
 	// headline. The same overclaim, one element to the right.
 	srv2, st2, vkey2 := testServer(t)
-	fxZero := verifyFixturesAt(t, srv2, st2, vkey2, true)
+	fxZero := verifyFixturesAt(t, srv2, st2, true)
 	zeroPath := filepath.Join(dir, "fx-zero.json")
 	if err := os.WriteFile(zeroPath, fxZero, 0o600); err != nil {
 		t.Fatal(err)
@@ -195,14 +207,16 @@ console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: ban
 // verifyFixtures captures exactly the responses /verify fetches, produced by
 // this node's real endpoints, so the page under test folds bytes the node
 // actually signed rather than bytes a test author typed.
-func verifyFixtures(t *testing.T, srv *httptest.Server, s *store.Store, vkey string) []byte {
-	return verifyFixturesAt(t, srv, s, vkey, false)
+func verifyFixtures(t *testing.T, srv *httptest.Server, s *store.Store) []byte {
+	return verifyFixturesAt(t, srv, s, false)
 }
 
 // verifyFixturesAt builds the fixture set, optionally recording the verdict at
 // size 0 — the "witnessed while the target's log was still empty" case, where
 // step 4 has nothing to compare and reports itself unperformed.
-func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, vkey string, atZero bool) []byte {
+// The verifier key is deliberately absent here: the fixtures are the node's
+// bytes, and which key the page checks them with is the variable under test.
+func verifyFixturesAt(t *testing.T, srv *httptest.Server, s *store.Store, atZero bool) []byte {
 	t.Helper()
 	const targetOrigin = "target.example/log"
 

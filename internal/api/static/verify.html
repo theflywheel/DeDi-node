@@ -299,17 +299,11 @@ async function run(){
   // A check that did not run is not a check that passed.
   //
   // verifyCheckpointSig returns null when there is no key to check against —
-  // neither true nor false. Only `=== false` cleared allOK, so a page with no
-  // verifier key rendered every signature row honestly as "unchecked", coloured
-  // its chips amber, and then opened with a green banner saying the witness
-  // claim holds and nothing was taken on the node's word. Both halves of that
-  // sentence were false: the signature step had not run, so nothing bound
-  // either checkpoint to a signer, and the append-only proof below it was
-  // folded against bytes this node handed over with nothing vouching for them.
-  //
-  // /check has always drawn this distinction — pass, fail, and "Partly checked:
-  // the record is in *a* log". This page, whose whole subject is evidence, did
-  // not.
+  // neither true nor false — and the append-only step reports the same when
+  // the target's log was empty at the first observation. Every one of those
+  // must reach `skips`, and the banner must never say the claim holds while
+  // any of them did. /check draws the same three-way distinction.
+  // Enforced by TestVerifyWillNotCallAnUncheckedSignatureAPass.
   // The reason travels with the fact. Recording only THAT something was
   // skipped left the banner explaining every partial result as a missing key —
   // which is false for the append-only step, whose skip means the target's log
@@ -317,7 +311,11 @@ async function run(){
   // verified perfectly. A tri-state verdict with a single-valued explanation
   // is still telling the reader something untrue about why.
   const skips = [];
-  const skipped = why => { skips.push(why); };
+  // Markup, not text: these are fixed sentences written here, carrying their
+  // own entities. Nothing derived from a response may be passed in — run it
+  // through esc() first if that ever changes. Named for what it takes so the
+  // next caller has to think about it.
+  const skippedHTML = whyHTML => { skips.push(whyHTML); };
   const fail = m => { allOK = false; return no(m); };
 
   const net = (await trace('/dedi/network', 'json')).data;
@@ -364,7 +362,7 @@ async function run(){
   const selfSig = await verifyCheckpointSig(selfNote, VKEY);
   chips.push(['1 · this node&rsquo;s log is signed', selfSig === true ? 'pass' : selfSig === false ? 'fail' : 'skip', 's1']);
   if(selfSig === false) allOK = false;
-  else if(selfSig !== true) skipped('this node publishes no verifier key, so nothing binds it to its own log');
+  else if(selfSig !== true) skippedHTML('this node publishes no verifier key, so nothing binds it to its own log');
 
   parts.push('<h2 id="s1">1. This node&rsquo;s own signed log</h2>' +
     '<p>A verdict is only worth something if it sits in a log this node cannot quietly edit. ' +
@@ -438,7 +436,7 @@ async function run(){
   if(reached){
     chips.push(['3 · the target signed its own log', targetSig === true ? 'pass' : targetSig === false ? 'fail' : 'skip', 's3']);
     if(targetSig === false) allOK = false;
-    else if(targetSig !== true) skipped('no key is published for the target, so nothing binds its checkpoint to it');
+    else if(targetSig !== true) skippedHTML('no key is published for the target, so nothing binds its checkpoint to it');
     parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2>' +
       '<p>Fetched by <em>your browser</em> from <code>' + esc(targetBase) + '</code>. This node is ' +
       'not in that path and could not alter these bytes.</p>' +
@@ -465,7 +463,7 @@ async function run(){
       // that explicitly did not run, which is the identical overclaim one
       // element to the right.
       state = 'skip';
-      skipped('the target&rsquo;s log was empty when it was first witnessed, so there is no earlier root to prove it has only been appended to');
+      skippedHTML('the target&rsquo;s log was empty when it was first witnessed, so there is no earlier root to prove it has only been appended to');
       body = '<p class="mut">The target&rsquo;s log was empty when it was last witnessed, and the ' +
         'empty tree is contained in every tree, so there is no history to contradict yet. This ' +
         'check becomes meaningful once it has been witnessed at a non-empty size (it is at ' +
