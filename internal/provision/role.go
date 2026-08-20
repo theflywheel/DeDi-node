@@ -76,6 +76,76 @@ type roleInfo struct {
 	// Needs names the inputs the operator must supply for this role. The
 	// console uses it to show only the fields that matter.
 	Needs []string `json:"needs"`
+
+	// Sets names the environment variables this role's configuration will
+	// carry. Filled by RoleCatalogue from the real renderer rather than
+	// written out here, so the console cannot show one list while the node is
+	// configured by another.
+	Sets []string `json:"sets"`
+}
+
+// setsFor asks the renderer which variables a role actually produces.
+//
+// The console shows this when an operator picks a role, before any node is
+// created, so the answer has to be true without a complete spec. It is derived
+// by rendering a fully-populated example of that role and taking the KEYS —
+// never the values, which are the example's and mean nothing — so a change to
+// envPairs shows up here on the next build instead of leaving a hand-written
+// list quietly describing the configuration of an older version.
+func setsFor(r Role) []string {
+	example := exampleSpec(r)
+	var out []string
+	for _, kv := range envPairs(example) {
+		out = append(out, kv[0])
+	}
+	sort.Strings(out)
+	return out
+}
+
+// exampleSpec is a spec of one role, carrying exactly the inputs that role
+// declares it needs, used only to ask the renderer which variables the role
+// produces. Its values are never shown to anyone.
+//
+// Filling in everything for every role made two roles indistinguishable, which
+// the catalogue test caught: witnessing composes with ANY role, so a standalone
+// handed a witness target sets precisely the variables a witness does. What
+// separates the five is the configuration each one REQUIRES, so that is what
+// the example carries — and the witness-target pair stays where it belongs, on
+// the role that cannot work without it.
+func exampleSpec(r Role) Spec {
+	needs := map[string]bool{}
+	for _, n := range roles[r].Needs {
+		needs[n] = true
+	}
+	s := Spec{
+		Role: r, NodeName: "example", Origin: "example.org/log",
+		PublicURL: "https://example.org", DatabaseURL: "postgres://example",
+	}
+	if needs["namespace"] || r == RoleChild {
+		s.Namespace = "example"
+	}
+	if needs["enrolment"] {
+		s.ParentURL, s.ParentKey, s.EnrolToken = "https://parent.example", "parent+key", "token"
+	}
+	if needs["witness_target"] {
+		// URL and key only. The target's origin is optional — envPairs emits it
+		// only when set, and Validate does not ask for it — so advertising it
+		// would name a variable a real configuration often will not carry, and
+		// which the console has no field to supply.
+		s.WitnessTargetURL = "https://target.example"
+		s.WitnessTargetKey = "target+key"
+	}
+	if needs["cluster"] {
+		s.ClusterID, s.ClusterPeers = "set-1", "a=10.0.0.1:7000,b=10.0.0.2:7000"
+		s.ClusterBind, s.ClusterDataDir = "0.0.0.0:7000", "/data/raft"
+	}
+	if needs["identity"] {
+		s.SharedKeyFile = "/keys/set.key"
+	}
+	if needs["crawl"] {
+		s.CrawlDomains = "example.org"
+	}
+	return s
 }
 
 var roles = map[Role]roleInfo{
@@ -159,7 +229,9 @@ func RoleNames() []string {
 func RoleCatalogue() []roleInfo {
 	out := make([]roleInfo, 0, len(roles))
 	for _, name := range RoleNames() {
-		out = append(out, roles[Role(name)])
+		info := roles[Role(name)]
+		info.Sets = setsFor(Role(name))
+		out = append(out, info)
 	}
 	return out
 }
