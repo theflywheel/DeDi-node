@@ -73,6 +73,11 @@
   .verdict.fail { border-color: var(--bad); background: var(--badbg); }
   /* Partly checked: neither pass nor fail, and it must not look like either. */
   .verdict.part { border-color: var(--warn); background: var(--warnbg); }
+  /* The caveat block. Bordered rather than muted: it is the one part of this
+     page a reader who believes everything above most needs to read. */
+  .caveat { border: 1px solid var(--line); border-left: 4px solid var(--warn);
+            padding: .7em .9em; margin: .6em 0; }
+  .caveat p { margin: .5em 0; }
   .warn { color: var(--warn); }
 
   svg { max-width: 100%; height: auto; display: block; }
@@ -446,7 +451,12 @@ async function run(){
   if(reached){
     let body = '', state = 'pass';
     if(w.size === 0){
-      state = 'skip';
+      // Not yet applicable is still not checked. The banner speaks for every
+      // step above it, so this has to reach the same tracker the signature
+      // steps use — otherwise "All checks recomputed" is printed over a step
+      // that explicitly did not run, which is the identical overclaim one
+      // element to the right.
+      state = 'skip'; skipped();
       body = '<p class="mut">The target&rsquo;s log was empty when it was last witnessed, and the ' +
         'empty tree is contained in every tree, so there is no history to contradict yet. This ' +
         'check becomes meaningful once it has been witnessed at a non-empty size (it is at ' +
@@ -505,6 +515,41 @@ async function run(){
         esc(f.url) + '</td><td class="num">' + f.status + '</td></tr>').join('') + '</table></div>' +
       '<pre>' + FETCHES.map(f => 'curl -s ' +
         esc(f.url.startsWith('http') ? f.url : location.origin + f.url)).join('\n') + '</pre>'));
+
+  // What none of this shows.
+  //
+  // The most important block on the page, and the last, because it is only
+  // meaningful once a reader has seen the chain hold. Every sentence is about
+  // THIS implementation:
+  //
+  //   - one witness per edge: Server.WitnessTarget is a single target, so the
+  //     ring gives one independent party on this edge, not a quorum;
+  //   - the witness keeps the previous root itself (witness.lastWitnessed) and
+  //     catches a same-size-different-root swap, recording it revoked with
+  //     "history was rewritten in place" — but that only ever proves the target
+  //     is append-only SINCE the first size the witness recorded;
+  //   - VerifyOnce runs its consistency check under `if have && last > 0`, so
+  //     the first observation checks nothing at all, and anything before it is
+  //     invisible;
+  //   - /dedi/log/proof/consistency takes any `old` size, so a checkpoint a
+  //     reader saved themselves genuinely works as the starting point.
+  parts.push('<h2 id="s6">What none of this shows</h2>' +
+    '<div class="caveat">' +
+    '<p>That the root this witness recorded was ever the target&rsquo;s real history. Every step ' +
+    'above verifies &mdash; and a witness colluding with its target, or one that only ever saw the ' +
+    'same forged log, produces a chain that verifies in exactly the same way. There is <b>one</b> ' +
+    'witness on this edge. You are trusting that one party was independent.</p>' +
+    '<p>And nothing before the first verdict. This witness proves the target has only appended ' +
+    '<i>since the size it first recorded</i>; its very first look checks nothing, because there is ' +
+    'no earlier root to check against. A rewrite that happened before then is invisible to it, and ' +
+    'so to you.</p>' +
+    '<p><b>The fix is not more ticks on this page.</b> Save the target&rsquo;s checkpoint yourself, ' +
+    'today &mdash; the commands are in the list above &mdash; and on your next visit ask this node ' +
+    'for a consistency proof from <i>your</i> saved size and root. ' +
+    '<code>/dedi/log/proof/consistency?old=&lt;yours&gt;&amp;new=&lt;now&gt;</code> accepts any ' +
+    'starting size. Then the party holding yesterday&rsquo;s checkpoint is you, and none of the ' +
+    'above has to be taken on trust.</p></div>');
+
 
   const banner = !allOK
     ? '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
