@@ -84,7 +84,7 @@ func TestNetworkWillNotDrawAnUnstatedVerdictAsClean(t *testing.T) {
 		"healthstring": variant(func(m map[string]any) { m["health"] = "yes" }),
 		"healthtrue":   variant(func(m map[string]any) { m["health"] = true }),
 		// a verdict that names no tree size printed "✓ NaN" under a green tick
-		"nosize": variant(func(m map[string]any) { delete(m, "size") }),
+		"nosize":    variant(func(m map[string]any) { delete(m, "size") }),
 		"sound":     variant(func(m map[string]any) {}),
 		"absent":    variant(func(m map[string]any) { delete(m, "consistency_ok") }),
 		"string":    variant(func(m map[string]any) { m["consistency_ok"] = "false" }),
