@@ -54,6 +54,9 @@
      because someone named it, and we know nothing else about it. */
   .node.silent { border-style: dashed; color: var(--mut); background: #fafafa; }
   .node .nm { font-weight: bold; }
+  /* The origin is long and must not stretch a card off the stage. */
+  .node .org { font-size: .78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+               max-width: 15em; }
   .badge { position: absolute; transform: translate(-50%, -50%); background: #fff; border: 1px solid var(--wit);
            color: var(--wit); font-size: .8em; padding: 0 .35em; white-space: nowrap; cursor: pointer; }
   .badge.bad { border-color: var(--bad); color: var(--bad); }
@@ -85,6 +88,10 @@
 </div>
 
 <div id="stage" style="height:26em"><svg id="edges" aria-hidden="true"></svg></div>
+<p class="mut" style="margin:.4em 0 0;font-size:.92em">A tick on an arrow is the witness&rsquo;s own
+conclusion, fetched from the node that drew it. What makes it worth anything is that you can recompute
+it without that node &mdash; select an edge and check it here, or read every byte on
+<a href="/verify">the evidence page</a>.</p>
 <p class="mut" id="coverage" style="margin:.4em 0 0;font-size:.9em">&hellip;</p>
 
 <div id="detail"><span class="mut">Select a node or an arrow.</span></div>
@@ -240,19 +247,52 @@ function stale(t){
   if (!h || h.standby) return false;   // a follower is not witnessing on purpose
   return h.stale === true || h.checking === false;
 }
+// One classifier for one verdict, used by every surface that draws it.
+//
+// This is a THREE-state answer — caught, sound, or not established — and the
+// third is the one that gets lost. Each surface used to test only for the
+// failure case, so a verdict arriving with consistency_ok absent fell through
+// to the affirmative branch: a solid arrow, a ✓ badge, and a green
+// "verified" cell over a bit nobody had asserted.
+//
+// That matters here more than anywhere else on this page, because these
+// verdicts are fetched cross-origin from peers of arbitrary version. Omitting
+// a JSON field is not an attack that takes effort — an older build does it by
+// accident — and the affirmative reading was free.
+//
+// Three surfaces drew this from three copies of the same test. They now share
+// one function: fixing this in edgeClass alone would have left the detail
+// panel still saying "verified".
+function verdictState(t){
+  if (!t) return 'none';
+  if (t.consistency_ok === false) return 'caught';
+  if (t.witnessed !== true) return 'never';
+  // Affirmative requires the affirmative value. Anything else — absent, a
+  // string, null — is not established.
+  if (t.consistency_ok !== true) return 'unstated';
+  // A verdict whose witness loop reports nothing about its own liveness is not
+  // a verdict known to be current. stale() answered false for a missing health
+  // block, which folded "liveness unreported" into the clean branch.
+  if (!t.health) return 'unwatched';
+  if (stale(t)) return 'stale';
+  return 'sound';
+}
 function edgeClass(t){
-  if (!t) return 'unk';
-  if (t.consistency_ok === false) return 'bad';
-  if (t.witnessed !== true) return 'unk';
-  if (stale(t)) return 'unk';
-  return '';
+  const st = verdictState(t);
+  if (st === 'caught') return 'bad';
+  if (st === 'sound') return '';
+  return 'unk';
 }
 function edgeLabel(t){
-  if (!t) return '?';
-  if (t.consistency_ok === false) return '✗ caught';
-  if (t.witnessed !== true) return 'not yet verified';
-  if (stale(t)) return '⚠ ' + num(t.size) + ' — not rechecked';
-  return '✓ ' + num(t.size);
+  switch (verdictState(t)) {
+    case 'none':     return '?';
+    case 'caught':   return '✗ caught';
+    case 'never':    return 'not yet verified';
+    case 'unstated': return '? not established';
+    case 'unwatched': return '⚠ ' + num(t.size) + ' — liveness unreported';
+    case 'stale':    return '⚠ ' + num(t.size) + ' — not rechecked';
+    default:         return '✓ ' + num(t.size);
+  }
 }
 
 function draw(){
@@ -270,11 +310,28 @@ function draw(){
     const d = document.createElement('div');
     d.className = 'node' + (n.answered ? '' : ' silent') +
       (SEL && SEL.kind === 'node' && SEL.n.key === n.key ? ' sel' : '');
+    // What the card may say, and how.
+    //
+    // The design draws a green "signing" pill and a "checkpoint Ns old" line.
+    // Neither can be shown honestly. Nothing here establishes that a peer is
+    // currently signing — a tree size says it signed something once — and a
+    // checkpoint note carries origin, size, root and a signature and NO
+    // timestamp at all, so the only time available is when this node last
+    // looked. Shipping either as drawn would add two affirmative claims nobody
+    // checked, to the page that exists to separate claims from evidence.
+    //
+    // So: the origin is the peer's own signed artifact, relayed. The tree size
+    // is this node's observation and is worded as one.
+    const originLine = n.origin
+      ? '<div class="mut org" title="' + esc(n.origin) + '">' + esc(n.origin) + '</div>'
+      : '<div class="mut org">no checkpoint seen &mdash; origin unknown</div>';
+    const seen = n.self
+      ? (n.tree_size === undefined ? 'answered' : num(n.tree_size) + ' entries')
+      : (n.tree_size === undefined ? 'answered' : num(n.tree_size) + ' entries when this node looked');
     d.innerHTML = '<div class="nm">' + esc(n.name) + (n.self ? ' <span class="mut">(this node)</span>' : '') +
-      '</div><div class="mut" style="font-size:.9em">' +
+      '</div>' + originLine + '<div class="mut" style="font-size:.9em">' +
       (n.answered
-         ? (n.tree_size === undefined ? 'answered' : num(n.tree_size) + ' entries') +
-           (n.targetCount === 0 ? ' · witnesses nobody' : '')
+         ? seen + (n.targetCount === 0 ? ' · witnesses nobody' : '')
          : esc(n.reason || 'not asked')) + '</div>';
     d.onclick = ev => { ev.stopPropagation(); select({ kind: 'node', n }); };
     stage.appendChild(d);
@@ -319,18 +376,28 @@ function draw(){
 }
 
 function verdictTable(t){
-  if (!t) return '<p class="mut">No verdict.</p>';
-  if (t.consistency_ok === false) {
+  const st = verdictState(t);
+  if (st === 'none') return '<p class="mut">No verdict.</p>';
+  if (st === 'caught') {
     return '<p class="no"><b>✗ The consistency check failed.</b></p>' +
       '<p class="no">' + esc(t.detail || 'This log changed in a way an append-only log cannot.') +
       '</p><p class="mut">This is the failure the whole design exists to make visible.</p>';
   }
-  if (t.witnessed !== true) {
+  if (st === 'never') {
     return '<p><b>Set up, but never successfully verified.</b></p>' +
       '<p class="mut">There is no verdict to read. That is not the same as a clean one.</p>';
   }
+  if (st === 'unstated') {
+    return '<p><b>This verdict does not state a result.</b></p>' +
+      '<p class="mut">The node that holds it says it witnessed this target and did not say what it ' +
+      'concluded. An older build may simply not report the field. Either way nothing here has been ' +
+      'established, and it must not be read as a clean verdict.</p>';
+  }
+  const appendOnly = st === 'sound'
+    ? '<td class="ok">verified</td>'
+    : '<td class="warn">verified, but see below</td>';
   return '<table>' +
-    '<tr><td class="mut" style="width:34%">append-only</td><td class="ok">verified</td></tr>' +
+    '<tr><td class="mut" style="width:34%">append-only</td>' + appendOnly + '</tr>' +
     '<tr><td class="mut">tree size</td><td class="num">' + num(t.size) + '</td></tr>' +
     '<tr><td class="mut">root</td><td style="word-break:break-all">' + esc(t.root || '') + '</td></tr>' +
     (t.verdict_at ? '<tr><td class="mut">verdict</td><td>' + esc(t.verdict_at.slice(0,19).replace('T',' ')) + '</td></tr>' : '') +
@@ -339,7 +406,12 @@ function verdictTable(t){
 
 function healthNote(t){
   const h = t && t.health;
-  if (!h) return '';
+  // Nothing reported is not nothing wrong. A verdict with no health block used
+  // to render with no caveat at all, which is the same as claiming the loop is
+  // fine — the one thing the comment above this section says must never happen.
+  if (!h) return '<p class="warn" style="margin:.4em 0 0">⚠ The node holding this verdict reports ' +
+    'nothing about whether its witness loop is still running, so there is no way to tell a verdict ' +
+    'confirmed a minute ago from one nothing has revisited in weeks.</p>';
   if (h.standby) return '<p class="mut" style="margin:.4em 0 0">This replica is on standby &mdash; the ' +
     'cluster leader does the witnessing and the verdict is replicated here.</p>';
   if (h.checking === false) return '<p class="warn" style="margin:.4em 0 0">⚠ This witness is not running. ' +
@@ -500,8 +572,32 @@ function select(sel){
           esc(target) + '</code>. <a href="/verify">The evidence page</a> shows every hash and byte ' +
           'this rests on, step by step.</p><button id="recheck">check it in my browser</button>'
         : '<p class="mut" style="margin:0">' + why + '</p>') +
-      '<div id="recheck-out"></div></div></div>';
+      '<div id="recheck-out"></div>' +
+      // The same fetch, by hand. Built from apiBase because the two URL shapes
+      // on this page differ — a node's url carries no path and a verdict's
+      // target_url already ends in /dedi — and concatenating the second form
+      // yields /dedi/dedi.
+      (target
+        ? '<p class="eyebrow" style="margin:.9em 0 .2em">Or by hand</p>' +
+          '<pre>curl -s ' + esc(target) + '/log/checkpoint</pre>' +
+          (t && t.target_key
+            ? '<p class="mut" style="margin:.2em 0 0">Check that checkpoint against the key ' +
+              esc(a.name) + ' publishes for it: ' +
+              '<button id="copykey" data-key="' + esc(t.target_key) + '">copy target key</button></p>'
+            : '')
+        : '') +
+      '</div></div>';
     if (canCheck) $('recheck').onclick = () => recheck(a, b, t);
+    const ck = $('copykey');
+    if (ck) ck.onclick = () => {
+      // Read from the attribute, not from a closure: the panel is rebuilt on
+      // every selection and a stale closure would copy the previously selected
+      // edge's key, which is exactly the wrong key to check a target against.
+      const k = ck.dataset.key || '';
+      const done = () => { ck.textContent = 'copied'; setTimeout(() => { ck.textContent = 'copy target key'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(k).then(done, () => {});
+      else done();
+    };
   } else {
     const n = sel.n;
     const watches = G.edges.filter(e => e.from === n.key);
