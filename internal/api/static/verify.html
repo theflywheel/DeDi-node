@@ -553,9 +553,11 @@ async function run(){
     '<p><b>The fix is not more ticks on this page.</b> Save the target&rsquo;s checkpoint yourself, ' +
     'today &mdash; the commands are in the list above &mdash; and on your next visit ask this node ' +
     'for a consistency proof from <i>your</i> saved size and root. ' +
-    '<code>/dedi/log/proof/consistency?old=&lt;yours&gt;&amp;new=&lt;now&gt;</code> accepts any ' +
-    'starting size. Then the party holding yesterday&rsquo;s checkpoint is you, and none of the ' +
-    'above has to be taken on trust.</p></div>');
+    '<code>/dedi/log/proof/consistency?old=&lt;your size&gt;&amp;new=&lt;now&gt;</code> will prove ' +
+    'it from any size you saved, provided the log was not empty when you saved it &mdash; there is ' +
+    'nothing to prove from an empty tree, which is the same reason a witness&rsquo;s own first look ' +
+    'establishes nothing. Then the party holding yesterday&rsquo;s checkpoint is you, and none of ' +
+    'the above has to be taken on trust.</p></div>');
 
 
   const banner = !allOK

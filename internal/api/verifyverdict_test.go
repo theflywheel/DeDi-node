@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -326,4 +327,68 @@ func parseNoteSizeRoot(t *testing.T, note string) (int64, string) {
 		t.Fatalf("checkpoint size %q: %v", lines[1], err)
 	}
 	return n, strings.TrimSpace(lines[2])
+}
+
+// The page tells a reader to check the node themselves. That instruction has to
+// work.
+//
+// The caveat panel points at /dedi/log/proof/consistency and originally said it
+// accepts any saved starting size. It does not: logConsistency rejects old < 1.
+// A reader who saved a checkpoint of an empty log would have followed the
+// instruction and received a 400 — in exactly the empty-log case this page
+// treats as only partly checked.
+//
+// I had "verified" that claim by finding where the handler parses `old`, which
+// showed the parameter is read and not what values it accepts. The bound is on
+// the next line. So this asserts the page's promise against the endpoint's real
+// behaviour rather than against a reading of it.
+func TestVerifyPromisesOnlyWhatTheProofEndpointDoes(t *testing.T) {
+	srv, s, _ := testServer(t)
+	seedBasic(t, s)
+
+	page, err := os.ReadFile(filepath.Join("static", "verify.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), "/dedi/log/proof/consistency") {
+		t.Skip("the page no longer points readers at the consistency endpoint")
+	}
+
+	ask := func(old, nu string) int {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/dedi/log/proof/consistency?old=" + old + "&new=" + nu)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+	size := fmt.Sprint(currentTreeSize(t, srv))
+
+	// The promise the page makes: a size you saved works.
+	if got := ask("1", size); got != http.StatusOK {
+		t.Errorf("a proof from size 1 to %s: %d, but the page tells readers to ask for one", size, got)
+	}
+	// The bound the page must not promise past.
+	//
+	// Loosening logConsistency's own `old < 1` does not make this pass: the
+	// store's ProveConsistency rejects 0 as well, so the request turns into a
+	// 500 rather than a proof. The property is defended in two layers, which is
+	// why this assertion cannot be tripped by relaxing only the handler — not
+	// because it checks nothing.
+	if got := ask("0", size); got == http.StatusOK {
+		t.Error("size 0 is accepted after all; the caveat's carve-out is now wrong in the other direction")
+	}
+	// And the page must say so.
+	if !strings.Contains(string(page), "not empty when you saved it") {
+		t.Error("the page does not tell readers that an empty starting tree cannot be proved from")
+	}
+}
+
+func currentTreeSize(t *testing.T, srv *httptest.Server) int64 {
+	t.Helper()
+	note := mustGetBodyOf(t, srv.URL+"/dedi/log/checkpoint")
+	n, _ := parseNoteSizeRoot(t, note)
+	return n
 }
