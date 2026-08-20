@@ -137,10 +137,10 @@ async function metrics(){
     const body = await r.text();
     for (const name of ['dedi_checkpoint_age_seconds', 'dedi_checkpoint_tree_size',
                         'dedi_log_entries', 'dedi_uptime_seconds',
-                        // The cluster three ride the same scrape and the same
+                        // The cluster four ride the same scrape and the same
                         // regex. A second reader with its own pattern is how
                         // one of them would come to disagree with the others
-                        // about the exponent form.
+                        // about the exponent form, or about the label set.
                         'dedi_cluster_enabled', 'dedi_cluster_lag_entries',
                         'dedi_cluster_last_contact_seconds', 'dedi_cluster_has_leader']) {
       // The exponent form is not optional: metrics.go formats with %g, which
@@ -446,13 +446,11 @@ function cards(d, shape, m, net){
     // has nothing new to apply. Contact age is the channel that sees it, so
     // green requires BOTH a recent contact and no lag.
     //
-    // The partition signal is dedi_cluster_has_leader, not a clock threshold.
-    //
-    // I first wrote this against a dedi_cluster_heartbeat_seconds that does not
-    // exist — the branch degraded to never firing, so it would have been dead
-    // code claiming to catch the one state the card is for. has_leader is
-    // emitted, is about Raft's own view rather than about how long feels long,
-    // and is exactly "this replica currently knows of no leader".
+    // The partition signal is dedi_cluster_has_leader, not a clock threshold:
+    // it is Raft's own view rather than a guess about how long feels long, and
+    // it says exactly "this replica currently knows of no leader". Anything
+    // added here must be a name metrics.go emits — see
+    // TestStatusReadsOnlyMetricsTheNodeEmits.
     const leaderless = m['dedi_cluster_has_leader'] === 0;
     lcls = (contact !== undefined && contact < 0) || leaderless ? 'no'
          : (lag === 0 && contact !== undefined ? 'ok' : 'mut');

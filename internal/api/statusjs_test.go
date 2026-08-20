@@ -290,8 +290,19 @@ func TestStatusReadsOnlyMetricsTheNodeEmits(t *testing.T) {
 	}
 	// And every name it scrapes should be one it uses; a name fetched and
 	// discarded is either dead weight or a card someone forgot to finish.
-	scrape := src[strings.Index(src, "for (const name of"):]
-	scrape = scrape[:strings.Index(scrape, "const m = body.match")]
+	// Locate the scrape list explicitly. Slicing on a marker that has moved
+	// panics, and a panic reports a harness fault as if it were the thing under
+	// test.
+	from := strings.Index(src, "for (const name of")
+	if from < 0 {
+		t.Fatal("no metric list in the page; it or this test has moved")
+	}
+	scrape := src[from:]
+	to := strings.Index(scrape, "const m = body.match")
+	if to < 0 {
+		t.Fatal("no metric match in the page; it or this test has moved")
+	}
+	scrape = scrape[:to]
 	for _, m := range regexp.MustCompile(`'(dedi_[a-z_]+)'`).FindAllStringSubmatch(scrape, -1) {
 		if !used[m[1]] {
 			t.Errorf("the page scrapes %s and never reads it", m[1])
