@@ -56,6 +56,47 @@
   .banner { border-left: 3px solid #999; background: #f4f4f4; padding: .5em .8em; margin: .8em 0; }
   .err { color: var(--bad); font-size: .9em; }
   #detail { border-left: 3px solid #ccc; padding-left: .8em; margin-top: .6em; }
+
+  /* The two-column reading layout: the table of things on the left, the form
+     that adds one on the right. Single column is the default so a phone never
+     executes a two-column rule at all. */
+  .cols { display: grid; grid-template-columns: 1fr; gap: 1.4em; align-items: start; }
+  @media (min-width: 60em) { .cols { grid-template-columns: 1.6fr 1fr; } }
+
+  /* A heading with a control on the same line — a filter, a count — wrapping
+     rather than pushing the page sideways. */
+  .hrow { display: flex; flex-wrap: wrap; gap: .4em .8em; align-items: baseline;
+          justify-content: space-between; }
+  .hrow h2 { margin: 1.6em 0 .4em; }
+  .hrow input { width: 10em; max-width: 100%; font-size: .9em; }
+  .rowacts { white-space: nowrap; }
+  .rowacts a { font-size: .9em; }
+
+  /* The key card. Compact when a key is loaded, explicit in both states. */
+  .keycard { border: 1px solid #ccc; border-left-width: 3px; padding: .55em .8em; margin: .8em 0; }
+  .keycard.on  { border-left-color: var(--ok); }
+  .keycard.off { border-left-color: var(--mut); }
+  .keycard .line { display: flex; flex-wrap: wrap; gap: .4em .8em; align-items: baseline; }
+
+  /* Role cards: the five shapes a node can be, as things you click rather than
+     radio buttons you read past. The radio is still there and still what the
+     form reads — it is visually hidden inside the label, so the keyboard and
+     the change handler work exactly as before. */
+  .roles { display: grid; grid-template-columns: 1fr; gap: .6em; margin: .2em 0 .6em; }
+  @media (min-width: 46em) { .roles { grid-template-columns: 1fr 1fr; } }
+  .role { display: block; border: 1px solid #ccc; padding: .55em .7em; cursor: pointer; margin: 0; }
+  .role:hover { background: #f4f4f4; }
+  .role .t { font-weight: bold; }
+  .role .s { color: var(--mut); font-size: .9em; }
+  /* Selection is a 2px border AND a marked word, never colour alone. */
+  .role.sel { border-width: 2px; border-color: #1a1a1a; padding: calc(.55em - 1px) calc(.7em - 1px); }
+  .role.sel.wit { border-color: var(--wit); }
+  .role input { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                clip: rect(0 0 0 0); clip-path: inset(50%); }
+  .role input:focus-visible + .t { outline: 2px solid var(--wit); outline-offset: 2px; }
+  .sets { font-size: .85em; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -66,10 +107,17 @@
 what keys they present, and when they stop being valid. Onboarding is a governed act — every
 action here is an <b>append</b> to the transparency log, never an edit or a delete.</p>
 
-<div class="banner" id="mode"><span class="mut">Checking for a publisher key&hellip;</span></div>
+<!-- The key card.
+     Compact, but never quiet about which of its two states it is in. The
+     unloaded sentence is the one an operator uses to decide whether the next
+     click writes anything, so shrinking the block must not shrink that away;
+     setMode() repaints this on every path that changes SIGNER, including the
+     failed-reimport path, because a card asserting a key that is not there is
+     worse than no card. -->
+<div class="keycard off" id="mode"><span class="mut">Checking for a publisher key&hellip;</span></div>
 
-<fieldset>
-  <legend>publisher key</legend>
+<details id="key-form">
+  <summary id="key-form-label">Load a publisher key</summary>
   <div class="grid">
     <div><label for="k-kid">key id</label><input id="k-kid" placeholder="op-1" spellcheck="false"></div>
     <div><label for="k-priv">private key <span class="mut">(base64, from <code>dedid pubkeygen</code>)</span></label>
@@ -78,10 +126,9 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <p class="mut" style="margin:.4em 0 0">The key is held in this page's memory only — never stored,
   never sent to the node. Only the signature it produces is. It is cleared when you close the tab.
   <b>Paste it only on a node you trust</b>: anything served this page could read it.</p>
-  <button onclick="loadKey()">load key</button>
-  <button onclick="clearKey()">forget key</button>
+  <button class="btn-primary" onclick="loadKey()">load key</button>
   <span id="k-state" class="mut">no key loaded</span>
-</fieldset>
+</details>
 
 <form onsubmit="return reload()">
 <div class="grid">
@@ -94,12 +141,18 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
 <p class="tabs" style="margin-top:1.4em">
   <a id="tab-list" class="sel" onclick="show('list')">Participants</a>
   <a id="tab-children" onclick="show('children')">Child nodes</a>
+  <a id="tab-addnode" onclick="show('addnode')">Add a node</a>
   <a id="tab-push" onclick="show('push')">Push</a>
-  <a id="tab-domain" onclick="show('domain')">Who serves</a>
+  <a id="tab-domain" onclick="show('domain')">Domains</a>
 </p>
 
 <!-- ---------- participants ---------- -->
 <div id="view-list">
+ <div class="cols">
+  <div>
+  <div class="hrow"><h2>Participants</h2>
+    <span><label class="vh" for="p-filter">filter participants</label>
+    <input id="p-filter" placeholder="filter" spellcheck="false" oninput="paintParticipants()"></span></div>
   <div id="participants"><p class="mut">loading...</p></div>
   <div id="detail"></div>
 
@@ -136,7 +189,10 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="out-revoke"></div>
   </div>
 
-  <details id="onboard-wrap" style="margin-top:1.4em">
+  </div><!-- /left column -->
+
+  <div id="onboard-col">
+  <details id="onboard-wrap" open>
     <summary><b>Onboard a participant</b> <span class="mut">— add someone new to this registry</span></summary>
     <div id="view-new">
   <h2>Onboard a participant</h2>
@@ -171,6 +227,8 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   <div id="out-new"></div>
     </div>
   </details>
+  </div><!-- /onboard column -->
+ </div><!-- /.cols -->
 </div>
 
 
@@ -189,6 +247,20 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
     <tr><td>Buys you</td><td>uptime</td><td>tamper evidence</td><td>a namespace someone else runs</td></tr>
   </table>
 
+  <div id="children-summary" class="mut">Nodes this one has delegated to are listed below.
+  To create another, use <a onclick="show('addnode')">Add a node</a>.</div>
+
+  <h3>Delegated so far</h3>
+  <div id="children-list"><p class="mut">loading...</p></div>
+  <div id="children-tree"></div>
+</div>
+
+<!-- ---------- add a node ---------- -->
+<div id="view-addnode" hidden>
+  <h2>Add a node</h2>
+  <p class="mut">What should this new node be to the nodes that already exist? The five shapes below
+  are the ones this binary implements; each renders the configuration that shape needs and, just as
+  importantly, leaves out the configuration it must not have.</p>
   <div class="banner">
     <b>This node never holds the child's private key.</b> It issues a one-time enrolment offer; the
     child generates its own key on first boot and enrols by presenting the <i>public</i> half. A
@@ -197,7 +269,7 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   </div>
 
   <fieldset><legend>what kind of node?</legend>
-    <div id="role-picker" class="grid"><span class="mut">loading roles&hellip;</span></div>
+    <div id="role-picker" class="roles"><span class="mut">loading roles&hellip;</span></div>
     <div id="role-detail" class="mut" style="margin-top:.6em">&hellip;</div>
     <p class="mut" style="margin:.5em 0 0">Roles are not exclusive. Witnessing composes with any of
     them &mdash; a child is normally witnessed by its parent, and a standalone registry can be
@@ -252,9 +324,6 @@ action here is an <b>append</b> to the transparency log, never an edit or a dele
   </fieldset>
   <div id="out-children"></div>
 
-  <h3>Delegated so far</h3>
-  <div id="children-list"><p class="mut">loading...</p></div>
-  <div id="children-tree"></div>
 </div>
 
 <div id="view-push" hidden>
@@ -324,7 +393,8 @@ const actionLink = (action, rec, label) =>
 // The sections the tab strip switches between. rotate/revoke are no longer
 // among them: they are panels inside the participants section, revealed by
 // selecting a participant, because that is where the operator already is.
-const VIEWS = ['list','children','push','domain'];
+let PARTS = [];   // every participant in the registry, filtered for display only
+const VIEWS = ['list','children','addnode','push','domain'];
 
 // ---- request signing ----
 // Writes are Ed25519-signed (design.md §4.4). The key lives in this closure and
@@ -379,11 +449,21 @@ function clearKey(){
 function setMode(){
   const el = $('mode');
   if(!el) return;
+  // Both states say the same four things: which key, where it lives, what
+  // survives a reload, and how to be rid of it. The compact card is smaller
+  // than the banner it replaces; it is not vaguer.
+  el.className = 'keycard ' + (SIGNER ? 'on' : 'off');
   el.innerHTML = SIGNER
-    ? '<b>Key ' + esc(SIGNER.kid) + ' is loaded.</b> Writes are signed in this tab and published directly. ' +
-      'The key is held non-extractably and closing the tab discards it.'
-    : '<b>No key is loaded.</b> Nothing here can write. Forms generate a signed command for you to run ' +
-      'elsewhere; load a key above to publish directly.';
+    ? '<div class="line"><span class="pill pill-ok">&check; key ' + esc(SIGNER.kid) + ' loaded</span>' +
+      '<button onclick="clearKey()">forget it</button></div>' +
+      '<p class="mut" style="margin:.35em 0 0">Writes are signed in this tab and published directly. ' +
+      'The key is held non-extractably in this tab\u2019s memory, never sent to the node and never ' +
+      'stored: closing the tab or reloading discards it.</p>'
+    : '<div class="line"><span class="pill">no key loaded</span></div>' +
+      '<p class="mut" style="margin:.35em 0 0"><b>Nothing here can write.</b> Forms generate a signed ' +
+      'command for you to run elsewhere. Load a key below to publish directly.</p>';
+  const f = $('key-form-label');
+  if(f) f.textContent = SIGNER ? 'Load a different publisher key' : 'Load a publisher key';
 }
 
 // recordLookup builds the read URL for a record.
@@ -503,32 +583,64 @@ function reload(){
   const box = $('participants');
   $('detail').innerHTML = '';
   hideLifecycle();   // the selection the panel was opened from is gone
+  PARTS = [];
   box.innerHTML = '<p class="mut">loading...</p>';
   queryAllRecords().then(async recs => {
     if(!recs.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
     // The query endpoint returns names + state; payload detail needs a lookup per record.
-    const rows = await Promise.all(recs.map(async r => {
+    PARTS = await Promise.all(recs.map(async r => {
       let d = {};
       try { d = (await jget(recordLookup(ns(), reg(), r.record_name))).data; }
       catch(e){ /* record may have been revoked between calls */ }
       return { name: r.record_name, state: r.state || d.state || '?', det: d.details || {}, ver: d.version };
     }));
-    box.innerHTML = '<table><tr><th>subscriber</th><th>role</th><th>domain</th><th>status</th>' +
-      '<th>key id</th><th>valid until</th><th>state</th><th>v</th></tr>' +
-      rows.map(r => {
-        const t = r.det, live = r.state === 'live';
-        // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
-        return '<tr><td>' + actionLink('detail', r.name, t.subscriber_id || '—') + '</td>' +
-          '<td>' + esc(t.type || t.role || '—') + '</td><td>' + esc(t.domain || '—') + '</td>' +
-          '<td>' + esc(t.status || '—') + '</td>' +
-          '<td class="mut">' + esc(r.name.slice(0, 14)) + (r.name.length > 14 ? '…' : '') + '</td>' +
-          '<td>' + expiry(t.valid_until) + '</td>' +
-          '<td class="' + (live ? 'ok' : 'no') + '">' + esc(r.state) + '</td>' +
-          '<td class="mut">' + esc(r.ver || '?') + '</td></tr>';
-      }).join('') + '</table>' +
-      '<p class="mut">' + rows.length + ' participant(s). Click a subscriber for version history.</p>';
+    paintParticipants();
   }).catch(e => box.innerHTML = '<p class="no">' + esc(e.message) + '</p>');
   return false;
+}
+
+// Filtering is display-only, over rows already loaded.
+//
+// queryAllRecords pages to the end, so the set being filtered is the whole
+// registry and a filter that finds nothing means there is nothing — not that
+// the match was on a page nobody fetched.
+function paintParticipants(){
+  const box = $('participants');
+  if(!box) return;
+  const f = ($('p-filter') ? $('p-filter').value : '').trim().toLowerCase();
+  const shown = !f ? PARTS : PARTS.filter(r => {
+    const t = r.det || {};
+    return [r.name, t.subscriber_id, t.type, t.role, t.domain, r.state]
+      .some(v => String(v || '').toLowerCase().includes(f));
+  });
+  if(!PARTS.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
+  box.innerHTML = '<div class="tw"><table><tr><th>subscriber</th><th>role</th><th>domain</th>' +
+    '<th>key id</th><th>valid until</th><th>state</th><th>v</th><th>do</th></tr>' +
+    shown.map(r => {
+      const t = r.det, live = r.state === 'live';
+      // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
+      //
+      // The state cell carries the WORD, in a pill. A revoked participant that
+      // differed from a live one only by ink would say nothing in greyscale,
+      // and this is the table an operator scans before deciding what to revoke.
+      return '<tr><td>' + actionLink('detail', r.name, t.subscriber_id || '\u2014') + '</td>' +
+        '<td>' + esc(t.type || t.role || '\u2014') + '</td><td>' + esc(t.domain || '\u2014') + '</td>' +
+        '<td class="mut">' + esc(r.name.slice(0, 14)) + (r.name.length > 14 ? '\u2026' : '') + '</td>' +
+        '<td>' + expiry(t.valid_until) + '</td>' +
+        '<td><span class="pill ' + (live ? 'pill-ok' : 'pill-bad') + '">' +
+          (live ? '&check; ' : '&#10007; ') + esc(r.state) + '</span></td>' +
+        '<td class="mut">' + esc(r.ver || '?') + '</td>' +
+        // The row actions OPEN the rotate and revoke panels bound to this
+        // record; neither writes anything. The panel is the confirmation step:
+        // it names the record in its heading, requires a reason, and only its
+        // own button issues the signed conditional write.
+        '<td class="rowacts">' + actionLink('rotate', r.name, 'rotate') + ' \u00b7 ' +
+          actionLink('revoke', r.name, 'revoke') + '</td></tr>';
+    }).join('') + '</table></div>' +
+    '<p class="mut">' + (f ? shown.length + ' of ' + PARTS.length : PARTS.length + ' participant(s)') +
+    '. Click a subscriber for its version history. Revoked rows stay in the table \u2014 revocation ' +
+    'appends a new version, it does not remove anything, and a row that vanished would be ' +
+    'indistinguishable from one that never existed.</p>';
 }
 
 async function queryAllRecords(){
@@ -761,6 +873,11 @@ function copy(id, btn){
 onAction($('participants'), 'detail', detail);
 onAction($('detail'), 'rotate', prefill);
 onAction($('detail'), 'revoke', prefillRevoke);
+// The same two openers, now reachable from the row itself. Wired to the table
+// as well as the detail panel: an operator who can see the row should not have
+// to open a detail view to reach the action the row is about.
+onAction($('participants'), 'rotate', prefill);
+onAction($('participants'), 'revoke', prefillRevoke);
 // Bound to the container, not to the row: the children table is replaced
 // wholesale on every reload, and a listener on a row would go with it.
 onAction($('children-list'), 'unchild', revokeChild);
@@ -796,14 +913,35 @@ function renderRoles(){
   const box = $('role-picker');
   if(!box) return;
   if(!ROLES.length){ box.innerHTML = '<span class="mut">no roles offered by this node</span>'; return; }
-  box.innerHTML = ROLES.map(r =>
-    '<div><label style="display:block;cursor:pointer">' +
-      '<input type="radio" name="noderole" value="' + esc(r.role) + '"' +
-      (r.role === ROLE ? ' checked' : '') + '> <b>' + esc(r.title) + '</b>' +
-      '<span class="mut" style="display:block;font-size:.9em">' + esc(r.summary) + '</span>' +
-    '</label></div>').join('');
+  // A card per role, and the radio is still the input the form reads — it is
+  // visually hidden inside the label, so the keyboard, the change handler and
+  // the existing name=noderole lookup all work exactly as they did.
+  //
+  // Selection shows as a heavier border AND the word "selected" for a screen
+  // reader; the --wit accent on Witness is decoration on top of that, never the
+  // thing that carries the state.
+  box.innerHTML = ROLES.map(r => {
+    const on = r.role === ROLE;
+    return '<label class="role' + (on ? ' sel' : '') + (r.role === 'witness' ? ' wit' : '') + '">' +
+      '<input type="radio" name="noderole" value="' + esc(r.role) + '"' + (on ? ' checked' : '') + '>' +
+      '<span class="t">' + esc(r.title) + (on ? '<span class="vh"> — selected</span>' : '') + '</span>' +
+      '<span class="s">' + esc(r.summary) + '</span></label>';
+  }).join('');
   box.querySelectorAll('input[name=noderole]').forEach(el => {
-    el.addEventListener('change', () => { ROLE = el.value; renderRoleDetail(); });
+    el.addEventListener('change', () => {
+      ROLE = el.value;
+      // Move the selection marking without rebuilding the picker: re-rendering
+      // it here would destroy the radio the operator just focused and drop the
+      // keyboard where it stood.
+      box.querySelectorAll('label.role').forEach(l => {
+        const on = l.querySelector('input').value === ROLE;
+        l.classList.toggle('sel', on);
+        const vh = l.querySelector('.t .vh');
+        if(on && !vh) l.querySelector('.t').insertAdjacentHTML('beforeend', '<span class="vh"> \u2014 selected</span>');
+        if(!on && vh) vh.remove();
+      });
+      renderRoleDetail();
+    });
   });
   renderRoleDetail();
 }
@@ -816,7 +954,19 @@ function renderRoleDetail(){
   box.innerHTML = '<table style="width:auto"><tr><td class="mut">identity</td><td>' + esc(r.identity) +
     '</td></tr><tr><td class="mut">log</td><td>' + esc(r.log) +
     '</td></tr><tr><td class="mut">buys you</td><td>' + esc(r.buys) +
-    '</td></tr><tr><td class="mut">write plane</td><td>' + esc(r.writes) + '</td></tr></table>';
+    '</td></tr><tr><td class="mut">write plane</td><td>' + esc(r.writes) + '</td></tr></table>' +
+    // What this role's configuration will actually carry.
+    //
+    // The names come from the node, which derives them by running its own
+    // renderer over an example of this role — so the list cannot describe one
+    // configuration while the node writes another. Names only: the values
+    // belong to the example and would be a lie about this node.
+    ((r.sets && r.sets.length)
+      ? '<p class="eyebrow" style="margin:.8em 0 .2em">Sets</p>' +
+        '<div class="tw"><pre class="sets">' + esc(r.sets.join('\n')) + '</pre></div>' +
+        '<p class="mut">Variable names only. The values are filled in from the fields below when ' +
+        'you render the configuration.</p>'
+      : '');
 
   // Only the fields this role actually needs. The list comes from the node
   // alongside the description, so a role cannot ask for something the renderer
