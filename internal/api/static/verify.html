@@ -538,8 +538,11 @@ async function run(){
   //   - VerifyOnce runs its consistency check under `if have && last > 0`, so
   //     the first observation checks nothing at all, and anything before it is
   //     invisible;
-  //   - /dedi/log/proof/consistency takes any `old` size, so a checkpoint a
-  //     reader saved themselves genuinely works as the starting point.
+  //   - /dedi/log/proof/consistency proves from any `old` size of 1 or more
+  //     (logConsistency rejects 0, and the store rejects it again), so a
+  //     checkpoint a reader saved themselves works as the starting point —
+  //     unless they saved it while the log was still empty, which the copy
+  //     below says. Pinned by TestVerifyPromisesOnlyWhatTheProofEndpointDoes.
   parts.push('<h2 id="s6">What none of this shows</h2>' +
     '<div class="caveat">' +
     '<p>That the root this witness recorded was ever the target&rsquo;s real history. Every step ' +

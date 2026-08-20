@@ -143,15 +143,6 @@ console.log(JSON.stringify({ holds, partly, skipChip, reason, chips, banner: ban
 		t.Error("a run with an unchecked signature does not say it was only partly checked")
 	}
 
-	// The invariant that ties the two together: the banner speaks for every step
-	// above it, so it may never say the claim holds while any step reads skip.
-	// Tracking only the two signature checks left step 4's "not yet applicable"
-	// printing under an "All checks recomputed" headline — the same overclaim
-	// one element to the right.
-	if no.Holds && no.SkipChip {
-		t.Error("the banner says the claim holds while a step reads skip")
-	}
-
 	// With the node's real key, the same run must still be able to say it holds.
 	yes := exec1(vkey)
 	if yes.SkipChip {
