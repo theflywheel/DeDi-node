@@ -625,7 +625,8 @@ function filterParticipants(){
 function paintParticipants(){
   const box = $('participants');
   if(!box) return;
-  const f = ($('p-filter') ? $('p-filter').value : '').trim().toLowerCase();
+  const typed = ($('p-filter') ? $('p-filter').value : '').trim();
+  const f = typed.toLowerCase();   // matching is case-insensitive; the message quotes what was typed
   const shown = !f ? PARTS : PARTS.filter(r => {
     const t = r.det || {};
     return [r.name, t.subscriber_id, t.type, t.role, t.domain, r.state]
@@ -633,12 +634,12 @@ function paintParticipants(){
   });
   if(!PARTS.length){ box.innerHTML = '<p class="mut">no participants in this registry.</p>'; return; }
   if(!shown.length){
-    box.innerHTML = '<p class="mut">Nothing in this registry matches \u201c' + esc(f) + '\u201d. ' +
+    box.innerHTML = '<p class="mut">Nothing in this registry matches \u201c' + esc(typed) + '\u201d. ' +
       'All ' + PARTS.length + ' participant(s) are still there; only the view is narrowed.</p>';
     return;
   }
   box.innerHTML = '<div class="tw"><table><tr><th>subscriber</th><th>role</th><th>domain</th>' +
-    '<th>key id</th><th>valid until</th><th>state</th><th>v</th><th>do</th></tr>' +
+    '<th>key id</th><th>valid until</th><th>state</th><th>v</th><th>actions</th></tr>' +
     shown.map(r => {
       const t = r.det, live = r.state === 'live';
       // ONIX reads `type` and `url`; older seeds used `role`/`subscriber_url`.
