@@ -71,6 +71,9 @@
   .verdict { padding: .6em .8em; margin: .8em 0; border-left: 4px solid; border-radius: 4px; }
   .verdict.pass { border-color: var(--ok); background: var(--okbg); }
   .verdict.fail { border-color: var(--bad); background: var(--badbg); }
+  /* Partly checked: neither pass nor fail, and it must not look like either. */
+  .verdict.part { border-color: var(--warn); background: var(--warnbg); }
+  .warn { color: var(--warn); }
 
   svg { max-width: 100%; height: auto; display: block; }
   svg text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -288,6 +291,22 @@ async function run(){
   const parts = [];
   const chips = [];
   let allOK = true;
+  // A check that did not run is not a check that passed.
+  //
+  // verifyCheckpointSig returns null when there is no key to check against —
+  // neither true nor false. Only `=== false` cleared allOK, so a page with no
+  // verifier key rendered every signature row honestly as "unchecked", coloured
+  // its chips amber, and then opened with a green banner saying the witness
+  // claim holds and nothing was taken on the node's word. Both halves of that
+  // sentence were false: the signature step had not run, so nothing bound
+  // either checkpoint to a signer, and the append-only proof below it was
+  // folded against bytes this node handed over with nothing vouching for them.
+  //
+  // /check has always drawn this distinction — pass, fail, and "Partly checked:
+  // the record is in *a* log". This page, whose whole subject is evidence, did
+  // not.
+  let anySkipped = false;
+  const skipped = () => { anySkipped = true; };
   const fail = m => { allOK = false; return no(m); };
 
   const net = (await trace('/dedi/network', 'json')).data;
@@ -333,7 +352,7 @@ async function run(){
   const selfCP = parseCheckpointBody(parseNote(selfNote).body);
   const selfSig = await verifyCheckpointSig(selfNote, VKEY);
   chips.push(['1 · this node&rsquo;s log is signed', selfSig === true ? 'pass' : selfSig === false ? 'fail' : 'skip', 's1']);
-  if(selfSig === false) allOK = false;
+  if(selfSig === false) allOK = false; else if(selfSig !== true) skipped();
 
   parts.push('<h2 id="s1">1. This node&rsquo;s own signed log</h2>' +
     '<p>A verdict is only worth something if it sits in a log this node cannot quietly edit. ' +
@@ -406,7 +425,7 @@ async function run(){
 
   if(reached){
     chips.push(['3 · the target signed its own log', targetSig === true ? 'pass' : targetSig === false ? 'fail' : 'skip', 's3']);
-    if(targetSig === false) allOK = false;
+    if(targetSig === false) allOK = false; else if(targetSig !== true) skipped();
     parts.push('<h2 id="s3">3. The target&rsquo;s own signed log</h2>' +
       '<p>Fetched by <em>your browser</em> from <code>' + esc(targetBase) + '</code>. This node is ' +
       'not in that path and could not alter these bytes.</p>' +
@@ -487,11 +506,17 @@ async function run(){
       '<pre>' + FETCHES.map(f => 'curl -s ' +
         esc(f.url.startsWith('http') ? f.url : location.origin + f.url)).join('\n') + '</pre>'));
 
-  const banner = allOK
-    ? '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
-        'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>'
-    : '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
-        'is evidence, not a glitch, and is worth capturing.') + '</div>';
+  const banner = !allOK
+    ? '<div class="verdict fail">' + no('At least one check failed — details below. A failure here ' +
+        'is evidence, not a glitch, and is worth capturing.') + '</div>'
+    : anySkipped
+    ? '<div class="verdict part"><b class="warn">Partly checked.</b> ' +
+      '<span class="mut">The proofs above fold, but at least one signature check could not run &mdash; ' +
+      'no key was published to check it against. Nothing here binds these checkpoints to whoever ' +
+      'signed them, so the append-only result rests on bytes this node handed over unvouched. ' +
+      'The amber steps say which.</span></div>'
+    : '<div class="verdict pass">' + yes('All checks recomputed here, in your browser, from the ' +
+        'bytes shown. This node&rsquo;s witness claim holds and nothing was taken on its word.') + '</div>';
 
   const strip = '<div class="steps">' + chips.map(c =>
     '<div class="chip ' + c[1] + '" onclick="document.getElementById(\'' + c[2] +
