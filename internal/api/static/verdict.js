@@ -57,9 +57,6 @@ function verdictState(t) {
   return 'sound';
 }
 
-// verdictSound is the only affirmative test any page may make.
-function verdictSound(t) { return verdictState(t) === 'sound'; }
-
 if (typeof module !== 'undefined') {
-  module.exports = { hasHealth, witnessStale, verdictState, verdictSound };
+  module.exports = { hasHealth, witnessStale, verdictState };
 }

@@ -609,9 +609,17 @@ function select(sel){
       // every selection and a stale closure would copy the previously selected
       // edge's key, which is exactly the wrong key to check a target against.
       const k = ck.dataset.key || '';
+      // Only say "copied" when a copy actually happened. Clipboard is absent in
+      // insecure contexts, and a button that reports success it did not perform
+      // is the same false affirmative this page exists to stop printing.
       const done = () => { ck.textContent = 'copied'; setTimeout(() => { ck.textContent = 'copy target key'; }, 1500); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(k).then(done, () => {});
-      else done();
+      const failed = () => {
+        ck.textContent = 'press \u2318C to copy';
+        ck.dataset.failed = '1';
+        setTimeout(() => { ck.textContent = 'copy target key'; delete ck.dataset.failed; }, 3000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(k).then(done, failed);
+      else failed();
     };
   } else {
     const n = sel.n;
