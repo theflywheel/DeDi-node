@@ -100,6 +100,7 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <pre>/dedi/lookup   /dedi/query   /dedi/versions
 /dedi/log/checkpoint   /dedi/witness   /dedi/network   /dedi/stats</pre>
 
+<script src="/static/verdict.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -210,14 +211,26 @@ function renderWatchers(r){
     // missing field as a pass turns "never checked" into "checked and fine".
     // An earlier draft of this page did precisely that and printed
     // "last proved this log append-only at NaN entries".
-    if (t.consistency_ok === false){
+    const st = verdictState(t);
+    if (st === 'caught'){
       out += '<p style="margin:0 0 .3em"><b class="no">✗ ' + esc(w.node) +
         ' has caught this log changing under it.</b></p>' +
         '<p class="no" style="margin:0 0 .4em">' +
         (t.detail ? esc(t.detail) : 'Its consistency check failed' + when) +
         '. This is the failure the whole design exists to make visible: do not trust this ' +
         'directory until it is explained.</p>';
-    } else if (t.witnessed !== true || t.size === undefined){
+    } else if (st === 'stale' || st === 'unwatched'){
+      // A verdict exists and it passed. What is missing is evidence the
+      // watcher is still watching -- a different fact, and saying "no verdict
+      // to read" here would state a false reason for the caveat.
+      out += '<p style="margin:0 0 .3em"><b>' + esc(w.node) + ' watches this log.</b></p>' +
+        '<p class="mut" style="margin:0 0 .4em">It last proved this log append-only at <b>' +
+        num(t.size) + '</b> entries' + when + '. ' +
+        (st === 'stale'
+          ? 'That check has since gone <b>stale</b> &mdash; the verdict stands, but nothing says it is current.'
+          : 'It does not report whether it is <b>still checking</b>, so nothing says that verdict is current.') +
+        '</p>';
+    } else if (st !== 'sound'){
       out += '<p style="margin:0 0 .3em"><b>' + esc(w.node) + ' is set up to watch this log.</b></p>' +
         '<p class="mut" style="margin:0 0 .4em">It has not successfully verified it yet, so there is no ' +
         'verdict to read. Not the same as a clean one.</p>';

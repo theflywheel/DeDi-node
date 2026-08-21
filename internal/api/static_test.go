@@ -295,19 +295,25 @@ func TestSharedVerifierDefinesWhatTheRingPageCalls(t *testing.T) {
 // would print a green tick beside the alarm. The browser never held the
 // pre-rewrite root and structurally cannot reproduce the catch.
 func TestRingPageRefusesToRecheckACaughtEdge(t *testing.T) {
+	// The page no longer spells the test out: reading a verdict moved into the
+	// shared classifier, because five pages had each open-coded it and got it
+	// wrong differently. This asked for the literal string and would now fail on
+	// a page whose behaviour is unchanged — a mechanism assertion outliving its
+	// mechanism. What must remain true is that a caught edge cannot be
+	// re-checked, so that is what this asks.
 	page := string(networkPageHTML)
-	if !strings.Contains(page, "consistency_ok === false") {
-		t.Fatal("the ring page does not branch on a failed verdict at all")
+	if !strings.Contains(page, "caught") {
+		t.Fatal("the ring page does not distinguish a caught edge at all")
 	}
-	// canCheck must exclude the caught case.
 	i := strings.Index(page, "const canCheck")
 	if i < 0 {
 		t.Fatal("canCheck is gone; the guard this test protects has been restructured")
 	}
 	guard := page[i : i+240]
-	if !strings.Contains(guard, "!caught") {
-		t.Errorf("canCheck does not exclude a caught edge, so the re-check would render a green tick "+
-			"beside the alarm:\n%s", guard)
+	// Sound is the only state that may be re-checked, and 'caught' is not it.
+	if !strings.Contains(guard, "'sound'") && !strings.Contains(guard, "!caught") {
+		t.Errorf("canCheck does not restrict the re-check to a sound verdict, so a caught edge "+
+			"would render a green tick beside the alarm:\n%s", guard)
 	}
 }
 

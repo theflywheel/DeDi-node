@@ -99,6 +99,7 @@ here, and that is decided by log position rather than by which half-hour a signa
 <div class="eyebrow">right now</div>
 <table id="now"><tr><td class="mut">reading&hellip;</td></tr></table>
 
+<script src="/static/verdict.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -275,8 +276,13 @@ async function lastChecked(){
         const d = (await j(p.url.replace(/\/$/, '') + '/dedi/witness')).data;
         for (const t of (d.targets || [])) {
           if (t.origin !== self.origin) continue;
-          if (t.consistency_ok === false) { forked = t; forkedBy = p.name; continue; }
-          if (t.witnessed === true && (!best || (t.verdict_at || '') > (best.verdict_at || ''))) {
+          // The shared classifier, not a local test. This line used to accept
+          // any verdict that was not explicitly a failure, so a peer omitting
+          // consistency_ok — an older build does it by accident — produced
+          // "independently verified this log" below.
+          const st = verdictState(t);
+          if (st === 'caught') { forked = t; forkedBy = p.name; continue; }
+          if (st === 'sound' && (!best || (t.verdict_at || '') > (best.verdict_at || ''))) {
             best = t; by = p.name;
           }
         }
