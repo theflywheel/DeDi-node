@@ -57,6 +57,19 @@ function verdictState(t) {
   return 'sound';
 }
 
+// num renders a quantity, or an em dash when the node did not send one.
+//
+// It lives here rather than on each page because the bug it fixes was caused
+// by each page owning its own copy: Number(undefined) is NaN and
+// toLocaleString renders it "NaN", so an absent field printed as a quantity
+// under its own label. That was found and fixed on one page at a time, four
+// times, which is the same shape as the verdict bug above.
+function num(n) {
+  if (n === null || n === undefined || n === '') return '\u2014';
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toLocaleString() : '\u2014';
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { hasHealth, witnessStale, verdictState };
+  module.exports = { hasHealth, witnessStale, verdictState, num };
 }

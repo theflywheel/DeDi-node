@@ -120,15 +120,10 @@ published yesterday. Only a party who kept yesterday's checkpoint can establish 
 full.</p>
 
 <script src="/static/verify.js"></script>
+<script src="/static/verdict.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-// A value the node did not send is not a number. Number(undefined) is NaN and
-// toLocaleString renders it "NaN", so an absent field printed as a quantity
-// under its own label — the shape the shared verdict classifier documents,
-// arrived at independently on four pages because each defined this line for
-// itself.
-const num = n => Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n).toLocaleString() : '\u2014';
 
 function step(state, title, detail){
   return '<div class="step ' + state + '"><b class="' + (state === 'pass' ? 'ok' : state === 'fail' ? 'no' : 'mut') +

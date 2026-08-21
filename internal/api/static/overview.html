@@ -120,12 +120,6 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-// A value the node did not send is not a number. Number(undefined) is NaN and
-// toLocaleString renders it "NaN", so an absent field printed as a quantity
-// under its own label — the shape the shared verdict classifier documents,
-// arrived at independently on four pages because each defined this line for
-// itself.
-const num = n => Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n).toLocaleString() : '\u2014';
 
 function ago(sec){
   sec = Math.round(sec);
