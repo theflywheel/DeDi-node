@@ -73,6 +73,14 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
       <tr><td class="mut">verifier key</td><td id="vkey" class="key">&hellip;</td></tr>
       <tr><td class="mut">tree size</td><td id="size" class="num">&hellip;</td></tr>
       <tr><td class="mut">last checkpoint</td><td id="cpage">&hellip;</td></tr>
+      <!-- Whether this node can be written to at all. Injected, because there
+           is no public endpoint for it and there should not be one.
+           NOT the number of publisher keys, which the design shows: that is
+           reconnaissance on an unauthenticated front door, and it works against
+           the reason the write routes are unregistered in the first place —
+           "an operator who has not opened the write plane cannot be probed for
+           one". Overruling the artboard here on purpose. -->
+      <tr><td class="mut">write plane</td><td>{{WRITE_PLANE}}</td></tr>
       <tr><td class="mut">requests served</td><td id="reqs" class="num">&hellip;</td></tr>
     </table>
     <p class="mut" style="margin:.4em 0 0">The verifier key is public by construction &mdash; it is what you
@@ -88,11 +96,19 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <h2>What you can do here</h2>
 <div class="cards">
   <a class="card" href="/browse"><b>Browse the directory &rarr;</b>
-    <span class="mut" id="browse-sub">namespaces, registries and records</span></a>
+    <!-- No live counts here, deliberately. Nothing in this node can produce
+         them: every store query takes a namespace as input and there is no
+         method that lists or counts namespaces, which is also why /browse's
+         root state is a field rather than a list. The system avoids letting a
+         caller map which namespaces it holds — children.go refuses an
+         unenrolled caller precisely so they cannot — so a global count would
+         work against that too. The id this used to carry was populated by no
+         script at all. -->
+    <span class="mut">namespaces, registries and records</span></a>
   <a class="card" href="/check"><b>Check a record yourself &rarr;</b>
     <span class="mut">recompute its proof in your browser</span></a>
   <a class="card" href="/docs"><b>Read the documentation &rarr;</b>
-    <span class="mut">served by this binary, not the internet</span></a>
+    <span class="mut">{{DOC_COUNT}} pages, served by this binary, not the internet</span></a>
 </div>
 
 <h2>API</h2>
@@ -104,7 +120,12 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
+// A value the node did not send is not a number. Number(undefined) is NaN and
+// toLocaleString renders it "NaN", so an absent field printed as a quantity
+// under its own label — the shape the shared verdict classifier documents,
+// arrived at independently on four pages because each defined this line for
+// itself.
+const num = n => Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n).toLocaleString() : '\u2014';
 
 function ago(sec){
   sec = Math.round(sec);
@@ -277,7 +298,12 @@ function renderCluster(c){
     const age = await checkpointAge();
     $('cpage').innerHTML = age === null ? '<span class="mut">unknown</span>'
       : age < 0 ? '<span class="no">never signed</span>'
-      : '<span class="' + (age > 3600 ? 'mut' : 'ok') + '">' + ago(age) + '</span>';
+      // Muted grey beside a green "44 seconds ago" reads as "fine, just
+      // quiet". The state needs its own word — a twelve-day-old checkpoint is
+      // the bug this page's own comment above recounts.
+      : age > 3600
+        ? '<span class="warn">stale &mdash; ' + ago(age) + ' ago</span>'
+        : '<span class="ok">' + ago(age) + ' ago</span>';
   } catch (e) { $('cpage').textContent = 'unknown'; }
   try {
     const s = (await j('/dedi/stats')).data;

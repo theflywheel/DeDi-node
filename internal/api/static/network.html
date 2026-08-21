@@ -78,7 +78,7 @@
 {{NAV}}
 
 <h1>The ring</h1>
-<p class="mut" id="lede">Who watches whom, and what each of them has actually proved.</p>
+<p class="mut">Who watches whom, and what each of them has actually proved.</p>
 
 <div class="legend">
   <span><svg width="42" height="12" aria-hidden="true"><line x1="0" y1="6" x2="32" y2="6" stroke="var(--wit)" stroke-width="2"/><path d="M32 2 L40 6 L32 10 Z" fill="var(--wit)"/></svg>
@@ -108,7 +108,12 @@ wrong conclusion.</p>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
+// A value the node did not send is not a number. Number(undefined) is NaN and
+// toLocaleString renders it "NaN", so an absent field printed as a quantity
+// under its own label — the shape the shared verdict classifier documents,
+// arrived at independently on four pages because each defined this line for
+// itself.
+const num = n => Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n).toLocaleString() : '\u2014';
 const SVGNS = 'http://www.w3.org/2000/svg';
 const TIMEOUT = 8000;
 

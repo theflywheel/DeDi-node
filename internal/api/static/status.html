@@ -103,7 +103,12 @@ here, and that is decided by log position rather than by which half-hour a signa
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
+// A value the node did not send is not a number. Number(undefined) is NaN and
+// toLocaleString renders it "NaN", so an absent field printed as a quantity
+// under its own label — the shape the shared verdict classifier documents,
+// arrived at independently on four pages because each defined this line for
+// itself.
+const num = n => Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n).toLocaleString() : '\u2014';
 const BUCKETS = 48, BUCKET_SECONDS = 1800;
 
 async function j(url, ms){

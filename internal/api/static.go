@@ -7,6 +7,7 @@ import (
 	"html"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/theflywheel/DeDi-node/internal/provision"
 )
@@ -73,6 +74,18 @@ const defaultDemoURL = "https://schemes.proto.theflywheel.in/"
 // are looking for goes.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	page := bytes.Replace(overviewHTML, []byte("{{VERIFIER_KEY}}"), []byte(s.VerifierKey), 1)
+	// Counted from the docs this binary actually carries, never written out as
+	// a number: the artboard's "19 pages" is sample data and a literal would be
+	// wrong the first time anyone adds a page.
+	docs, _ := loadDocs()
+	page = bytes.Replace(page, []byte("{{DOC_COUNT}}"), []byte(strconv.Itoa(len(docs))), 1)
+	// Whether this node can be written to. The count of publisher keys is
+	// deliberately not published here; see the comment at the row itself.
+	plane := "closed &mdash; read-only"
+	if s.writeEnabled() {
+		plane = "open"
+	}
+	page = bytes.Replace(page, []byte("{{WRITE_PLANE}}"), []byte(plane), 1)
 	s.writePage(w, page, "/")
 }
 
