@@ -9,14 +9,22 @@ import (
 	"testing"
 )
 
-func frontPage(t *testing.T, srv interface{ Close() }, url string) string {
+func frontPage(t *testing.T, url string) string {
 	t.Helper()
 	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	// A 404 body satisfies a "does not contain" assertion perfectly. Every test
+	// below asks what the front door says, which presumes it answered.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%s: %s", url, resp.Status)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("%s: %v", url, err)
+	}
 	return string(b)
 }
 
@@ -28,7 +36,7 @@ func frontPage(t *testing.T, srv interface{ Close() }, url string) string {
 func TestFrontDoorSaysWhetherThisNodeCanBeWrittenTo(t *testing.T) {
 	// No publisher keys: the write routes are not even registered.
 	ro, _, _ := testServer(t)
-	page := frontPage(t, ro, ro.URL+"/")
+	page := frontPage(t, ro.URL+"/")
 	if !strings.Contains(page, "closed") {
 		t.Error("a node with no publisher keys does not say its write plane is closed")
 	}
@@ -38,7 +46,7 @@ func TestFrontDoorSaysWhetherThisNodeCanBeWrittenTo(t *testing.T) {
 
 	// With keys, it says so — and still does not say how many.
 	rw, _, _ := writeServer(t, "flywheel")
-	page = frontPage(t, rw, rw.URL+"/")
+	page = frontPage(t, rw.URL+"/")
 	if !regexp.MustCompile(`write plane</td><td>[^<]*open`).MatchString(page) {
 		t.Error("a node with a write plane does not say so")
 	}
@@ -56,7 +64,7 @@ func TestFrontDoorSaysWhetherThisNodeCanBeWrittenTo(t *testing.T) {
 // the binary actually carries.
 func TestFrontDoorCountsTheDocsItActuallyHas(t *testing.T) {
 	srv, _, _ := testServer(t)
-	page := frontPage(t, srv, srv.URL+"/")
+	page := frontPage(t, srv.URL+"/")
 	docs, err := loadDocs()
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +94,7 @@ func TestNoServedPageLeaksATemplatePlaceholder(t *testing.T) {
 	leftover := regexp.MustCompile(`\{\{[A-Z_]+\}\}`)
 	for _, path := range []string{"/", "/browse", "/network", "/status", "/check", "/verify",
 		"/docs", "/docs/witnessing", "/admin"} {
-		page := frontPage(t, srv, srv.URL+path)
+		page := frontPage(t, srv.URL+path)
 		if m := leftover.FindString(page); m != "" {
 			t.Errorf("%s is served with %s still in it", path, m)
 		}

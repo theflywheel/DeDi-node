@@ -22,6 +22,16 @@
  * happened to pass, and the two must never be told apart by shade alone. */
 :root { --ok: #1a7f37; --bad: #b42318; --mut: #6b6b6b; --wit: #1f4788; --warn: #8a6d1f; }
 
+/* The state classes live beside the variables they read. --warn shipped here
+   with no rule to use it, so each page that wanted the colour declared its own
+   .warn -- four identical copies, and the fifth page to want it got body ink
+   and no warning. A variable without the rule that consumes it is half a
+   token. */
+.ok { color: var(--ok); }
+.no { color: var(--bad); }
+.mut { color: var(--mut); }
+.warn { color: var(--warn); }
+
 /* Buttons.
  *
  * The bare element gets the secondary treatment rather than the browser

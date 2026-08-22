@@ -138,9 +138,21 @@ func TestTheDocsIndexIsNotAFooter(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("/docs does not link %s — the generated contents is empty", order[0])
 	}
-	if i > len(page)/3 {
-		t.Errorf("the contents starts %d%% of the way down /docs — a reader must scroll past the "+
-			"explainer to learn the documentation exists", 100*i/len(page))
+	// Measure inside <body>. The claim is about what a reader scrolls past, and
+	// nobody scrolls past a stylesheet: counting the head made this fail when
+	// the shared CSS grew, and would equally have let the contents sink while a
+	// large head kept the ratio looking fine.
+	b := strings.Index(page, "<body>")
+	if b < 0 {
+		t.Fatal("/docs has no body")
+	}
+	visible, at := len(page)-b, i-b
+	if at < 0 {
+		t.Fatalf("the contents link is in the head at %d", i)
+	}
+	if at > visible/3 {
+		t.Errorf("the contents starts %d%% of the way down the body of /docs — a reader must scroll "+
+			"past the explainer to learn the documentation exists", 100*at/visible)
 	}
 
 	// And it must list all of them, not merely begin near the top.

@@ -59,11 +59,11 @@ function verdictState(t) {
 
 // num renders a quantity, or an em dash when the node did not send one.
 //
-// It lives here rather than on each page because the bug it fixes was caused
-// by each page owning its own copy: Number(undefined) is NaN and
-// toLocaleString renders it "NaN", so an absent field printed as a quantity
-// under its own label. That was found and fixed on one page at a time, four
-// times, which is the same shape as the verdict bug above.
+// Number(undefined) is NaN and toLocaleString renders it "NaN", so a field the
+// node never sent printed as a quantity under that field's own label. Four
+// pages carried the same unguarded one-liner, so the same defect was in all
+// four at once; it lives here now so the guard cannot be true of three of
+// them.
 function num(n) {
   if (n === null || n === undefined || n === '') return '\u2014';
   const v = Number(n);

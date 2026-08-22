@@ -38,7 +38,6 @@
   td.num { font-variant-numeric: tabular-nums; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
   .cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 0 1.6em; }
   .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6em; }
   .card { border: 1px solid #ccc; padding: .7em .8em; display: block; text-decoration: none; color: inherit; }
@@ -120,6 +119,21 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// checkpointLine is a named function, not an expression inline in the
+// bootstrap, because the bug it shipped with could only be seen in its output:
+// ago() already ends its string with the word, and two branches appended " ago"
+// to it, so the first line of the first page anyone sees read "44 seconds ago
+// ago". Every test read the page source and none of them read the sentence.
+function checkpointLine(age){
+  if (age === null) return '<span class="mut">unknown</span>';
+  if (age < 0) return '<span class="no">never signed</span>';
+  // Muted grey beside a green "44 seconds ago" reads as "fine, just quiet".
+  // The state needs its own word — a twelve-day-old checkpoint is the bug this
+  // page's own comment further down recounts.
+  if (age > 3600) return '<span class="warn">stale &mdash; ' + ago(age) + '</span>';
+  return '<span class="ok">' + ago(age) + '</span>';
+}
 
 function ago(sec){
   sec = Math.round(sec);
@@ -289,15 +303,7 @@ function renderCluster(c){
     $('title').textContent = 'this node is not answering';
   }
   try {
-    const age = await checkpointAge();
-    $('cpage').innerHTML = age === null ? '<span class="mut">unknown</span>'
-      : age < 0 ? '<span class="no">never signed</span>'
-      // Muted grey beside a green "44 seconds ago" reads as "fine, just
-      // quiet". The state needs its own word — a twelve-day-old checkpoint is
-      // the bug this page's own comment above recounts.
-      : age > 3600
-        ? '<span class="warn">stale &mdash; ' + ago(age) + ' ago</span>'
-        : '<span class="ok">' + ago(age) + ' ago</span>';
+    $('cpage').innerHTML = checkpointLine(await checkpointAge());
   } catch (e) { $('cpage').textContent = 'unknown'; }
   try {
     const s = (await j('/dedi/stats')).data;
