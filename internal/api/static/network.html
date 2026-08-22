@@ -39,8 +39,6 @@
   td.num { font-variant-numeric: tabular-nums; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
-  .warn { color: var(--warn); }
   /* Witnessing is the only relationship on this page that is evidence, so it is
      the only one given a colour. See the legend, which says so out loud. */
   .wit { color: var(--wit); }
@@ -78,7 +76,7 @@
 {{NAV}}
 
 <h1>The ring</h1>
-<p class="mut" id="lede">Who watches whom, and what each of them has actually proved.</p>
+<p class="mut">Who watches whom, and what each of them has actually proved.</p>
 
 <div class="legend">
   <span><svg width="42" height="12" aria-hidden="true"><line x1="0" y1="6" x2="32" y2="6" stroke="var(--wit)" stroke-width="2"/><path d="M32 2 L40 6 L32 10 Z" fill="var(--wit)"/></svg>
@@ -108,7 +106,6 @@ wrong conclusion.</p>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
 const SVGNS = 'http://www.w3.org/2000/svg';
 const TIMEOUT = 8000;
 

@@ -103,7 +103,6 @@ here, and that is decided by log position rather than by which half-hour a signa
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
 const BUCKETS = 48, BUCKET_SECONDS = 1800;
 
 async function j(url, ms){

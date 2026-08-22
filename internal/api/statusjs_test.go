@@ -42,6 +42,17 @@ func TestStatusTellsQuietApartFromBroken(t *testing.T) {
 	if i := strings.Index(js, "(async function(){"); i >= 0 {
 		js = js[:i]
 	}
+	// The shared file is loaded by a <script src> the browser resolves; this
+	// harness has to do the same, or every helper that moved into it reads as
+	// undefined here while the real page works.
+	shared, err := os.ReadFile(filepath.Join("static", "verdict.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(src, "/static/verdict.js") {
+		t.Fatal("the page no longer loads the shared helpers; it or this harness has moved")
+	}
+	js = string(shared) + js
 	for _, need := range []string{"function cards(", "function render("} {
 		if !strings.Contains(js, need) {
 			t.Fatalf("%s is not in the shipped page; it or this harness has moved", need)

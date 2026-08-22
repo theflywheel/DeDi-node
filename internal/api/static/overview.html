@@ -38,7 +38,6 @@
   td.num { font-variant-numeric: tabular-nums; }
   pre { background: #f4f4f4; padding: .6em; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   code { background: #f4f4f4; padding: 0 .2em; }
-  .ok { color: var(--ok); } .no { color: var(--bad); } .mut { color: var(--mut); }
   .cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 0 1.6em; }
   .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6em; }
   .card { border: 1px solid #ccc; padding: .7em .8em; display: block; text-decoration: none; color: inherit; }
@@ -73,6 +72,14 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
       <tr><td class="mut">verifier key</td><td id="vkey" class="key">&hellip;</td></tr>
       <tr><td class="mut">tree size</td><td id="size" class="num">&hellip;</td></tr>
       <tr><td class="mut">last checkpoint</td><td id="cpage">&hellip;</td></tr>
+      <!-- Whether this node can be written to at all. Injected, because there
+           is no public endpoint for it and there should not be one.
+           NOT the number of publisher keys, which the design shows: that is
+           reconnaissance on an unauthenticated front door, and it works against
+           the reason the write routes are unregistered in the first place —
+           "an operator who has not opened the write plane cannot be probed for
+           one". Overruling the artboard here on purpose. -->
+      <tr><td class="mut">write plane</td><td>{{WRITE_PLANE}}</td></tr>
       <tr><td class="mut">requests served</td><td id="reqs" class="num">&hellip;</td></tr>
     </table>
     <p class="mut" style="margin:.4em 0 0">The verifier key is public by construction &mdash; it is what you
@@ -88,11 +95,19 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <h2>What you can do here</h2>
 <div class="cards">
   <a class="card" href="/browse"><b>Browse the directory &rarr;</b>
-    <span class="mut" id="browse-sub">namespaces, registries and records</span></a>
+    <!-- No live counts here, deliberately. Nothing in this node can produce
+         them: every store query takes a namespace as input and there is no
+         method that lists or counts namespaces, which is also why /browse's
+         root state is a field rather than a list. The system avoids letting a
+         caller map which namespaces it holds — children.go refuses an
+         unenrolled caller precisely so they cannot — so a global count would
+         work against that too. The id this used to carry was populated by no
+         script at all. -->
+    <span class="mut">namespaces, registries and records</span></a>
   <a class="card" href="/check"><b>Check a record yourself &rarr;</b>
     <span class="mut">recompute its proof in your browser</span></a>
   <a class="card" href="/docs"><b>Read the documentation &rarr;</b>
-    <span class="mut">served by this binary, not the internet</span></a>
+    <span class="mut">{{DOC_COUNT}} pages, served by this binary, not the internet</span></a>
 </div>
 
 <h2>API</h2>
@@ -104,7 +119,21 @@ away: <a href="/check">recompute a record&rsquo;s proof yourself</a>, or read wh
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const num = n => Number(n).toLocaleString();
+
+// checkpointLine is a named function, not an expression inline in the
+// bootstrap, because the bug it shipped with could only be seen in its output:
+// ago() already ends its string with the word, and two branches appended " ago"
+// to it, so the first line of the first page anyone sees read "44 seconds ago
+// ago". Every test read the page source and none of them read the sentence.
+function checkpointLine(age){
+  if (age === null) return '<span class="mut">unknown</span>';
+  if (age < 0) return '<span class="no">never signed</span>';
+  // Muted grey beside a green "44 seconds ago" reads as "fine, just quiet".
+  // The state needs its own word — a twelve-day-old checkpoint is the bug this
+  // page's own comment further down recounts.
+  if (age > 3600) return '<span class="warn">stale &mdash; ' + ago(age) + '</span>';
+  return '<span class="ok">' + ago(age) + '</span>';
+}
 
 function ago(sec){
   sec = Math.round(sec);
@@ -274,10 +303,7 @@ function renderCluster(c){
     $('title').textContent = 'this node is not answering';
   }
   try {
-    const age = await checkpointAge();
-    $('cpage').innerHTML = age === null ? '<span class="mut">unknown</span>'
-      : age < 0 ? '<span class="no">never signed</span>'
-      : '<span class="' + (age > 3600 ? 'mut' : 'ok') + '">' + ago(age) + '</span>';
+    $('cpage').innerHTML = checkpointLine(await checkpointAge());
   } catch (e) { $('cpage').textContent = 'unknown'; }
   try {
     const s = (await j('/dedi/stats')).data;

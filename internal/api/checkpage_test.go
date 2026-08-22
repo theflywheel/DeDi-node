@@ -55,6 +55,16 @@ func TestCheckerVerifiesARealProofAndRejectsATamperedOne(t *testing.T) {
 	full := string(page)
 	pageJS := full[strings.LastIndex(full, "<script>")+len("<script>"):]
 	pageJS = pageJS[:strings.Index(pageJS, "</script>")]
+	// Same as the browser does with the <script src> above the page's own
+	// program: without it the shared helpers are undefined here only.
+	if !strings.Contains(full, "/static/verdict.js") {
+		t.Fatal("the page no longer loads the shared helpers; it or this harness has moved")
+	}
+	sharedJS, err := os.ReadFile(filepath.Join("static", "verdict.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageJS = string(sharedJS) + pageJS
 	// The two handler bindings need elements that exist; the harness supplies them.
 	good, _ := json.Marshal(env)
 

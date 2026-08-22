@@ -57,6 +57,19 @@ function verdictState(t) {
   return 'sound';
 }
 
+// num renders a quantity, or an em dash when the node did not send one.
+//
+// Number(undefined) is NaN and toLocaleString renders it "NaN", so a field the
+// node never sent printed as a quantity under that field's own label. Four
+// pages carried the same unguarded one-liner, so the same defect was in all
+// four at once; it lives here now so the guard cannot be true of three of
+// them.
+function num(n) {
+  if (n === null || n === undefined || n === '') return '\u2014';
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toLocaleString() : '\u2014';
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { hasHealth, witnessStale, verdictState };
+  module.exports = { hasHealth, witnessStale, verdictState, num };
 }
