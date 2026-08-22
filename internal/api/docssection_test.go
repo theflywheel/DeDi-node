@@ -77,57 +77,82 @@ func TestADocPageNamesTheSectionItIsIn(t *testing.T) {
 	}
 }
 
-// The label must sit above the document's own title, inside the article -- an
-// eyebrow that follows the h1 is not an eyebrow, it is a stray line of small
-// caps, and one rendered outside <main> is in the contents column.
+// The label must sit above the document's own title, inside the article, and
+// there must be exactly one of it.
 //
-// Byte offsets in the whole page cannot tell either of those apart: moving the
-// label ahead of the sidebar keeps it earlier in the document than the h1 while
-// putting it in the wrong column entirely. This asks the parsed tree instead.
+// Byte offsets in the whole page could not tell "before the title" apart from
+// "in the contents column", so this reads the parsed tree. Taking merely the
+// first .eyebrow and the first h1 is not enough either: an <h1 class="eyebrow">
+// is a single node that satisfies both, and a stray second label lower in the
+// article satisfies neither test while being obviously wrong. So: exactly one,
+// not a heading, and a preceding sibling of the title under the same parent.
+//
+// Run over every filed page, not one -- a layout that only breaks on the pages
+// with long titles is still broken.
 func TestTheSectionLabelSitsAboveTheTitleInsideTheArticle(t *testing.T) {
 	srv, _, _ := testServer(t)
-	doc := parsePage(t, srv.URL+"/docs/witnessing")
+	for _, slug := range readingOrder() {
+		doc := parsePage(t, srv.URL+"/docs/"+slug)
 
-	var eyebrow, h1 *html.Node
-	var order []string
-	walk(doc, func(n *html.Node) {
-		if n.Type != html.ElementNode {
-			return
+		var labels []*html.Node
+		var h1 *html.Node
+		walk(doc, func(n *html.Node) {
+			if n.Type != html.ElementNode {
+				return
+			}
+			if hasClass(n, "eyebrow") {
+				labels = append(labels, n)
+			}
+			if n.Data == "h1" && h1 == nil {
+				h1 = n
+			}
+		})
+		if len(labels) != 1 {
+			t.Errorf("/docs/%s carries %d section labels, want exactly 1", slug, len(labels))
+			continue
 		}
-		if hasClass(n, "eyebrow") && eyebrow == nil {
-			eyebrow = n
-			order = append(order, "eyebrow")
+		label := labels[0]
+		if h1 == nil {
+			t.Errorf("/docs/%s has no title", slug)
+			continue
 		}
-		if n.Data == "h1" && h1 == nil {
-			h1 = n
-			order = append(order, "h1")
+		if label == h1 {
+			t.Errorf("/docs/%s puts the label ON the title; there is no separate label", slug)
+			continue
 		}
-	})
-	if eyebrow == nil {
-		t.Fatal("the page does not name its section")
-	}
-	if h1 == nil {
-		t.Fatal("the page has no title")
-	}
-	if len(order) < 2 || order[0] != "eyebrow" {
-		t.Errorf("the section label renders after the page title: %v", order)
-	}
-	// walk is document order, so the eyebrow coming first is necessary but not
-	// sufficient: it must also be in the article rather than the contents.
-	if !ancestorWith(eyebrow, "toc") {
-		// good -- but say what we actually require, positively:
-		inMain := false
-		for p := eyebrow.Parent; p != nil; p = p.Parent {
-			if p.Type == html.ElementNode && p.Data == "main" {
-				inMain = true
+		switch label.Data {
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			t.Errorf("/docs/%s renders the label as <%s>, which puts it in the document outline",
+				slug, label.Data)
+		}
+		if label.Parent != h1.Parent {
+			t.Errorf("/docs/%s puts the label and the title in different containers", slug)
+			continue
+		}
+		// Preceding sibling: walk forward from the label and expect to meet the
+		// title. "Above" is a relationship, not a byte offset.
+		before := false
+		for n := label.NextSibling; n != nil; n = n.NextSibling {
+			if n == h1 {
+				before = true
 				break
 			}
 		}
-		if !inMain {
-			t.Error("the section label is not inside the article")
+		if !before {
+			t.Errorf("/docs/%s renders the section label after the page title", slug)
 		}
-	} else {
-		t.Error("the section label renders inside the contents column")
+		inMain := false
+		for p := label.Parent; p != nil; p = p.Parent {
+			if p.Type == html.ElementNode && p.Data == "main" {
+				inMain = true
+			}
+			if p.Type == html.ElementNode && hasClass(p, "toc") {
+				t.Errorf("/docs/%s renders the section label inside the contents column", slug)
+			}
+		}
+		if !inMain {
+			t.Errorf("/docs/%s renders the section label outside the article", slug)
+		}
 	}
 }
 

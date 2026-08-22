@@ -63,15 +63,19 @@ var sections = []section{
 		[]string{"operator-console", "onboarding", "key-rotation", "revocation",
 			"delegation", "push", "discovery", "governance"}},
 	// conformance leads "Against the standard" rather than sitting in "Proving
-	// it". Both sections could take it -- the suite it documents is executable
-	// by a stranger against your node with no credentials, which is squarely
-	// what "Proving it" means -- so the question is not which claim it supports
-	// but which document it is read beside. It answers the same question as
-	// spec-gaps, in the same terms, about the same specification: conformance
-	// is where this node matches, spec-gaps is where it does not. Splitting
-	// that pair across two sections made a reader find half an answer and have
-	// no reason to think there was another half. It goes first because what
-	// matches should be stated before what does not.
+	// it", and the reason is only this: it and spec-gaps are one account of
+	// this node against one specification, split in two. conformance walks the
+	// surfaces and records what each does -- matches and divergences both, its
+	// summary table has columns for either -- and spec-gaps enumerates what the
+	// standard asks for and this node does not do. A reader who found one of
+	// them in a different section from the other had no reason to think there
+	// was a second half. conformance goes first because it is the wider of the
+	// two.
+	//
+	// Two earlier versions of this comment justified the move by claiming
+	// something about who can check what, and both were false in different
+	// ways. Neither claim was needed: where a document is filed is a question
+	// about what it is read beside.
 	{"Proving it", "The parts that make a claim checkable by someone who does not trust you.",
 		[]string{"witnessing", "file-publication"}},
 	{"Against the standard", "Where this node and the specification agree, and where they do not.",
