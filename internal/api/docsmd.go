@@ -54,13 +54,32 @@ var sections = []section{
 		[]string{"why", "design"}},
 	{"Running a node", "Getting one up, and choosing what it does.",
 		[]string{"railway-template", "deployment-modes", "replication"}},
+	// delegation stays here, against the design canvas, which files it beside
+	// replication as a topology choice. It is a write the console makes, like
+	// onboarding and revocation, and a reader looking for how to delegate looks
+	// where the other writes are. That it also changes the shape of the network
+	// is a consequence of the write, not a second home for the document.
 	{"Operating it", "The console, and every write it can make.",
 		[]string{"operator-console", "onboarding", "key-rotation", "revocation",
 			"delegation", "push", "discovery", "governance"}},
+	// conformance leads "Against the standard" rather than sitting in "Proving
+	// it", and the reason is only this: it and spec-gaps are one account of
+	// this node against one specification, split in two. conformance walks the
+	// surfaces and records what each does -- matches and divergences both, its
+	// summary table has columns for either -- and spec-gaps enumerates what the
+	// standard asks for and this node does not do. A reader who found one of
+	// them in a different section from the other had no reason to think there
+	// was a second half. conformance goes first because it is the wider of the
+	// two.
+	//
+	// Two earlier versions of this comment justified the move by claiming
+	// something about who can check what, and both were false in different
+	// ways. Neither claim was needed: where a document is filed is a question
+	// about what it is read beside.
 	{"Proving it", "The parts that make a claim checkable by someone who does not trust you.",
-		[]string{"witnessing", "file-publication", "conformance"}},
+		[]string{"witnessing", "file-publication"}},
 	{"Against the standard", "Where this node and the specification agree, and where they do not.",
-		[]string{"reference-schemas", "spec-gaps", "beckn-demo"}},
+		[]string{"conformance", "spec-gaps", "reference-schemas", "beckn-demo"}},
 }
 
 var (
@@ -79,6 +98,34 @@ func readingOrder() []string {
 		out = append(out, sec.Slugs...)
 	}
 	return out
+}
+
+// docSectionOf names the section a page sits in, or "" if it sits in none.
+func docSectionOf(slug string) string {
+	for _, sec := range sections {
+		for _, s := range sec.Slugs {
+			if s == slug {
+				return sec.Name
+			}
+		}
+	}
+	return ""
+}
+
+// docEyebrow labels the page with the section it belongs to.
+//
+// The design canvas drew a breadcrumb here reading "Proving it / Witnessing
+// 1 of 2". The page title is already the second half of that path, and the
+// sidebar beside it already marks where the reader is, so the only part that
+// says something new is the section name. The counter says less than it looks
+// like it does: these are grouped documents, not a numbered course, and
+// "1 of 2" invites a reader to think they have finished half of something.
+func docEyebrow(slug string) string {
+	name := docSectionOf(slug)
+	if name == "" {
+		return ""
+	}
+	return `<p class="eyebrow">` + html.EscapeString(name) + `</p>`
 }
 
 // docSidebar renders the whole contents with the current page marked.
@@ -371,10 +418,11 @@ func (s *Server) docLayout(title, body string) string {
 // docLayoutAt renders a page that knows where it sits in the documentation.
 func (s *Server) docLayoutAt(slug, title, body string) string {
 	docs, _ := loadDocs()
-	side, pn := "", ""
+	side, pn, eyebrow := "", "", ""
 	if docs != nil && slug != "" {
 		side = docSidebar(slug, docs)
 		pn = docPrevNext(slug, docs)
+		eyebrow = docEyebrow(slug)
 	}
 	return `<!doctype html>
 <html lang="en">
@@ -422,6 +470,8 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
   .toc .sec:first-child { margin-top: 0; }
   .toc a, .toc .here { display: block; padding: .12em 0; }
   .toc .here { font-weight: bold; border-left: 2px solid var(--wit); padding-left: .5em; margin-left: -.6em; }
+  .eyebrow { color: var(--mut); text-transform: uppercase; letter-spacing: .06em;
+             font-size: .78em; margin: 0 0 .2em; }
   .pn { display: flex; justify-content: space-between; gap: 1em; margin-top: 2.5em;
         border-top: 1px solid #ddd; padding-top: .8em; font-size: .95em; }
   .pn span { flex: 1 1 0; }
@@ -436,7 +486,7 @@ func (s *Server) docLayoutAt(slug, title, body string) string {
 </head>
 <body>
 ` + s.nav("/docs") + `
-<div class="` + docClass(side) + `">` + side + `<main>` + body + pn + `
+<div class="` + docClass(side) + `">` + side + `<main>` + eyebrow + body + pn + `
 <p class="back"><a href="/docs">← All documentation</a></p>
 </main></div>
 ` + mermaidRuntime(body) + `</body>
