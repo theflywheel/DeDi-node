@@ -3,3 +3,4 @@ keys/
 *.key
 .env
 .superpowers/
+/dedid
