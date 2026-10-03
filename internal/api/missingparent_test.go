@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
@@ -15,30 +16,34 @@ import (
 // answer must say which parent (#70). It was a 500 with no detail.
 func TestAWriteUnderAMissingParentSaysWhichParent(t *testing.T) {
 	create := publisher.Precondition{IfNoneMatch: "*"}
-	// Missing registry: the namespace exists.
-	seeded, s, priv := writeServer(t, "flywheel")
-	seedBasic(t, s)
-	// Missing namespace: the key is scoped to flywheel, so it has to be a
-	// flywheel that was never created, not some other name (that is a 403).
-	empty, _, priv2 := writeServer(t, "flywheel")
-	for _, c := range []struct {
-		srv                         *httptest.Server
-		key                         ed25519.PrivateKey
-		method, path, body, missing string
-	}{
-		{seeded, priv, "POST", "/admin/namespaces/flywheel/registries/nope/records/x/publish", `{"payload":{"a":1}}`, `registry flywheel/nope`},
-		{empty, priv2, "PUT", "/admin/namespaces/flywheel/registries/r", `{"payload":{"description":"d","schema":{"type":"object"}}}`, `namespace "flywheel"`},
-	} {
-		srv, priv := c.srv, c.key
-		resp := signedDo(t, srv, priv, c.method, c.path, []byte(c.body), create)
-		var body struct{ Error, Code string }
-		json.NewDecoder(resp.Body).Decode(&body)
+	check := func(srv *httptest.Server, key ed25519.PrivateKey, method, path, body, missing string) {
+		t.Helper()
+		resp := signedDo(t, srv, key, method, path, []byte(body), create)
+		var b struct{ Error, Code string }
+		json.NewDecoder(resp.Body).Decode(&b)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusNotFound || body.Code != "NOT_FOUND" {
-			t.Errorf("%s %s: %d %s, want 404 NOT_FOUND", c.method, c.path, resp.StatusCode, body.Code)
+		if resp.StatusCode != http.StatusNotFound || b.Code != "NOT_FOUND" {
+			t.Errorf("%s %s: %d %s, want 404 NOT_FOUND", method, path, resp.StatusCode, b.Code)
 		}
-		if !strings.Contains(body.Error, c.missing) {
-			t.Errorf("%s %s: error %q does not name the missing parent %q", c.method, c.path, body.Error, c.missing)
+		if !strings.Contains(b.Error, missing) {
+			t.Errorf("%s %s: error %q does not name the missing parent %q", method, path, b.Error, missing)
 		}
 	}
+
+	// Missing namespace. The key is scoped to flywheel, so it has to be a
+	// flywheel that was never created; any other name is a 403. Runs first:
+	// every test server truncates the shared database when it starts, so a
+	// server created after seeding would wipe the seed.
+	empty, _, k1 := writeServer(t, "flywheel")
+	check(empty, k1, "PUT", "/admin/namespaces/flywheel/registries/r",
+		`{"payload":{"description":"d","schema":{"type":"object"}}}`, `namespace "flywheel"`)
+
+	// Missing registry under a namespace that exists, the case #70 names.
+	seeded, s, k2 := writeServer(t, "flywheel")
+	seedBasic(t, s)
+	if _, err := s.Resolve(context.Background(), "namespace", "flywheel", "", "", nil, nil); err != nil {
+		t.Fatalf("the namespace this case depends on is not there: %v", err)
+	}
+	check(seeded, k2, "POST", "/admin/namespaces/flywheel/registries/nope/records/x/publish",
+		`{"payload":{"a":1}}`, `registry flywheel/nope`)
 }
