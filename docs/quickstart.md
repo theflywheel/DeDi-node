@@ -15,7 +15,7 @@ docker network create dedi-net
 docker run -d --name dedi-pg --network dedi-net \
   -e POSTGRES_USER=dedi -e POSTGRES_PASSWORD=dedi -e POSTGRES_DB=dedi \
   postgres:16-alpine
-until docker exec dedi-pg pg_isready -U dedi -q; do sleep 1; done
+until docker exec dedi-pg pg_isready -h 127.0.0.1 -U dedi -q; do sleep 1; done
 
 docker run -d --name dedi-node --network dedi-net -p 8080:8080 \
   -e DATABASE_URL='postgres://dedi:dedi@dedi-pg:5432/dedi?sslmode=disable' \
@@ -148,7 +148,11 @@ resolvable with `?version_id=<id>` from the versions list.
 
 ```sh
 docker rm -f dedi-node dedi-pg && docker network rm dedi-net
+rm -f publisher.key headers.txt ns.json reg.json alice.json
 ```
+
+`pubkeygen` refuses to overwrite an existing `publisher.key`, so remove it
+before running the quickstart again.
 
 ## Next
 

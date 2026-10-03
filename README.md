@@ -16,7 +16,7 @@ walks through it end to end, including a first signed write:
     docker network create dedi-net
     docker run -d --name dedi-pg --network dedi-net \
       -e POSTGRES_USER=dedi -e POSTGRES_PASSWORD=dedi -e POSTGRES_DB=dedi postgres:16-alpine
-    until docker exec dedi-pg pg_isready -U dedi -q; do sleep 1; done
+    until docker exec dedi-pg pg_isready -h 127.0.0.1 -U dedi -q; do sleep 1; done
     docker run -d --name dedi-node --network dedi-net -p 8080:8080 \
       -e DATABASE_URL='postgres://dedi:dedi@dedi-pg:5432/dedi?sslmode=disable' \
       -e DEDI_ORIGIN=localhost/log flywheelai/dedi-node:latest
@@ -62,7 +62,7 @@ Note: a stock ONIX adapter pins the registry URL to `fabric.nfh.global` via a si
 
 ## Live demo
 
-Three independently operated nodes carry the `beckn-testnet` registry, arranged in a witness ring
+Three independently operated nodes form a witness ring, and node A carries the `beckn-testnet` registry. The ring is arranged
 — A watches B, B watches C, C watches A — so every node is watched by another and none is
 privileged. Each node has its own identity key, its own Postgres and its own log; they are separate
 operators, not replicas. Every node's explorer shows the whole network and which peers are up.

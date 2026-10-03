@@ -149,10 +149,16 @@ on every route.
 | 428 | `PRECONDITION_REQUIRED` | a write that needs a precondition sent none |
 | 500 | `INTERNAL` | a fault on the node |
 
-On a [replicated](replication.md) node only the leader writes. **Every** write
-that reaches a follower, domain verification included, is answered
+On a [replicated](replication.md) node only the leader writes. 
+Most writes that reach a follower, domain verification included, are answered
 `307 Temporary Redirect` to the same path on the leader, method and body
-intact, so a client that follows redirects needs no cluster awareness. When
+intact, so a client that follows redirects needs little cluster awareness. The
+exceptions are writes that first look up existing state on the replica they
+reached (record revocation, webhook subscription create and delete, child
+minting and revocation, and enrolment): a follower that has not yet applied
+that state answers from its own copy, typically `404` (or `409`/`401` for the
+child and enrolment routes), instead of redirecting. Retry those against the
+leader. When
 there is no leader, or the leader's public URL is not configured in
 `DEDI_CLUSTER_PEERS`, the follower answers `503` with code `NO_LEADER` and
 `Retry-After: 2`. Reads are served by every replica.

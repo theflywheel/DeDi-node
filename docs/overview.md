@@ -31,7 +31,8 @@ written, and it does not keep history tamper-evident. This node adds both.
 **Extensions**
 
 - **A signed write plane.** 13 `/admin` routes; every write is Ed25519-signed by
-  a publisher key scoped to one namespace, with a mandatory precondition so a
+  a publisher key scoped to one namespace; namespace, registry and record writes
+  also carry a mandatory precondition so a
   replay or a race fails instead of overwriting ([operator console](operator-console.md)).
 - **A Merkle log.** Every version is a leaf of an RFC 6962 tree; the node signs
   C2SP checkpoints, and any lookup can carry an inclusion proof. Consistency
