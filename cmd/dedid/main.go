@@ -344,7 +344,7 @@ func openStore(ctx context.Context) (*store.Store, error) {
 }
 
 // nodeKey resolves the identity key that signs this node's checkpoints, and
-// returns it with its verifier key when that is known.
+// returns it with its verifier key.
 //
 // Three sources, in descending order of how explicitly the operator asked for
 // them: DEDI_KEY, a key file, and failing both, the node's own database. The
@@ -354,10 +354,8 @@ func openStore(ctx context.Context) (*store.Store, error) {
 // first install Go". The key is generated once and kept, so the node keeps the
 // identity its existing checkpoints were signed under.
 //
-// The verifier key comes back empty for the explicit sources: a note private
-// key does not carry its public half in a form we can recover without
-// reimplementing the note format, and operators supplying their own key already
-// have the verifier key that keygen printed alongside it.
+// Every source yields the verifier key: the explicit ones derive it from the
+// private key (withVerifier).
 func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey string, err error) {
 	if k := strings.TrimSpace(os.Getenv("DEDI_KEY")); k != "" {
 		return withVerifier(k)
@@ -413,10 +411,6 @@ func nodeKey(ctx context.Context, s *store.Store, origin string) (skey, vkey str
 	if skey == candidateSKey {
 		log.Printf("generated node identity for origin %s", origin)
 	}
-	// Printed on every boot, not just the first: this is the key third parties
-	// need to verify this node's checkpoints, and an operator who did not
-	// capture it at creation has no other way to recover it.
-	log.Printf("node verifier key (distribute to clients and witnesses):\n%s", vkey)
 	return skey, vkey, nil
 }
 
@@ -515,6 +509,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	// Printed on every boot and for every key source, not just a minted one:
+	// it is the key third parties need to verify this node's checkpoints, and
+	// an operator wiring a witness should not have to find it on the / page (#88).
+	log.Printf("node verifier key (distribute to clients and witnesses):\n%s", vkey)
 	interval, err := time.ParseDuration(envOr("DEDI_CHECKPOINT_INTERVAL", "30s"))
 	if err != nil {
 		return fmt.Errorf("DEDI_CHECKPOINT_INTERVAL: %w", err)
@@ -675,10 +673,6 @@ func serve() error {
 		return fmt.Errorf("DEDI_STATS_FLUSH_INTERVAL must be positive")
 	}
 
-	// A node that minted its own key already knows its verifier key, so the
-	// explorer can show it without the operator copying it back in by hand.
-	// An explicit DEDI_VERIFIER_KEY still wins, since only the operator knows
-	// the public half of a key they supplied themselves.
 	// The other nodes carrying this network. Observing them is a different and
 	// weaker thing than witnessing one of them: this only establishes that a
 	// peer answered, which is what a network overview should claim and no more.
@@ -736,7 +730,7 @@ func serve() error {
 		// because /status can only report what this node signed and must not
 		// imply that somebody independent is checking it is up.
 		StatusURL:    os.Getenv("DEDI_EXTERNAL_STATUS_URL"),
-		AdminAuth:    adminAuth(keys != nil),
+		AdminAuth:    adminAuth(keys.Len() > 0),
 		PublicURL:    publicURL,
 		OnDelegation: func(rec delegation.Record) { childSup.Apply(ctx, rec) },
 		// Off unless the operator says otherwise: the node fetches webhook

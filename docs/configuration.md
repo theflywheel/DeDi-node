@@ -31,7 +31,7 @@ syntax (`30s`, `5m`, `1h`).
 | `DEDI_PUBLISHER_KEYS` | — | `kid:namespace:base64pubkey` entries, comma or whitespace separated, from `dedid pubkeygen`. Unset: no write routes and no `/admin` at all (404). Set: the 13 signed `/admin` routes exist. Each key may write only its own namespace. Append to the list; replacing it revokes every other key. |
 | `DEDI_WILDCARD_NAMESPACES` | — | Comma-separated namespaces allowed to answer the Beckn wildcard lookup (`…/subscribers.beckn.one/{key_id}`) and `?domain=` discovery. Set it only if this node serves the Beckn ONIX registry lookup. On a node with no publisher keys, unset means every namespace may answer. |
 | `DEDI_ADMIN_USER` | `admin` | HTTP Basic user for `/admin` and every write route. |
-| `DEDI_ADMIN_PASSWORD` | — | Turns that Basic-auth gate on. Unset, the node logs a warning on every boot, including a read-only node that has no write routes for it to guard. The publisher signature is still required either way. |
+| `DEDI_ADMIN_PASSWORD` | — | Turns that Basic-auth gate on. Unset on a node with publisher keys, the node logs a warning on every boot. A read-only node has no write routes for it to guard and logs nothing. The publisher signature is still required either way. |
 
 ## Witnessing and the network view
 
