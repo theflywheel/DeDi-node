@@ -66,16 +66,20 @@ func TestAnIneligibleNamespaceCannotAnswerAnONIXIdentityLookup(t *testing.T) {
 		[]byte(`{"payload":{"subscriber_id":"bpp.acme.example","type":"BPP","url":"https://attacker.example/beckn",`+
 			`"signing_public_key":"g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo=","network_memberships":["beckn.one/testnet"]}}`))
 
-	// The exact three-part path ONIX's LookupNode uses.
-	resp, err := http.Get(srv.URL + "/dedi/lookup/bpp.acme.example/subscribers.beckn.one/KEY-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		var body map[string]any
-		json.NewDecoder(resp.Body).Decode(&body)
-		t.Fatalf("ineligible namespace answered an identity lookup: %d %v", resp.StatusCode, body)
+	// The exact three-part path ONIX's LookupNode uses, and the same question
+	// asked "as on" today or later: that is still a question about now, not
+	// history (#69), so it gets the same answer.
+	for _, q := range []string{"", "?as_on=" + time.Now().UTC().Format(time.DateOnly), "?as_on=2100-01-01T00:00:00Z"} {
+		resp, err := http.Get(srv.URL + "/dedi/lookup/bpp.acme.example/subscribers.beckn.one/KEY-1" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			var body map[string]any
+			json.NewDecoder(resp.Body).Decode(&body)
+			t.Errorf("ineligible namespace answered an identity lookup%s: %d %v", q, resp.StatusCode, body)
+		}
+		resp.Body.Close()
 	}
 }
 

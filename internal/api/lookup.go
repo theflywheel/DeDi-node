@@ -68,9 +68,9 @@ func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 		versionID = &n
 	}
 	if v := q.Get("as_on"); v != "" {
-		t, err := time.Parse(time.RFC3339Nano, v)
+		t, err := parseDateParam("as_on", v, true)
 		if err != nil {
-			return nil, nil, errors.New("as_on must be an RFC 3339 timestamp")
+			return nil, nil, err
 		}
 		asOn = &t
 	}
@@ -143,8 +143,9 @@ const becknWildcardRegistry = "subscribers.beckn.one"
 // check only binds where it has something to protect against.
 //
 // This governs the unversioned read — what a subscriber binds to *now*, which
-// is what routing consumes. Asking for a specific version or an as-on time is
-// reading history, and history is not an identity claim.
+// is what routing consumes. Asking for a specific version or a settled as-on
+// time (settledRead) is reading history, and history is not an identity claim.
+// as_on=<today> is not history: it is a "now" read and gets the same check.
 func (s *Server) becknNamespaceEligible(ns string) bool {
 	if s.WildcardNamespaces == nil {
 		return true
@@ -172,7 +173,7 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, vid, asOn)
-	if reg == becknWildcardRegistry && vid == nil && asOn == nil {
+	if reg == becknWildcardRegistry && !settledRead(vid, asOn, time.Now()) {
 		// An exact hit here used to be returned whatever namespace it sat in,
 		// so the eligibility allowlist only ever guarded the fallback. With the
 		// write plane open that is a hole: a publisher scoped to a namespace
@@ -221,21 +222,48 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 // its signatures validated, indefinitely. Only a non-200 stops it.
 //
 // History stays fully reachable, because this only gates the "what is it now"
-// read. A version-pinned read (?version_id= / ?as_on=) is a question about the
-// past and still answers, as does ?include_revoked=true and /dedi/versions.
-// Nothing is hidden — only the live binding is withdrawn.
+// read. A read about a settled past (see settledRead) still answers, as does
+// ?include_revoked=true and /dedi/versions. Nothing is hidden — only the live
+// binding is withdrawn.
 func revokedAndUnresolvable(r *http.Request, e store.Entry, vid *int64, asOn *time.Time) bool {
-	if e.State != "revoked" || vid != nil || asOn != nil {
+	if e.State != "revoked" || settledRead(vid, asOn, time.Now()) {
 		return false
 	}
 	return r.URL.Query().Get("include_revoked") != "true"
 }
 
+// settleMargin is how far behind now an as_on must be before its answer is
+// treated as final. A write's created_at is stamped by the proposer before the
+// log commits it, so a version can still land with a created_at a little in
+// the past.
+//
+// It is a margin, not a guarantee. It does not cover a follower that is
+// further behind the leader than this (followers still serve reads), or a
+// proposer whose clock runs behind this node's by more than this. Either can
+// let a settled read miss a version that is already committed, and that answer
+// is then cached as immutable.
+//
+// ponytail: fixed margin; gate immutability on the replica having applied the
+// leader's commit index if lagging followers turn out to serve these reads.
+const settleMargin = time.Minute
+
+// settledRead reports whether a lookup is about a past that can no longer
+// change: a pinned version, or an as_on far enough behind now.
+//
+// "Has an as_on" used to stand in for this. It is not the same thing: as_on is
+// any instant, including today's date read as its last microsecond (#69) or
+// a year in the future, and the answer to those still moves with the next
+// write. Treating them as settled cached that answer as immutable for a year
+// and waived the revocation gate on what is really a "what is it now" read.
+func settledRead(vid *int64, asOn *time.Time, now time.Time) bool {
+	return vid != nil || (asOn != nil && asOn.Before(now.Add(-settleMargin)))
+}
+
 // setCacheHeaders emits ETag/Cache-Control and answers 304 when the caller
 // already holds the current version (design.md §5.4).
 //
-// A version-pinned read (?version_id= / ?as_on=) can never change, so it is
-// immutable and cacheable for a long time. A latest-version read must stay
+// A settled read (settledRead) can never change, so it is immutable and
+// cacheable for a long time. A latest-version read must stay
 // short-lived: it is how a revocation reaches a consumer.
 //
 // This governs HTTP caches and proxies. It does NOT govern the ONIX
@@ -245,7 +273,9 @@ func revokedAndUnresolvable(r *http.Request, e store.Entry, vid *int64, asOn *ti
 // Returns true when it has written a 304 and the caller should stop.
 func (s *Server) setCacheHeaders(w http.ResponseWriter, r *http.Request, e store.Entry) bool {
 	q := r.URL.Query()
-	pinned := q.Get("version_id") != "" || q.Get("as_on") != ""
+	// The handler has already parsed and validated these; this cannot fail.
+	vid, asOn, _ := parseLookupParams(r)
+	pinned := settledRead(vid, asOn, time.Now())
 
 	// The digest covers the payload; state and the proof mode are not in it but
 	// do change the response, so they are part of the tag.

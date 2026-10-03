@@ -127,7 +127,7 @@ reason. Nodes do not replicate each other's records — each keeps its own key, 
 federation beyond witnessing is an explicit non-goal (design.md &sect;3).</p>
 <p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
 signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
-<code>?as_on=</code> resolves the record as of an RFC&nbsp;3339 timestamp. Example against the public
+<code>?as_on=</code> resolves the record as of a date (<code>YYYY-MM-DD</code>, the close of that day in UTC) or an RFC&nbsp;3339 timestamp. Example against the public
 reference node (seeded with Beckn identities; on your own node, use your host and a record you seeded):</p>
 <pre><code>curl -s "https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
 
