@@ -102,7 +102,7 @@ The write is a conditional upsert. Read the record's current version tag and
 send it as `-if-match`; send `-create` when it does not exist yet:
 
 ```sh
-t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r .data.version_tag)
+t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r '.data.version_tag // empty')
 [ -n "$t" ] && pre="-if-match $t" || pre="-create"
 ```
 
