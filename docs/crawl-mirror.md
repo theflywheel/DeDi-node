@@ -24,7 +24,7 @@ or link-local address is refused unless `DEDI_ALLOW_PRIVATE_WEBHOOK_TARGETS=true
 
 ## What a crawl checks
 
-For each domain, all of this or nothing is ingested:
+For each domain, every check below runs before anything is ingested:
 
 1. fetch `/.well-known/dedi.index.json` and verify the manifest's own JWS;
 2. refuse it if `next_update` is in the past;
@@ -39,8 +39,11 @@ For each domain, all of this or nothing is ingested:
    with the last key is what catches a takeover. The node has no command to
    accept a new key: the domain stays stopped until the pin is changed.
 
-All-or-nothing because a partial crawl would leave a copy that disagrees with
-the manifest that vouched for it.
+Verification is all-or-nothing, because a partial crawl would leave a copy that
+disagrees with the manifest that vouched for it. Ingestion itself is not: files
+are appended one at a time, so if a later file is refused at ingest time (for
+example, it names a namespace this node owns), the files before it have already
+been written.
 
 ## What gets stored
 

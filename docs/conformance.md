@@ -65,8 +65,9 @@ every claimed profile passed; `--format junit` or `--format json` for CI.
 The source tree also carries `conformance/`, a separate Go module so the node
 itself builds without it. It parses the vendored `openapi.yaml` at test time
 (no hand-copied route list), runs the node's handler in-process against seeded
-fixtures, and asserts every spec path resolves, every documented parameter is
-accepted, every `required` response property is present, and the envelope is
+fixtures, and asserts every spec path resolves, every documented parameter that has an
+enum or a date format is accepted (free-form ones like `version_id`, `name`,
+`page` are not exercised there), every `required` response property is present, and the envelope is
 `{message, data}`. `TestAllSpecPathsAreClassified` fails the build when the
 pinned spec grows a path nobody has classified. `TestAgainstTheStandardSuite`
 runs the published suite above against that in-process node (claiming core,

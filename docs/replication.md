@@ -208,7 +208,11 @@ leader's public URL. 307 rather than 308 or 302 because the method and body
 must survive — the body is what the publisher signed — and because leadership
 moves, so the redirect must not be cacheable as permanent. A follower never
 decides a write from its own replica, not even "unchanged" or "already
-revoked", because its copy may trail the leader.
+revoked", because its copy may trail the leader. Three writes are the exception
+today: record revocation and creating or deleting a webhook subscription first
+look up the record, registry or subscription on the replica they reached, so on
+a follower that has not yet applied it they answer `404` rather than redirect.
+Retrying against the leader works.
 
 It answers `503` with `Retry-After: 2` and code `NO_LEADER` instead in two
 cases: during an election, when there is briefly no leader (a second or two,

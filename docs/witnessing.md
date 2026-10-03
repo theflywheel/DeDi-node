@@ -168,8 +168,8 @@ checkpoint, exactly:
 curl -s https://node-b.example/dedi/log/checkpoint | head -1
 ```
 
-Get the key from the target operator. The target also prints it on every boot
-and shows it on its `/` page, in the note format this variable takes (the
+Get the key from the target operator. The target shows it on its `/` page (and
+prints it in its boot log when it minted its own key), in the note format this variable takes (the
 manifest at `/.well-known/dedi.index.json` carries the same public key as a
 JWK, which is a different encoding). Verifying a checkpoint against a key the target
 handed you over the same connection proves nothing about the target; it proves

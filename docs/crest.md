@@ -52,9 +52,10 @@ the node. Anyone can fetch that URL and check it with no CREST code at all.
 ## What CREST checks itself
 
 An inclusion proof says a record is in the log at the root the node serves
-today. It does not say the log was not rewritten to produce that root. So
-CREST also consumes the rest of what the node offers, in its `pkg/dedi`
-package:
+today. It does not say the log was not rewritten to produce that root. The
+rest of what the node offers closes that gap, and CREST is adding it to its
+`pkg/dedi` package in an open change (CREST pull request #242), not yet on its
+main branch. Once merged:
 
 - **Checkpoints, authenticated.** It verifies each checkpoint against the
   node's verifier key with the same `sumdb/note` code the node signs with.
