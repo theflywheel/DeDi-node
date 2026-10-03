@@ -143,8 +143,9 @@ const becknWildcardRegistry = "subscribers.beckn.one"
 // check only binds where it has something to protect against.
 //
 // This governs the unversioned read — what a subscriber binds to *now*, which
-// is what routing consumes. Asking for a specific version or an as-on time is
-// reading history, and history is not an identity claim.
+// is what routing consumes. Asking for a specific version or a settled as-on
+// time (settledRead) is reading history, and history is not an identity claim.
+// as_on=<today> is not history: it is a "now" read and gets the same check.
 func (s *Server) becknNamespaceEligible(ns string) bool {
 	if s.WildcardNamespaces == nil {
 		return true
@@ -172,7 +173,7 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, err := s.Store.Resolve(r.Context(), "record", ns, reg, rec, vid, asOn)
-	if reg == becknWildcardRegistry && vid == nil && asOn == nil {
+	if reg == becknWildcardRegistry && !settledRead(vid, asOn, time.Now()) {
 		// An exact hit here used to be returned whatever namespace it sat in,
 		// so the eligibility allowlist only ever guarded the fallback. With the
 		// write plane open that is a hole: a publisher scoped to a namespace
@@ -232,12 +233,18 @@ func revokedAndUnresolvable(r *http.Request, e store.Entry, vid *int64, asOn *ti
 }
 
 // settleMargin is how far behind now an as_on must be before its answer is
-// final. A write's created_at is stamped by the proposer before the log
-// commits it, so a version can still land with a created_at a little in the
-// past.
+// treated as final. A write's created_at is stamped by the proposer before the
+// log commits it, so a version can still land with a created_at a little in
+// the past.
 //
-// ponytail: fixed margin; derive it from observed commit latency if writes
-// ever take longer than this to land.
+// It is a margin, not a guarantee. It does not cover a follower that is
+// further behind the leader than this (followers still serve reads), or a
+// proposer whose clock runs behind this node's by more than this. Either can
+// let a settled read miss a version that is already committed, and that answer
+// is then cached as immutable.
+//
+// ponytail: fixed margin; gate immutability on the replica having applied the
+// leader's commit index if lagging followers turn out to serve these reads.
 const settleMargin = time.Minute
 
 // settledRead reports whether a lookup is about a past that can no longer

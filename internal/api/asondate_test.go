@@ -113,3 +113,31 @@ func TestAnAsOnThatHasNotHappenedYetIsTreatedAsNow(t *testing.T) {
 	getJSON(t, base+"?as_on="+settled, http.StatusOK)
 	getJSON(t, base+"?as_on="+today+"&include_revoked=true", http.StatusOK)
 }
+
+// A settled as_on that lands on a revoked version answers it, as history.
+//
+// This is what lets a verifier check a signature made last week by a key
+// revoked last week. The test above revokes "now", so its settled read lands
+// on a live version and would pass even if every as_on of a revoked record
+// were gated.
+func TestASettledAsOnStillAnswersARevokedVersion(t *testing.T) {
+	srv, s, _ := testServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, in := range []store.AppendInput{
+		{EntryType: "namespace", Namespace: "flywheel", PayloadRaw: []byte(`{"description":"d"}`), CreatedAt: now.Add(-200 * time.Hour)},
+		{EntryType: "registry", Namespace: "flywheel", Registry: "participants", PayloadRaw: []byte(`{"description":"r","schema":{"type":"object"}}`), CreatedAt: now.Add(-200 * time.Hour)},
+		{EntryType: "record", Namespace: "flywheel", Registry: "participants", RecordName: "bpp", PayloadRaw: []byte(`{"k":"v1"}`), CreatedAt: now.Add(-200 * time.Hour)},
+		{EntryType: "record", Namespace: "flywheel", Registry: "participants", RecordName: "bpp", PayloadRaw: []byte(`{"k":"v1"}`), State: "revoked", CreatedAt: now.Add(-100 * time.Hour)},
+	} {
+		in.CreatedBy = "t"
+		if _, err := s.Append(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	day := now.Add(-48 * time.Hour).Format(time.DateOnly) // after the revocation, and over
+	m := getJSON(t, srv.URL+"/dedi/lookup/flywheel/participants/bpp?as_on="+day, http.StatusOK)
+	if st := m["data"].(map[string]any)["state"]; st != "revoked" {
+		t.Errorf("as_on=%s answered state %v, want the revoked version", day, st)
+	}
+}

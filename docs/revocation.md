@@ -24,7 +24,9 @@ This is not squeamishness about data. It is the requirement:
   correct signature permanently unattributable.
 
 So a revoked record still resolves. `include_revoked=true` returns it with its
-state, and `as_on` answers what was true at any instant.
+state, and `as_on` answers what was true at any instant that is over. An
+`as_on` of today, or of a time still ahead, is a question about now: it gets
+the same 404 as a plain read unless it also sends `include_revoked=true`.
 
 ## What downstream actually does with it
 
