@@ -2,7 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,8 +25,39 @@ import (
 // than assuming it.
 var errNoSuchVersion = errors.New("no such version")
 
+// lookupParams is every query key a lookup route reads. Anything else is
+// rejected rather than ignored (#65): ?versionId=2 used to return the latest
+// version with a valid proof attached, and every check a careful client runs
+// passed, because they are all over the record the node chose to return.
+//
+// internal is read by internalNamespaceGuard, not here, so it is easy to miss.
+var lookupParams = map[string]bool{
+	"version_id": true, "as_on": true, "proof": true, "include_revoked": true, "internal": true,
+}
+
 func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
-	q := r.URL.Query()
+	// Not r.URL.Query(): it discards ParseQuery's error along with every
+	// segment that has a ';' or a bad %-escape, so ?versionId=2; never reached
+	// the check below and answered with the latest version all the same.
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, nil, fmt.Errorf("malformed query string: %v", err)
+	}
+	for k, vs := range q {
+		// Every reader below takes the first value, so ?version_id=&version_id=2
+		// would unpin silently, the #65 failure reached through a duplicate.
+		if len(vs) > 1 && lookupParams[k] {
+			return nil, nil, fmt.Errorf("query parameter %q given more than once", k)
+		}
+		if !lookupParams[k] {
+			accepted := make([]string, 0, len(lookupParams))
+			for p := range lookupParams {
+				accepted = append(accepted, p)
+			}
+			sort.Strings(accepted)
+			return nil, nil, fmt.Errorf("unknown query parameter %q; lookups accept %s", k, strings.Join(accepted, ", "))
+		}
+	}
 	var versionID *int64
 	var asOn *time.Time
 	if v := q.Get("version_id"); v != "" {
