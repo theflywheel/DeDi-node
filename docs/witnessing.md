@@ -52,6 +52,17 @@ That last point is the whole design. The witness does not email anyone. It
 writes down what it saw, in a log that is itself append-only and itself
 witnessed, so the evidence outlives the incident and the person who noticed.
 
+The check runs every interval, but a consistent verdict is written at most once
+per `DEDI_WITNESS_RECORD_INTERVAL` (default `1h`; `0` writes every change). An
+alarm is written at once, whatever the interval. Without this a ring floods
+itself: each verdict grows the witness's own tree, its own watcher sees that as
+a change and writes a verdict, and so on round the ring every minute. Between
+written verdicts the witness proves each new checkpoint consistent with the
+last tree it *checked*, held in memory, so a rewrite inside the window is still
+caught. After a restart that memory is gone and it starts again from the last
+written verdict. Child witness loops (see [delegation](delegation.md)) use the
+same setting.
+
 ## The three failures it is built to catch
 
 **The tree shrank.** `size < last` is impossible for an append-only log. No
@@ -81,8 +92,8 @@ forever. Every dashboard reading verdicts stays green while nothing is being
 checked.
 
 Verdict age cannot distinguish the two. A witness writes nothing while its
-target's tree is unchanged, so on a quiet network the newest verdict is
-legitimately hours old.
+target's tree is unchanged, and at most one consistent verdict per record
+interval while it grows, so the newest verdict is legitimately hours old.
 
 So the node reports its own liveness separately, at `/dedi/network`:
 
@@ -112,6 +123,7 @@ DEDI_WITNESS_TARGET_URL=https://node-b.example/dedi     # note the /dedi suffix
 DEDI_WITNESS_TARGET_KEY=<the target's verifier key>     # sumdb/note format
 DEDI_WITNESS_TARGET_ORIGIN=node-b.example/log           # the target's log origin
 DEDI_WITNESS_INTERVAL=60s                               # optional
+DEDI_WITNESS_RECORD_INTERVAL=1h                         # optional
 ```
 
 `DEDI_WITNESS_TARGET_ORIGIN` must equal the first line of the target's

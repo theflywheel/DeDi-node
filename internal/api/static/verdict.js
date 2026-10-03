@@ -70,6 +70,19 @@ function num(n) {
   return Number.isFinite(v) ? v.toLocaleString() : '\u2014';
 }
 
+// writesUnsigned reports entries in the log above the newest signed tree size:
+// writes no checkpoint covers yet. Arguments are the dedi_log_entries and
+// dedi_checkpoint_tree_size metrics; a missing reading is not evidence of
+// anything, so it answers false.
+//
+// This, not the checkpoint's age, is what says the signer is behind. The
+// checkpointer signs only when the tree grows, so on a quiet log an old
+// checkpoint is correct — the DediWritesUnsigned alert rule and the status
+// page both decide by position for that reason, and so must every page.
+function writesUnsigned(entries, signedSize) {
+  return Number.isFinite(entries) && Number.isFinite(signedSize) && entries > signedSize;
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { hasHealth, witnessStale, verdictState, num };
+  module.exports = { hasHealth, witnessStale, verdictState, num, writesUnsigned };
 }

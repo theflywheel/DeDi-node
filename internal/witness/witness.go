@@ -44,6 +44,21 @@ type Witness struct {
 	Interval  time.Duration
 	Client    *http.Client
 
+	// RecordInterval is the least time between two consistent verdicts this
+	// witness appends for the target. Every check still runs every Interval;
+	// only the writing of an "ok" verdict waits. Alarms are never held back.
+	//
+	// It exists because a verdict is itself a log entry. In a ring (A watches
+	// B, B watches C, C watches A) each verdict grows the witness's own tree,
+	// which its own watcher then sees as a change and records, and so on round
+	// the ring for ever: about one verdict per node per check, with nothing
+	// else happening. Zero records every change, which is the old behaviour.
+	RecordInterval time.Duration
+
+	// now is the clock RecordInterval is measured against; nil is time.Now.
+	// Tests swap it rather than sleeping for an hour.
+	now func() time.Time
+
 	// Writer records verdicts. nil writes straight to Store.
 	Writer Appender
 
@@ -58,6 +73,27 @@ type Witness struct {
 
 	mu     sync.Mutex
 	health Health
+
+	// seen is the last tree this witness verified, whether or not it appended
+	// a verdict for it, and recordedAt is when it last appended one. With
+	// RecordInterval the log's newest verdict can lag the tree the witness has
+	// actually checked, so the next consistency proof is asked from seen, not
+	// from the log: a rewrite of anything between the two would otherwise be
+	// invisible until the next appended verdict, and the proof from the older
+	// size would still pass if the rewrite was undone in time.
+	//
+	// Both live only in memory. After a restart (or a leadership change, see
+	// Run) seen is empty and the baseline falls back to the newest verdict in
+	// the log, which is what this witness did before RecordInterval existed;
+	// recordedAt is zero, so the first change after a restart is recorded at
+	// once.
+	seen       *tree
+	recordedAt time.Time
+}
+
+type tree struct {
+	size int64
+	root tlog.Hash
 }
 
 // Result is the outcome of a single verification.
@@ -65,7 +101,49 @@ type Result struct {
 	Size          int64
 	Root          string // base64
 	ConsistencyOK bool
-	Fresh         bool // the target's checkpoint advanced since last time
+	Fresh         bool // this run appended a verdict
+}
+
+func (w *Witness) clock() time.Time {
+	if w.now != nil {
+		return w.now()
+	}
+	return time.Now()
+}
+
+func (w *Witness) baseline() (tree, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.seen == nil {
+		return tree{}, false
+	}
+	return *w.seen, true
+}
+
+// remember stores the tree just verified and, when a verdict was appended for
+// it, when that happened.
+func (w *Witness) remember(t tree, appended bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seen = &t
+	if appended {
+		w.recordedAt = w.clock()
+	}
+}
+
+// recordDue reports whether a consistent verdict may be appended now.
+func (w *Witness) recordDue() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.RecordInterval <= 0 || w.recordedAt.IsZero() || w.clock().Sub(w.recordedAt) >= w.RecordInterval
+}
+
+// forget drops the in-memory baseline, so the next check starts from the log.
+func (w *Witness) forget() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seen = nil
+	w.recordedAt = time.Time{}
 }
 
 func (w *Witness) appender() Appender {
@@ -225,10 +303,13 @@ func (w *Witness) registryPayload() []byte {
 	return b
 }
 
-// VerifyOnce checks the target's latest checkpoint; if it advanced, verifies
-// append-only consistency against the last witnessed state and records the
-// verdict in this node's own log. A detected inconsistency is recorded with
-// state `revoked` so it surfaces as a broken witness.
+// VerifyOnce checks the target's latest checkpoint and, if it advanced,
+// verifies append-only consistency from the last tree this witness verified.
+// An inconsistency is appended to this node's own log at once, with state
+// `revoked` so it surfaces as a broken witness. A consistent verdict is
+// appended only if RecordInterval has passed since the last one; otherwise
+// the check still happened, and the next appended verdict covers it, because
+// every check in between proved consistency from the one before.
 func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	size, root, err := w.verifyCheckpoint(ctx)
 	if err != nil {
@@ -245,7 +326,32 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	if err := w.ensureParents(ctx); err != nil {
 		return Result{}, err
 	}
-	last, lastRoot, have := w.lastWitnessed(ctx)
+	logSize, logRoot, logged := w.lastWitnessed(ctx)
+
+	// The baseline is the last tree verified in memory if there is one, else
+	// the newest verdict in the log (first run, or after a restart).
+	base, have := w.baseline()
+	if !have && logged {
+		base, have = tree{logSize, logRoot}, true
+	}
+
+	alarm := func(detail string) (Result, error) {
+		p := map[string]any{"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": false}
+		if detail != "" {
+			p["detail"] = detail
+		}
+		payload, _ := json.Marshal(p)
+		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS,
+			Registry: w.Origin, RecordName: "checkpoint", PayloadRaw: payload, State: "revoked",
+			CreatedBy: "witness"}); err != nil {
+			return Result{}, err
+		}
+		// The alarmed tree becomes the baseline, as the logged verdict always
+		// was: a target that keeps serving it raises one alarm, not one per
+		// check, and any further change is judged against it.
+		w.remember(tree{size, root}, true)
+		return Result{Size: size, Root: rootB64, ConsistencyOK: false, Fresh: true}, nil
+	}
 
 	// An unchanged tree is only unchanged if its root still agrees. Returning
 	// early on size alone accepted the one attack that needs no growth at all:
@@ -254,66 +360,57 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 	// root is the only thing that measures content — so a matching size with a
 	// different root is not a quiet period, it is equivocation, and it is
 	// recorded as an alarm rather than skipped.
-	if have && size == last {
-		if root == lastRoot {
-			return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
+	if have && size == base.size && root != base.root {
+		return alarm("root changed while tree size stayed at " + fmt.Sprint(size) +
+			": history was rewritten in place")
+	}
+
+	// base.size == 0 is "the target's log was empty when we last looked", and
+	// the empty tree is a prefix of every tree, so there is nothing to prove. It
+	// has to be special-cased because ProveTree rejects an old size below 1:
+	// without this, a witness that first saw its target empty could never
+	// advance again. It would fail on every run, silently, while its stored
+	// verdict still read consistency_ok — a witness that has stopped witnessing
+	// but still looks fine.
+	if have && base.size > 0 && size != base.size {
+		if size < base.size {
+			return alarm("") // target shrank — impossible for an append-only log
 		}
-		payload, _ := json.Marshal(map[string]any{
-			"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": false,
-			"detail": "root changed while tree size stayed at " + fmt.Sprint(size) +
-				": history was rewritten in place",
-		})
-		if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS,
-			Registry: w.Origin, RecordName: "checkpoint", PayloadRaw: payload, State: "revoked",
-			CreatedBy: "witness"}); err != nil {
+		proof, err := w.fetchConsistency(ctx, base.size, size)
+		if err != nil {
 			return Result{}, err
 		}
-		return Result{Size: size, Root: rootB64, ConsistencyOK: false, Fresh: true}, nil
-	}
-
-	consistencyOK := true
-	// last == 0 is "the target's log was empty when we last looked", and the
-	// empty tree is a prefix of every tree, so there is nothing to prove. It has
-	// to be special-cased because ProveTree rejects an old size below 1: without
-	// this, a witness that first saw its target empty could never advance again.
-	// It would fail on every run, silently, while its stored verdict still read
-	// consistency_ok — a witness that has stopped witnessing but still looks fine.
-	if have && last > 0 {
-		if size < last {
-			consistencyOK = false // target shrank — impossible for an append-only log
-		} else {
-			proof, err := w.fetchConsistency(ctx, last, size)
-			if err != nil {
-				return Result{}, err
-			}
-			if err := tlog.CheckTree(proof, size, root, last, lastRoot); err != nil {
-				consistencyOK = false
-			}
+		if err := tlog.CheckTree(proof, size, root, base.size, base.root); err != nil {
+			return alarm("")
 		}
 	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": consistencyOK,
-	})
-	state := "live"
-	if !consistencyOK {
-		state = "revoked"
+	// Consistent. Nothing to write if the log already says exactly this, and
+	// nothing yet if the last verdict is younger than RecordInterval.
+	if (logged && size == logSize && root == logRoot) || !w.recordDue() {
+		w.remember(tree{size, root}, false)
+		return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: false}, nil
 	}
+	payload, _ := json.Marshal(map[string]any{
+		"target": w.TargetURL, "size": size, "root": rootB64, "consistency_ok": true,
+	})
 	if _, err := w.appender().Append(ctx, store.AppendInput{EntryType: "record", Namespace: witnessNS, Registry: w.Origin,
-		RecordName: "checkpoint", PayloadRaw: payload, State: state, CreatedBy: "witness"}); err != nil {
+		RecordName: "checkpoint", PayloadRaw: payload, State: "live", CreatedBy: "witness"}); err != nil {
 		return Result{}, err
 	}
-	return Result{Size: size, Root: rootB64, ConsistencyOK: consistencyOK, Fresh: true}, nil
+	w.remember(tree{size, root}, true)
+	return Result{Size: size, Root: rootB64, ConsistencyOK: true, Fresh: true}, nil
 }
 
 // Health describes whether this witness is still doing its job.
 //
 // It exists because a stalled witness is otherwise invisible. The verdict in
-// the log is only rewritten when the target's tree changes, so a witness that
-// has been failing on every run for hours still presents a last verdict reading
+// the log is only rewritten when the target's tree changes (and, while it stays
+// consistent, at most once per RecordInterval), so a witness that has been
+// failing on every run for hours still presents a last verdict reading
 // consistency_ok — indistinguishable from one that checked a second ago and
-// found nothing new. Verdict age cannot stand in for this: on a quiet target the
-// newest verdict is legitimately old.
+// found nothing new. Verdict age cannot stand in for this: on a quiet target, or
+// inside RecordInterval, the newest verdict is legitimately old.
 //
 // What is trustworthy here is only that this node believes it ran. It is this
 // node's report about itself and nobody should take it as proof; the proof is
@@ -362,7 +459,7 @@ func (w *Witness) record(err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.health.Standby = false
-	now := time.Now().UTC()
+	now := w.clock().UTC()
 	w.health.LastAttemptAt = now
 	w.health.Attempts++
 	if err != nil {
@@ -374,25 +471,34 @@ func (w *Witness) record(err error) {
 	w.health.LastError = ""
 }
 
+// check is one tick of Run: verify, then record health. Health is recorded on
+// every check, whether or not it appended a verdict, so a witness that is
+// checking but has nothing new to write still reads as alive.
+func (w *Witness) check(ctx context.Context) {
+	if !w.standing() {
+		// Another replica is witnessing now and its verdicts may move past
+		// the tree this one last saw. Starting again from the log when this
+		// replica leads again means judging the target against the newest
+		// recorded verdict rather than an older private one.
+		w.forget()
+		w.recordStandby()
+		return
+	}
+	r, err := w.VerifyOnce(ctx)
+	w.record(err)
+	switch {
+	case err != nil:
+		log.Printf("witness(%s): %v", w.Origin, err)
+	case r.Fresh && r.ConsistencyOK:
+		log.Printf("witness(%s): verified append-only at size %d", w.Origin, r.Size)
+	case r.Fresh && !r.ConsistencyOK:
+		log.Printf("witness(%s): ALARM — consistency FAILED at size %d", w.Origin, r.Size)
+	}
+}
+
 // Run verifies on Interval until ctx is done.
 func (w *Witness) Run(ctx context.Context) {
-	verify := func() {
-		if !w.standing() {
-			w.recordStandby()
-			return
-		}
-		r, err := w.VerifyOnce(ctx)
-		w.record(err)
-		switch {
-		case err != nil:
-			log.Printf("witness(%s): %v", w.Origin, err)
-		case r.Fresh && r.ConsistencyOK:
-			log.Printf("witness(%s): verified append-only at size %d", w.Origin, r.Size)
-		case r.Fresh && !r.ConsistencyOK:
-			log.Printf("witness(%s): ALARM — consistency FAILED at size %d", w.Origin, r.Size)
-		}
-	}
-	verify()
+	w.check(ctx)
 	t := time.NewTicker(w.Interval)
 	defer t.Stop()
 	for {
@@ -400,7 +506,7 @@ func (w *Witness) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			verify()
+			w.check(ctx)
 		}
 	}
 }

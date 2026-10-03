@@ -364,8 +364,7 @@ function cards(d, shape, m, net){
   // an unsigned write older than that would otherwise leave the card green
   // while making a claim about the whole log. Both are position-based; neither
   // consults the clock.
-  const total = m['dedi_log_entries'], signedSize = m['dedi_checkpoint_tree_size'];
-  const behind = (total !== undefined && signedSize !== undefined) ? total > signedSize : false;
+  const behind = writesUnsigned(m['dedi_log_entries'], m['dedi_checkpoint_tree_size']);
 
   let ageCls = 'mut', ageSub;
   if ((shape && shape.unsigned > 0) || behind) {
