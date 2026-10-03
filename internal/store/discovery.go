@@ -41,7 +41,8 @@ import (
 //     and receive traffic meant for someone else.
 //
 // A nil eligible slice means no restriction, matching FindBecknSubscriber;
-// serve() refuses that combination once publisher keys are configured.
+// once publisher keys are configured, writePlaneConfig passes a non-nil
+// allowlist, empty when none is set.
 //
 // domain matches a scalar `"domain": "retail"` and membership of an array
 // `"domain": ["retail", "mobility"]`. The spec permits both spellings, and a

@@ -277,9 +277,10 @@ func TestSignRejectsBothPreconditions(t *testing.T) {
 	}
 }
 
-// The wildcard allowlist is only mandatory once writes are possible: a
-// read-only node must keep booting unrestricted, and opening the write plane
-// without the constraint must fail loudly rather than quietly escalate.
+// The wildcard allowlist only binds once writes are possible: a read-only node
+// must keep booting unrestricted, and opening the write plane without the
+// constraint must leave nothing eligible rather than quietly escalate. It must
+// still boot, since a node that does not serve Beckn has nothing to list (#80).
 func TestWritePlaneConfigBindsWildcardToPublisherKeys(t *testing.T) {
 	dir := t.TempDir()
 	gen := capture(t, func() error {
@@ -301,12 +302,16 @@ func TestWritePlaneConfigBindsWildcardToPublisherKeys(t *testing.T) {
 		t.Fatalf("keys=%d wildcard=%v, want 0 and nil", keys.Len(), wildcard)
 	}
 
-	// Write plane open with no allowlist: must refuse to start.
-	if _, _, err := writePlaneConfig(entry, ""); err == nil {
-		t.Fatal("node started with publisher keys but no wildcard allowlist")
-	}
-	if _, _, err := writePlaneConfig(entry, "   ,  ,"); err == nil {
-		t.Fatal("a whitespace-only allowlist was accepted as a constraint")
+	// Write plane open with no allowlist: boots, with an empty allowlist. nil
+	// would mean unrestricted, so it must be non-nil and empty.
+	for _, spec := range []string{"", "   ,  ,"} {
+		keys, wildcard, err := writePlaneConfig(entry, spec)
+		if err != nil {
+			t.Fatalf("allowlist %q: node with publisher keys failed to boot: %v", spec, err)
+		}
+		if keys.Len() != 1 || wildcard == nil || len(wildcard) != 0 {
+			t.Fatalf("allowlist %q: keys=%d wildcard=%#v, want 1 and an empty non-nil allowlist", spec, keys.Len(), wildcard)
+		}
 	}
 
 	// Write plane open with an allowlist: fine, and entries are trimmed.

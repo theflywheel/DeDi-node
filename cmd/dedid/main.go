@@ -303,9 +303,12 @@ func signCmd(args []string) error {
 //
 // A node with no publisher keys is read-only, and an unrestricted wildcard is
 // safe there — that is today's reference deployment, and it keeps working
-// untouched. The moment a key is configured, the allowlist becomes mandatory:
-// without it any publisher could answer for any subscriber_id on the node,
-// which design.md:256 forbids the publisher plane from shipping.
+// untouched. Once a key is configured, an unrestricted wildcard would let any
+// publisher answer for any subscriber_id on the node, which design.md:256
+// forbids the publisher plane from shipping. So with keys and no allowlist the
+// result is an empty allowlist, not nil: nothing is eligible. This used to be
+// a refusal to start, which made a Beckn setting mandatory for nodes that do
+// not serve Beckn at all (#80).
 func writePlaneConfig(keysSpec, wildcardSpec string) (*publisher.KeySet, []string, error) {
 	keys, err := publisher.ParseKeySet(keysSpec)
 	if err != nil {
@@ -318,9 +321,7 @@ func writePlaneConfig(keysSpec, wildcardSpec string) (*publisher.KeySet, []strin
 		}
 	}
 	if keys.Len() > 0 && wildcard == nil {
-		return nil, nil, fmt.Errorf("DEDI_WILDCARD_NAMESPACES must list the namespaces eligible " +
-			"for Beckn wildcard lookup when DEDI_PUBLISHER_KEYS is set: without it any publisher " +
-			"key could answer for any subscriber_id on the node (design.md:256)")
+		wildcard = []string{}
 	}
 	return keys, wildcard, nil
 }
@@ -653,6 +654,9 @@ func serve() error {
 	if keys.Len() > 0 {
 		log.Printf("write plane open: %d publisher key(s); wildcard namespaces: %s",
 			keys.Len(), strings.Join(wildcard, ", "))
+		if len(wildcard) == 0 {
+			log.Printf("Beckn wildcard lookup and ?domain= discovery disabled: DEDI_WILDCARD_NAMESPACES is unset or empty")
+		}
 	}
 	statsInterval, err := time.ParseDuration(envOr("DEDI_STATS_FLUSH_INTERVAL", "10s"))
 	if err != nil {

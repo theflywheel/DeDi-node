@@ -72,6 +72,10 @@ It prints the private key to keep and the `DEDI_PUBLISHER_KEYS` line to set on
 the service. Until you do, `/admin` is not merely locked — it is not routed at
 all, and answers 404.
 
+If the node serves Beckn, also set `DEDI_WILDCARD_NAMESPACES` to the namespaces
+allowed to answer the `subscribers.beckn.one` wildcard lookup and `?domain=`
+discovery. Left unset on a node with a publisher key, both answer nothing.
+
 `DEDI_ADMIN_PASSWORD` is already set for you, to a value Railway generated for
 your deployment alone. It gates the console the moment your publisher key brings
 it into existence, which matters because that moment is exactly when nobody
