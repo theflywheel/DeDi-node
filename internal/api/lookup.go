@@ -68,9 +68,9 @@ func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 		versionID = &n
 	}
 	if v := q.Get("as_on"); v != "" {
-		t, err := time.Parse(time.RFC3339Nano, v)
+		t, err := parseDateParam("as_on", v, true)
 		if err != nil {
-			return nil, nil, errors.New("as_on must be an RFC 3339 timestamp")
+			return nil, nil, err
 		}
 		asOn = &t
 	}

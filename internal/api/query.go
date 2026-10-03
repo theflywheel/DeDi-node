@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -25,9 +26,9 @@ func parseQueryFilters(r *http.Request) (store.QueryFilters, error) {
 	}
 	for key, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To, "as_on": &f.AsOn} {
 		if v := q.Get(key); v != "" {
-			t, err := time.Parse(time.RFC3339Nano, v)
+			t, err := parseDateParam(key, v, key != "from")
 			if err != nil {
-				return f, errors.New(key + " must be an RFC 3339 timestamp")
+				return f, err
 			}
 			*dst = &t
 		}
@@ -216,4 +217,30 @@ func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 		"page_size":      f.PageSize,
 		"records":        recs,
 	})
+}
+
+// parseDateParam reads a date query parameter (as_on, from, to).
+//
+// The spec declares all of them `format: date`, YYYY-MM-DD (#69). We only took
+// RFC 3339, so the spec's own format got a 400 -- including the plainest way to
+// ask what a record said on a given day. Both are accepted now: RFC 3339 for
+// the callers already sending it, and a bare date read as a whole UTC day.
+//
+// Every comparison against these is inclusive (store: created_at <= as_on,
+// latest_at between from and to), so a day means its first instant for a lower
+// bound and its last for an upper one. as_on=2026-03-01 is the version in force
+// at the close of 1 March, not at the midnight it began.
+func parseDateParam(key, v string, endOfDay bool) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return t, nil
+	}
+	d, err := time.Parse(time.DateOnly, v)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be a date (YYYY-MM-DD) or an RFC 3339 timestamp", key)
+	}
+	if endOfDay {
+		// Postgres keeps microseconds, so this is the last instant it can store.
+		return d.AddDate(0, 0, 1).Add(-time.Microsecond), nil
+	}
+	return d, nil
 }

@@ -68,8 +68,12 @@ func validQueryValue(p Parameter) string {
 		return p.Schema.Enum[0]
 	}
 	switch p.Schema.Format {
+	// Far enough ahead that every fixture version exists by then: an as_on
+	// before the fixture was written is a 404, not a format error.
 	case "date-time":
-		return "2020-01-01T00:00:00Z"
+		return "2100-01-01T00:00:00Z"
+	case "date":
+		return "2100-01-01"
 	}
 	switch p.Schema.Type {
 	case "integer":
@@ -218,10 +222,12 @@ func TestSpecPathsResolve(t *testing.T) {
 // outside the documented enum now returns 400, the suite must use a
 // spec-valid value or it would be testing the 400 path instead.
 //
-// Non-enum query parameters (version_id, as_on, name, page, ...) are
-// intentionally not exercised here: the spec gives them only a bare type
-// (e.g. "string"), not a value the suite can derive as "valid" without
-// guessing at implementation-specific semantics. See
+// Parameters with a declared format are exercised the same way: in this
+// spec as_on, from and to are `format: date-time`. (docs/spec/dedi-global
+// declares the same three as `format: date`. This suite does not read that
+// spec, so internal/api/asondate_test.go is what holds the node to it, #69.) The rest (version_id, name, page, ...) are not: the
+// spec gives them only a bare type, not a value the suite can derive as
+// "valid" without guessing at implementation-specific semantics. See
 // TestVersionIDAcceptsSpecDeclaredType for a documented gap of exactly that
 // kind found while building this suite.
 func TestSpecQueryParametersAccepted(t *testing.T) {
@@ -234,7 +240,9 @@ func TestSpecQueryParametersAccepted(t *testing.T) {
 	for _, ep := range spec.Endpoints() {
 		ep := ep
 		for _, qp := range ep.QueryParams() {
-			if !qp.HasEnum() {
+			// A declared format is a value the suite can derive without
+			// guessing, same as an enum, so it is exercised too.
+			if !qp.HasEnum() && qp.Schema.Format != "date" && qp.Schema.Format != "date-time" {
 				continue
 			}
 			qp := qp
