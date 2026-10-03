@@ -307,3 +307,39 @@ func signedNoFollow(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey,
 	}
 	return resp
 }
+
+// Every write redirects before it reads the replica (#86).
+//
+// The replica here is empty, as on a follower that has not applied anything
+// yet. Each of these used to look up the record, registry, subscription,
+// delegation or offer locally first, and answer 404, 409 or 401 from that.
+func TestALaggingFollowerRedirectsEveryWriteBeforeReadingItsReplica(t *testing.T) {
+	const leader = "https://leader.example"
+	srv, priv, _ := followerServer(t, cluster.State{Enabled: true, Role: "follower", LeaderURL: leader})
+
+	http.DefaultClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	t.Cleanup(func() { http.DefaultClient.CheckRedirect = nil })
+	for _, c := range []struct {
+		method, path, body string
+		signed             bool
+	}{
+		{http.MethodPost, "/admin/namespaces/ns/registries/reg/records/x/revoke", `{}`, true},
+		{http.MethodPost, "/admin/namespaces/ns/registries/reg/subscriptions", `{"target_url":"https://hook.example/x"}`, true},
+		{http.MethodDelete, "/admin/namespaces/ns/subscriptions/sub-1", ``, true},
+		{http.MethodPost, "/admin/namespaces/ns/children", `{"namespace":"ns.child","role":"child"}`, true},
+		{http.MethodPost, "/admin/namespaces/ns/children/ns.child/revoke", `{}`, true},
+		{http.MethodPost, "/enrol", `{"namespace":"ns.child","token":"t"}`, false},
+		{http.MethodPost, "/dedi/enrol", `{"namespace":"ns.child","token":"t"}`, false},
+	} {
+		key := priv
+		if !c.signed {
+			key = nil
+		}
+		resp := signedDo(t, srv, key, c.method, c.path, []byte(c.body), publisher.Precondition{})
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusTemporaryRedirect || resp.Header.Get("Location") != leader+c.path {
+			t.Errorf("%s %s on a lagging follower: %d to %q, want 307 to the leader",
+				c.method, c.path, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+}

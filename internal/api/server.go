@@ -174,11 +174,11 @@ func (s *Server) Handler() http.Handler {
 	// It is registered off the /dedi/ prefix: that prefix belongs to the DeDi
 	// standard (docs/spec/lfdt/api/openapi.yaml), which reserves it for
 	// lookup/query/versions, not for this node's own delegation mechanism.
-	mux.HandleFunc("POST /enrol", s.enrolChild)
+	mux.HandleFunc("POST /enrol", s.leaderOnly(s.enrolChild))
 	// Deprecated alias for the old, spec-prefix-squatting path. Kept only
 	// until every deployed ring node has upgraded to call POST /enrol
 	// instead; remove once that rollout is complete.
-	mux.HandleFunc("POST /dedi/enrol", s.deprecatedEnrolChild)
+	mux.HandleFunc("POST /dedi/enrol", s.leaderOnly(s.deprecatedEnrolChild))
 	mux.HandleFunc("GET /healthz", s.healthz)
 	// Operational, not part of the read plane: replica lag and peer
 	// reachability in the format a scraper already speaks, so a replica falling
@@ -232,7 +232,7 @@ func (s *Server) Handler() http.Handler {
 		// shared password cannot attribute a write, so it never replaces the
 		// signature — it only fronts it.
 		write := func(pattern string, h http.HandlerFunc) {
-			mux.Handle(pattern, s.AdminAuth.gate(s.Auth.Require(h, denyWrite)))
+			mux.Handle(pattern, s.AdminAuth.gate(s.Auth.Require(s.leaderOnly(h), denyWrite)))
 		}
 		write("PUT /admin/namespaces/{namespace}", s.putNamespace)
 		write("POST /admin/namespaces/{namespace}/children", s.createChild)

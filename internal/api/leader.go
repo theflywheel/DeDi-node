@@ -37,6 +37,24 @@ func (s *Server) onFollower() bool {
 	return st.Enabled && st.Role != "leader"
 }
 
+// leaderOnly redirects a write that reached a follower before its handler runs.
+//
+// Handlers read the replica before they write: whether the record exists,
+// whether the child is already delegated, whether the offer has been applied.
+// On a follower that trails the leader those reads answer 404, 409 or 401 for a
+// request the leader would accept. Redirecting here, once, is what keeps every
+// write route from having to remember (#86). GETs on the write plane are reads
+// and stay local.
+func (s *Server) leaderOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && s.onFollower() {
+			s.redirectToLeader(w, r)
+			return
+		}
+		h(w, r)
+	}
+}
+
 // redirectToLeader points a write at the replica that can serve it.
 //
 // 307 rather than 308: the redirect is about who is leader *now*, which changes
