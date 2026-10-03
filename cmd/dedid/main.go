@@ -238,16 +238,20 @@ func signCmd(args []string) error {
 	path := fs.String("path", "", "request URI, e.g. /admin/namespaces/beckn-testnet (required)")
 	bodyFile := fs.String("body", "", "file containing the request body (empty for none)")
 	ifMatch := fs.String("if-match", "", "version tag (<hex digest>-<state>) of the version being replaced")
-	create := fs.Bool("create", false, "the target must not exist yet (If-None-Match: *)")
+	create := fs.Bool("create", false, "the target must not exist yet (If-None-Match: *); give neither for routes that take no precondition")
 	curl := fs.Bool("curl", false, "print curl header flags instead of plain headers")
 	fs.Parse(args)
 	if *kid == "" || *path == "" {
 		return fmt.Errorf("sign: -kid and -path are required")
 	}
 	// The precondition is signed, so it has to be decided here rather than
-	// added to the request afterwards — see publisher.Preimage.
-	if (*ifMatch == "") == !*create {
-		return fmt.Errorf("sign: give exactly one of -if-match <digest>-<state> or -create")
+	// added to the request afterwards — see publisher.Preimage. Neither flag
+	// signs none: domain verify, child and subscription routes take no
+	// precondition, and a namespace, registry or record write sent without one
+	// is refused by the node with 428 (preconditionOf), so the CLI need not
+	// insist (#79).
+	if *ifMatch != "" && *create {
+		return fmt.Errorf("sign: give at most one of -if-match <digest>-<state> or -create")
 	}
 	pre := publisher.Precondition{IfMatch: *ifMatch}
 	if *create {
