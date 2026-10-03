@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,10 +36,21 @@ var lookupParams = map[string]bool{
 }
 
 func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
-	q := r.URL.Query()
+	// Not r.URL.Query(): it discards ParseQuery's error along with every
+	// segment that has a ';' or a bad %-escape, so ?versionId=2; never reached
+	// the check below and answered with the latest version all the same.
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, nil, fmt.Errorf("malformed query string: %v", err)
+	}
 	for k := range q {
 		if !lookupParams[k] {
-			return nil, nil, fmt.Errorf("unknown query parameter %q; lookups accept version_id, as_on, proof, include_revoked", k)
+			accepted := make([]string, 0, len(lookupParams))
+			for p := range lookupParams {
+				accepted = append(accepted, p)
+			}
+			sort.Strings(accepted)
+			return nil, nil, fmt.Errorf("unknown query parameter %q; lookups accept %s", k, strings.Join(accepted, ", "))
 		}
 	}
 	var versionID *int64

@@ -22,9 +22,20 @@ func TestALookupRejectsAParameterItDoesNotRead(t *testing.T) {
 		// The near-misses a client actually writes, taken from the report.
 		for _, bad := range []string{"versionId", "version", "versionid", "asOn"} {
 			m := getJSON(t, fmt.Sprintf("%s%s?%s=%d&proof=inclusion", srv.URL, path, bad, rec1.Seq), http.StatusBadRequest)
-			if !strings.Contains(fmt.Sprint(m["error"]), bad) {
+			// Quoted: the message also lists the accepted keys, and "version"
+			// is a substring of "version_id", so a bare match proves nothing.
+			if !strings.Contains(fmt.Sprint(m["error"]), fmt.Sprintf("%q", bad)) {
 				t.Errorf("%s?%s: the error does not name the parameter it refused: %v", path, bad, m["error"])
 			}
+		}
+		// A query the parser cannot read must not shed the part it chokes on
+		// and answer with what is left.
+		for _, raw := range []string{
+			fmt.Sprintf("proof=inclusion&versionId=%d;", rec1.Seq),
+			fmt.Sprintf("version_id=%d;proof=inclusion", rec1.Seq),
+			"versionId=%zz&proof=inclusion",
+		} {
+			getJSON(t, srv.URL+path+"?"+raw, http.StatusBadRequest)
 		}
 	}
 }
@@ -47,6 +58,13 @@ func TestALookupStillAcceptsEveryParameterACallerSends(t *testing.T) {
 		"?internal=1",
 	} {
 		getJSON(t, base+q, http.StatusOK)
+	}
+	// The refusal must tell a caller every key it could have used.
+	m := getJSON(t, base+"?nope=1", http.StatusBadRequest)
+	for k := range lookupParams {
+		if !strings.Contains(fmt.Sprint(m["error"]), k) {
+			t.Errorf("the 400 does not mention accepted key %q: %v", k, m["error"])
+		}
 	}
 	// An unknown *value* of a known key is still a version that does not exist,
 	// not a malformed request; see errNoSuchVersion.
