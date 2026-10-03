@@ -38,6 +38,7 @@ type childSupervisor struct {
 	cluster *cluster.Node
 	monitor *network.Monitor
 	iv      time.Duration
+	record  time.Duration // DEDI_WITNESS_RECORD_INTERVAL, same as the peer witness
 
 	mu      sync.Mutex
 	running map[string]*childWitness
@@ -54,12 +55,12 @@ type childWitness struct {
 	cancel context.CancelFunc
 }
 
-func newChildSupervisor(s *store.Store, clu *cluster.Node, mon *network.Monitor) (*childSupervisor, error) {
+func newChildSupervisor(s *store.Store, clu *cluster.Node, mon *network.Monitor, record time.Duration) (*childSupervisor, error) {
 	iv, err := time.ParseDuration(envOr("DEDI_CHILD_WITNESS_INTERVAL", "60s"))
 	if err != nil {
 		return nil, err
 	}
-	return &childSupervisor{store: s, cluster: clu, monitor: mon, iv: iv,
+	return &childSupervisor{store: s, cluster: clu, monitor: mon, iv: iv, record: record,
 		running: map[string]*childWitness{}}, nil
 }
 
@@ -122,6 +123,8 @@ func (cs *childSupervisor) Start(ctx context.Context, rec delegation.Record) {
 		TargetKey: rec.ChildKey,
 		Origin:    rec.ChildOrigin,
 		Interval:  cs.iv,
+
+		RecordInterval: cs.record,
 	}
 	if cs.cluster != nil {
 		// Verdicts are log entries, so they take the leader path like every

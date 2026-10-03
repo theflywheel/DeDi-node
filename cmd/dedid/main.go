@@ -559,6 +559,13 @@ func serve() error {
 	// target is append-only and records each verdict under `_witness`.
 	witnessTargetURL := os.Getenv("DEDI_WITNESS_TARGET_URL")
 	witnessTargetOrigin := envOr("DEDI_WITNESS_TARGET_ORIGIN", "target")
+	// Shared by the peer witness and every child witness loop: how often a
+	// consistent verdict is written down. Checks still run every interval;
+	// alarms are written at once. See witness.Witness.RecordInterval.
+	recordIv, err := time.ParseDuration(envOr("DEDI_WITNESS_RECORD_INTERVAL", "1h"))
+	if err != nil {
+		return fmt.Errorf("DEDI_WITNESS_RECORD_INTERVAL: %w", err)
+	}
 	var wit *witness.Witness
 	if wt := witnessTargetURL; wt != "" {
 		wiv, err := time.ParseDuration(envOr("DEDI_WITNESS_INTERVAL", "60s"))
@@ -571,6 +578,8 @@ func serve() error {
 			TargetKey: os.Getenv("DEDI_WITNESS_TARGET_KEY"),
 			Origin:    witnessTargetOrigin,
 			Interval:  wiv,
+
+			RecordInterval: recordIv,
 		}
 		if clu != nil {
 			// Verdicts are log entries, so they go through the leader like any
@@ -580,7 +589,7 @@ func serve() error {
 			wit.IsWriter = clu.IsLeader
 		}
 		go wit.Run(ctx)
-		log.Printf("witnessing %s every %s", wt, wiv)
+		log.Printf("witnessing %s every %s, recording consistent verdicts at most every %s", wt, wiv, recordIv)
 	}
 
 	// Optional: anchor signed checkpoints to an external ledger (adapter-based;
@@ -701,7 +710,7 @@ func serve() error {
 
 	// Children this node has delegated namespaces to: witnessed continuously,
 	// and resumed across restarts.
-	childSup, err := newChildSupervisor(s, clu, netmon)
+	childSup, err := newChildSupervisor(s, clu, netmon, recordIv)
 	if err != nil {
 		return fmt.Errorf("DEDI_CHILD_WITNESS_INTERVAL: %w", err)
 	}

@@ -125,13 +125,21 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
 // ago() already ends its string with the word, and two branches appended " ago"
 // to it, so the first line of the first page anyone sees read "44 seconds ago
 // ago". Every test read the page source and none of them read the sentence.
-function checkpointLine(age){
+//
+// Stale is decided by log position, not by age alone. The checkpointer signs
+// only when the tree grows, so on a quiet log a day-old checkpoint is correct,
+// and calling it stale was a false warning on every idle node. It is stale when
+// writes sit above it (writesUnsigned) and the newest signature is over an hour
+// old: the same two conditions as the DediWritesUnsigned alert rule, so a node
+// between a write and its next signing tick is not flagged.
+function checkpointLine(age, unsigned){
   if (age === null) return '<span class="mut">unknown</span>';
   if (age < 0) return '<span class="no">never signed</span>';
   // Muted grey beside a green "44 seconds ago" reads as "fine, just quiet".
-  // The state needs its own word — a twelve-day-old checkpoint is the bug this
-  // page's own comment further down recounts.
-  if (age > 3600) return '<span class="warn">stale &mdash; ' + ago(age) + '</span>';
+  // The state needs its own word.
+  if (unsigned && age > 3600) {
+    return '<span class="warn">stale &mdash; signed ' + ago(age) + ', with newer entries unsigned</span>';
+  }
   return '<span class="ok">' + ago(age) + '</span>';
 }
 
@@ -150,16 +158,22 @@ async function j(url){
 
 // The checkpoint's age is not in the checkpoint: a signed note carries the
 // origin, size and root, and nothing about when it was signed. The node
-// publishes the age as a metric, which is where this reads it from.
-async function checkpointAge(){
+// publishes the age as a metric, which is where this reads it from, with the
+// two sizes that say whether anything is waiting to be signed.
+async function checkpointCell(){
   const r = await fetch('/metrics');
-  if (!r.ok) return null;
+  if (!r.ok) return checkpointLine(null);
+  const body = await r.text();
   // The exponent form is not optional to handle: metrics.go formats with %g,
   // which switches to 1.0368e+06 past a million seconds — so a checkpoint that
   // had not been signed for twelve days parsed as "1 second old" and painted
   // itself green. Exactly the wrong direction for a staleness indicator to err.
-  const m = (await r.text()).match(/^dedi_checkpoint_age_seconds\s+(-?[\d.]+(?:[eE][+-]?\d+)?)/m);
-  return m ? Number(m[1]) : null;
+  const metric = name => {
+    const m = body.match(new RegExp('^' + name + '\\s+(-?[\\d.]+(?:[eE][+-]?\\d+)?)', 'm'));
+    return m ? Number(m[1]) : null;
+  };
+  return checkpointLine(metric('dedi_checkpoint_age_seconds'),
+    writesUnsigned(metric('dedi_log_entries'), metric('dedi_checkpoint_tree_size')));
 }
 
 // Who watches THIS node cannot be answered by this node: /dedi/witness reports
@@ -303,7 +317,7 @@ function renderCluster(c){
     $('title').textContent = 'this node is not answering';
   }
   try {
-    $('cpage').innerHTML = checkpointLine(await checkpointAge());
+    $('cpage').innerHTML = await checkpointCell();
   } catch (e) { $('cpage').textContent = 'unknown'; }
   try {
     const s = (await j('/dedi/stats')).data;
