@@ -63,6 +63,7 @@ type namespaceDTO struct {
 	CreatedBy    string         `json:"created_by"`
 	Domain       string         `json:"domain"`
 	State        string         `json:"state"`
+	VersionTag   string         `json:"version_tag"`
 	TTL          int            `json:"ttl"`
 }
 
@@ -73,7 +74,7 @@ func namespaceData(e store.Entry, versions []store.Entry, ttl int) namespaceDTO 
 		Description: p.Description, Digest: hex.EncodeToString(e.Digest), Meta: p.Meta,
 		Version: versionID(e.Seq), VersionCount: len(versions),
 		CreatedAt: fmtTime(versions[0].CreatedAt), UpdatedAt: fmtTime(e.CreatedAt),
-		CreatedBy: e.CreatedBy, Domain: p.Domain, State: e.State, TTL: ttl,
+		CreatedBy: e.CreatedBy, Domain: p.Domain, State: e.State, VersionTag: versionTag(e), TTL: ttl,
 	}
 }
 
@@ -91,6 +92,7 @@ type registryDTO struct {
 	UpdatedAt    string         `json:"updated_at"`
 	CreatedBy    string         `json:"created_by"`
 	State        string         `json:"state"`
+	VersionTag   string         `json:"version_tag"`
 	TTL          int            `json:"ttl"`
 }
 
@@ -101,7 +103,7 @@ func registryData(e store.Entry, versions []store.Entry, ttl int) registryDTO {
 		Description: p.Description, Digest: hex.EncodeToString(e.Digest), Schema: p.Schema, Meta: p.Meta,
 		Version: versionID(e.Seq), VersionCount: len(versions),
 		CreatedAt: fmtTime(versions[0].CreatedAt), UpdatedAt: fmtTime(e.CreatedAt),
-		CreatedBy: e.CreatedBy, State: e.State, TTL: ttl,
+		CreatedBy: e.CreatedBy, State: e.State, VersionTag: versionTag(e), TTL: ttl,
 	}
 }
 
@@ -124,7 +126,11 @@ type recordDTO struct {
 	UpdatedAt          string          `json:"updated_at"`
 	CreatedBy          string          `json:"created_by"`
 	State              string          `json:"state"`
-	ValidTill          *string         `json:"valid_till"`
+	// VersionTag is the value a conditional write takes as If-Match (#66), so
+	// a client copies it back rather than composing it from digest and state.
+	// It is not the ETag: that one is a cache validator and varies with ?proof.
+	VersionTag string  `json:"version_tag"`
+	ValidTill  *string `json:"valid_till"`
 	// Expired / NotYetValid report the payload's declared validity window
 	// against the node's clock. They are advisory: the record still resolves,
 	// because filtering it would be a read-plane behaviour change for
@@ -208,7 +214,7 @@ func recordData(e store.Entry, versions []store.Entry, ttl int) recordDTO {
 		Version:            versionID(e.Seq), VersionCount: len(versions),
 		Genesis:   versionID(versions[0].Seq),
 		CreatedAt: fmtTime(versions[0].CreatedAt), UpdatedAt: fmtTime(e.CreatedAt),
-		CreatedBy: e.CreatedBy, State: e.State,
+		CreatedBy: e.CreatedBy, State: e.State, VersionTag: versionTag(e),
 		ValidTill: validTill, Expired: expired, NotYetValid: notYet, TTL: ttl,
 	}
 }

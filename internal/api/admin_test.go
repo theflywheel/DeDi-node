@@ -73,16 +73,21 @@ func currentPrecondition(t *testing.T, srv *httptest.Server, adminPath string) p
 	if resp.StatusCode != http.StatusOK {
 		return publisher.Precondition{IfNoneMatch: "*"}
 	}
+	// Copied back, not composed: the tag is the server's format (#66). Every
+	// write test in this package goes through here, so a lookup that stops
+	// carrying it fails all of them rather than none.
 	var env struct {
 		Data struct {
-			Digest string `json:"digest"`
-			State  string `json:"state"`
+			VersionTag string `json:"version_tag"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatal(err)
 	}
-	return publisher.Precondition{IfMatch: env.Data.Digest + "-" + env.Data.State}
+	if env.Data.VersionTag == "" {
+		t.Fatalf("lookup of %s carries no version_tag to send as If-Match", adminPath)
+	}
+	return publisher.Precondition{IfMatch: env.Data.VersionTag}
 }
 
 // signedDo issues a request signed by priv, or unsigned when priv is nil.
@@ -690,5 +695,67 @@ func TestCapturedPublishCannotUndoReasonlessRevoke(t *testing.T) {
 	}
 	if n := versionsOf(t, srv, "ns", "r", "KEY-1"); n != 2 {
 		t.Fatalf("replay appended: %v versions, want 2", n)
+	}
+}
+
+// The write answers in the vocabulary the read asks in (#68), and what it
+// reports is enough to pin the version it just wrote — no read-back.
+func TestAPublishNamesItsVersionTheWayALookupPinsIt(t *testing.T) {
+	srv, s, priv := writeServer(t, "flywheel")
+	seedBasic(t, s)
+	path := "/admin/namespaces/flywheel/registries/participants/records/bap.example.com/publish"
+	resp := signedDo(t, srv, priv, "POST", path, []byte(`{"payload":{"role":"BAP","signing_public_key":"k3"}}`))
+	defer resp.Body.Close()
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	vid, _ := env.Data["version_id"].(string)
+	tag, _ := env.Data["version_tag"].(string)
+	if vid == "" || tag == "" {
+		t.Fatalf("publish response lacks version_id or version_tag: %v", env.Data)
+	}
+	// Pin by exactly what the write reported; it must be what was written,
+	// and the lookup's tag must be the same value the write handed out.
+	got := getJSON(t, srv.URL+"/dedi/lookup/flywheel/participants/bap.example.com?version_id="+vid, http.StatusOK)
+	d := got["data"].(map[string]any)
+	if d["details"].(map[string]any)["signing_public_key"] != "k3" {
+		t.Errorf("?version_id=%s from the publish response resolves to %v, not the version just written", vid, d["details"])
+	}
+	if d["version_tag"] != tag {
+		t.Errorf("lookup version_tag %v != publish version_tag %v", d["version_tag"], tag)
+	}
+}
+
+// Every lookup level hands out a tag its own write accepts as-is (#66).
+//
+// Copied straight from the lookup into If-Match, with nothing composed. The
+// helper above covers the levels other tests overwrite; nothing else
+// overwrites a registry, so without this a registry lookup could drop the
+// tag and no test would notice.
+func TestEveryLookupLevelCarriesATagItsWriteAccepts(t *testing.T) {
+	srv, s, priv := writeServer(t, "flywheel")
+	seedBasic(t, s)
+	for _, c := range []struct{ method, write, read, body string }{
+		{"PUT", "/admin/namespaces/flywheel", "/dedi/lookup/flywheel",
+			`{"payload":{"description":"Flywheel network v2","domain":"flywheel.in"}}`},
+		{"PUT", "/admin/namespaces/flywheel/registries/participants", "/dedi/lookup/flywheel/participants",
+			`{"payload":{"description":"Beckn participants v2","schema":{"type":"object"}}}`},
+		{"POST", "/admin/namespaces/flywheel/registries/participants/records/bap.example.com/publish",
+			"/dedi/lookup/flywheel/participants/bap.example.com",
+			`{"payload":{"role":"BAP","signing_public_key":"k9"}}`},
+	} {
+		tag, _ := getJSON(t, srv.URL+c.read, http.StatusOK)["data"].(map[string]any)["version_tag"].(string)
+		if tag == "" {
+			t.Errorf("%s carries no version_tag", c.read)
+			continue
+		}
+		resp := signedDo(t, srv, priv, c.method, c.write, []byte(c.body), publisher.Precondition{IfMatch: tag})
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s with If-Match copied from %s: status %d", c.write, c.read, resp.StatusCode)
+		}
 	}
 }

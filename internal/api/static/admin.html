@@ -490,7 +490,7 @@ async function currentVersion(ns, reg, rec){
   const r = await fetch(recordLookup(ns, reg, rec));
   if(!r.ok) return null;
   const d = (await r.json()).data;
-  return d.version_tag || (d.digest + '-' + d.state);
+  return d.version_tag;
 }
 
 // The signed preimage must match publisher.Preimage byte for byte: scheme,
@@ -818,7 +818,7 @@ function genRotate(){
     return jget(recordLookup(ns(), reg(), rec))
       .then(j => apply('out-key', 'POST', recordPath(ns(), reg(), rec) + '/publish',
                        {payload: Object.assign({}, j.data.details, fields)}, 'Rotated key for ' + rec,
-                       {ifMatch: j.data.version_tag || (j.data.digest + '-' + j.data.state)}))
+                       {ifMatch: j.data.version_tag}))
       .catch(e => fail('out-key', ['could not read the current record: ' + e.message]));
   }
   // Same rule without a key loaded. A seed command is runnable as printed, so
