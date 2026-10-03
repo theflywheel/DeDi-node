@@ -400,7 +400,9 @@ func (s *Server) revokeRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	in.EntryType, in.Namespace, in.Registry, in.RecordName = "record", ns, reg, rec
 	// Revoking an already-revoked record is a no-op, not a second revocation.
-	// Only the leader gets here (leaderOnly), so `current` is not a stale guess.
+	// Followers redirect before reaching this (leaderOnly). A newly elected
+	// leader can still briefly trail its own committed log, so the locked
+	// re-read below is what decides.
 	if current.State == "revoked" {
 		lockedCurrent, err := s.Store.ResolveCurrentForWrite(r.Context(), in)
 		if errors.Is(err, store.ErrVersionConflict) {

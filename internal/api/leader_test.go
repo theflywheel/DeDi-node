@@ -342,4 +342,18 @@ func TestALaggingFollowerRedirectsEveryWriteBeforeReadingItsReplica(t *testing.T
 				c.method, c.path, resp.StatusCode, resp.Header.Get("Location"))
 		}
 	}
+
+	// Reads on the write plane, and rendering a node config, stay local: the
+	// console on a follower cannot follow a cross-origin redirect.
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/admin/namespaces/ns/subscriptions", ``},
+		{http.MethodHead, "/admin/namespaces/ns/subscriptions", ``},
+		{http.MethodPost, "/admin/node-config", `{"role":"standalone"}`},
+	} {
+		resp := signedDo(t, srv, priv, c.method, c.path, []byte(c.body), publisher.Precondition{})
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTemporaryRedirect {
+			t.Errorf("%s %s on a follower was redirected; it writes nothing", c.method, c.path)
+		}
+	}
 }

@@ -202,8 +202,10 @@ daemon logs a note if you configure one.
 
 ### Writes arriving at a follower
 
-A follower answers every write with `307 Temporary Redirect` to the same path
-on the leader's public URL, enrolment included. 307 rather than 308 or 302
+A follower answers every write that passes the admin gate and signature check
+with `307 Temporary Redirect` to the same path on the leader's public URL,
+enrolment included. Rendering a node configuration writes nothing and is
+answered locally. 307 rather than 308 or 302
 because the method and body must survive — the body is what the publisher
 signed — and because leadership moves, so the redirect must not be cacheable as
 permanent. The redirect happens before the handler runs, so no write is decided

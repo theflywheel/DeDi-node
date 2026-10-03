@@ -43,11 +43,11 @@ func (s *Server) onFollower() bool {
 // whether the child is already delegated, whether the offer has been applied.
 // On a follower that trails the leader those reads answer 404, 409 or 401 for a
 // request the leader would accept. Redirecting here, once, is what keeps every
-// write route from having to remember (#86). GETs on the write plane are reads
-// and stay local.
+// write route from having to remember (#86). GET and HEAD on the write plane
+// are reads and stay local.
 func (s *Server) leaderOnly(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && s.onFollower() {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && s.onFollower() {
 			s.redirectToLeader(w, r)
 			return
 		}
