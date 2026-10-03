@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,8 +23,23 @@ import (
 // than assuming it.
 var errNoSuchVersion = errors.New("no such version")
 
+// lookupParams is every query key a lookup route reads. Anything else is
+// rejected rather than ignored (#65): ?versionId=2 used to return the latest
+// version with a valid proof attached, and every check a careful client runs
+// passed, because they are all over the record the node chose to return.
+//
+// internal is read by internalNamespaceGuard, not here, so it is easy to miss.
+var lookupParams = map[string]bool{
+	"version_id": true, "as_on": true, "proof": true, "include_revoked": true, "internal": true,
+}
+
 func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 	q := r.URL.Query()
+	for k := range q {
+		if !lookupParams[k] {
+			return nil, nil, fmt.Errorf("unknown query parameter %q; lookups accept version_id, as_on, proof, include_revoked", k)
+		}
+	}
 	var versionID *int64
 	var asOn *time.Time
 	if v := q.Get("version_id"); v != "" {
