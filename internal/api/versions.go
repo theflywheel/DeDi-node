@@ -18,7 +18,15 @@ type versionsDTO struct {
 	TTL           int      `json:"ttl"`
 }
 
+// versionsParams is every key a /dedi/versions route reads: none of its own,
+// and internal, read by internalNamespaceGuard (#73).
+var versionsParams = map[string]bool{"internal": true}
+
 func (s *Server) versionsFor(w http.ResponseWriter, r *http.Request, entryType, ns, reg, rec, what string) ([]store.Entry, bool) {
+	if _, err := strictQuery(r, versionsParams); err != nil {
+		badRequest(w, err.Error())
+		return nil, false
+	}
 	versions, err := s.Store.Versions(r.Context(), entryType, ns, reg, rec)
 	if errors.Is(err, store.ErrNotFound) {
 		notFound(w, what)
