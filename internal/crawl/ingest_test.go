@@ -201,6 +201,46 @@ func TestIngestRefusesTheReservedPrefix(t *testing.T) {
 	}
 }
 
+// TestIngestIsAllOrNothing: a manifest with one refused namespace writes
+// nothing, not the files that happened to come before it (#90).
+func TestIngestIsAllOrNothing(t *testing.T) {
+	for _, c := range []struct {
+		why, ns, record string
+		details         json.RawMessage
+	}{
+		{"reserved prefix", "_witness", "r", json.RawMessage(`{}`)},
+		{"namespace we own", "partner.example", "r", json.RawMessage(`{}`)},
+		{"record breaks the registry schema", "bbb.example", "r", json.RawMessage(`[1]`)},
+		{"record with no name", "bbb.example", "", json.RawMessage(`{}`)},
+	} {
+		s := testStore(t)
+		ctx := context.Background()
+		if _, err := s.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: "partner.example",
+			PayloadRaw: []byte(`{"description":"ours"}`), CreatedBy: "seed"}); err != nil {
+			t.Fatal(err)
+		}
+		p := newPublisher(t, "")
+		// The stub lists files sorted by registry, so the good "a" file comes
+		// before the refused one, and "z" after it.
+		p.publish("aaa.example", "a", []dedifile.Record{{RecordName: "a", Details: json.RawMessage(`{}`)}}, testNextUpdate)
+		p.publish(c.ns, "r", []dedifile.Record{{RecordName: c.record, Details: c.details}}, testNextUpdate)
+		p.publish("zzz.example", "z", []dedifile.Record{{RecordName: "z", Details: json.RawMessage(`{}`)}}, testNextUpdate)
+
+		res, err := fetcher().Fetch(ctx, "http://"+p.origin(), "")
+		if err != nil {
+			t.Fatalf("%s: Fetch: %v", c.why, err)
+		}
+		if _, err := (&Ingester{Store: s, Writer: s}).Ingest(ctx, res); err == nil {
+			t.Fatalf("%s: the crawl succeeded", c.why)
+		}
+		for _, ns := range []string{"aaa.example", "bbb.example", "zzz.example"} {
+			if _, err := s.Resolve(ctx, "namespace", ns, "", "", nil, nil); !errors.Is(err, store.ErrNotFound) {
+				t.Errorf("%s: refused, but %s was still ingested: %v", c.why, ns, err)
+			}
+		}
+	}
+}
+
 // TestCrawledDataIsNeverRepublishedAsOurs is the laundering guard. We serve
 // other publishers' records, but we must not re-sign them under our key: a
 // crawler downstream would then attribute them to us, and the original
