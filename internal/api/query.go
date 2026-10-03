@@ -162,9 +162,18 @@ func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 	// The discovery extension (design.md §120). Opt-in by the presence of the
 	// parameter, so /dedi/query without it behaves exactly as it always has and
 	// still never reaches into the payload.
-	if domain := r.URL.Query().Get("domain"); domain != "" {
-		if _, err := strictQuery(r, domainQueryParams); err != nil {
+	// Chosen by the key's presence, not its value: an empty ?domain= used to
+	// fall through to the listing, which then refused "domain" as a key this
+	// route does not read.
+	if r.URL.Query().Has("domain") {
+		q, err := strictQuery(r, domainQueryParams)
+		if err != nil {
 			badRequest(w, err.Error())
+			return
+		}
+		domain := q.Get("domain")
+		if domain == "" {
+			badRequest(w, "domain must not be empty")
 			return
 		}
 		s.queryByDomain(w, r, ns, reg, domain)

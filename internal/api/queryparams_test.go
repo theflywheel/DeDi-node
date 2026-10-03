@@ -14,32 +14,45 @@ import (
 func TestAListingRejectsAParameterItDoesNotRead(t *testing.T) {
 	srv, s, _ := testServer(t)
 	seedBasic(t, s)
-	for _, c := range []struct{ path, bad string }{
+	for _, c := range []struct{ path, query, refused string }{
 		// The report's own examples, and the near-misses beside them.
-		{"/dedi/query/flywheel/participants", "asOn=2020-01-01T00:00:00Z"},
-		{"/dedi/query/flywheel/participants", "State=revoked"},
-		{"/dedi/query/flywheel", "pageSize=100"},
-		{"/dedi/query/flywheel", "status=active;"}, // unparseable, not ignored
-		{"/dedi/query/flywheel/participants", "page=1&page=2"},
+		{"/dedi/query/flywheel/participants", "asOn=2020-01-01T00:00:00Z", "asOn"},
+		{"/dedi/query/flywheel/participants", "State=revoked", "State"},
+		{"/dedi/query/flywheel", "pageSize=100", "pageSize"},
+		{"/dedi/query/flywheel/participants", "page=1&page=2", "page"},
 		// The discovery branch reads only domain; a page sent with it was dropped.
-		{"/dedi/query/flywheel/participants", "domain=flywheel.in&page=2"},
-		{"/dedi/versions/flywheel", "version_id=1"},
-		{"/dedi/versions/flywheel/participants/bap.example.com", "include_revoked=true"},
+		{"/dedi/query/flywheel/participants", "domain=flywheel.in&page=2", "page"},
+		{"/dedi/versions/flywheel", "version_id=1", "version_id"},
+		{"/dedi/versions/flywheel/participants/bap.example.com", "include_revoked=true", "include_revoked"},
 	} {
-		m := getJSON(t, srv.URL+c.path+"?"+c.bad, http.StatusBadRequest)
-		key := strings.SplitN(strings.SplitN(c.bad, "=", 2)[0], "&", 2)[0]
-		if e := fmt.Sprint(m["error"]); !strings.Contains(e, key) && !strings.Contains(e, "malformed") {
-			t.Errorf("%s?%s: the refusal does not say what it refused: %s", c.path, c.bad, e)
+		m := getJSON(t, srv.URL+c.path+"?"+c.query, http.StatusBadRequest)
+		// The refused key opens the message, quoted. Anywhere else would be
+		// satisfied by the list of accepted keys that follows it.
+		e := fmt.Sprint(m["error"])
+		if !strings.HasPrefix(e, fmt.Sprintf("unknown query parameter %q", c.refused)) &&
+			!strings.HasPrefix(e, fmt.Sprintf("query parameter %q given more than once", c.refused)) {
+			t.Errorf("%s?%s: the refusal does not open by naming %q: %s", c.path, c.query, c.refused, e)
+		}
+	}
+	// Unparseable, and an empty domain: refused, and not as an unknown key.
+	for _, c := range []struct{ path, query, says string }{
+		{"/dedi/query/flywheel", "status=active;", "malformed"},
+		{"/dedi/query/flywheel/participants", "domain=", "domain must not be empty"},
+	} {
+		m := getJSON(t, srv.URL+c.path+"?"+c.query, http.StatusBadRequest)
+		if e := fmt.Sprint(m["error"]); !strings.Contains(e, c.says) {
+			t.Errorf("%s?%s: %s, want it to say %q", c.path, c.query, e, c.says)
 		}
 	}
 }
 
 // Every key a real caller sends still works.
 //
-// Taken from the callers, not from the allow-lists: index.html (page,
-// page_size), admin.html (page, page_size, domain), the docs and monitors
-// (internal, status, state, sort, name), and the spec's own query parameters,
-// which conformance/ also exercises.
+// Not taken from the allow-lists. From callers: index.html and admin.html
+// (page, page_size, domain), the docs (page_size, domain, internal), and a
+// CREST spike script (/dedi/versions with no query). The rest (name, status,
+// state, sort, from, to, as_on) come from the two specs' parameter lists, not
+// from any caller found.
 func TestAListingStillAcceptsEveryParameterACallerSends(t *testing.T) {
 	srv, s, _ := testServer(t)
 	seedBasic(t, s)
