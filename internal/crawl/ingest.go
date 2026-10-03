@@ -71,6 +71,15 @@ type Ingester struct {
 // checkpoint would advance on data that never changed.
 func (in *Ingester) Ingest(ctx context.Context, res Result) (Ingested, error) {
 	var out Ingested
+	// Every file's namespace is checked before the first append, so a manifest
+	// whose second file is refused does not leave its first file ingested (#90).
+	// Fetch already verified every file; this is the other half of a crawl
+	// being all-or-nothing.
+	for _, f := range res.Files {
+		if err := in.mayMirror(ctx, res, f.Namespace); err != nil {
+			return out, err
+		}
+	}
 	for _, f := range res.Files {
 		n, err := in.ingestFile(ctx, res, f)
 		if err != nil {
@@ -84,15 +93,36 @@ func (in *Ingester) Ingest(ctx context.Context, res Result) (Ingested, error) {
 	return out, nil
 }
 
-func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File) (Ingested, error) {
-	var out Ingested
-	ns, reg := f.Namespace, f.Registry.Name
+// mayMirror refuses a namespace a crawl of res must not write into.
+func (in *Ingester) mayMirror(ctx context.Context, res Result, ns string) error {
 	if strings.HasPrefix(ns, "_") {
 		// Underscore is this node's own bookkeeping prefix and is hidden from
 		// the read plane; letting a remote publisher write there would let them
 		// hide records from every surface that reads them.
-		return out, fmt.Errorf("refusing to mirror namespace %q: the _ prefix is reserved for this node", ns)
+		return fmt.Errorf("refusing to mirror namespace %q: the _ prefix is reserved for this node", ns)
 	}
+	existing, err := in.Store.Resolve(ctx, "namespace", ns, "", "", nil, nil)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if owner := mirrorOf(existing.PayloadRaw); owner != res.Domain {
+		// The interesting failure. Two publishers claiming one namespace is
+		// not something a crawler may resolve on its own — picking either
+		// one would silently answer lookups from a source the operator did
+		// not choose.
+		return fmt.Errorf("%w: %q is %s, not a mirror of %s",
+			ErrNamespaceOwned, ns, describeOwner(owner), res.Domain)
+	}
+	return nil
+}
+
+// ingestFile writes one file. Its namespace has already passed mayMirror.
+func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File) (Ingested, error) {
+	var out Ingested
+	ns, reg := f.Namespace, f.Registry.Name
 
 	nsPayload, err := json.Marshal(map[string]any{
 		"description": "mirrored from " + res.Domain,
@@ -101,7 +131,7 @@ func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File)
 	if err != nil {
 		return out, err
 	}
-	switch existing, err := in.Store.Resolve(ctx, "namespace", ns, "", "", nil, nil); {
+	switch _, err := in.Store.Resolve(ctx, "namespace", ns, "", "", nil, nil); {
 	case errors.Is(err, store.ErrNotFound):
 		if err := in.append(ctx, res, store.AppendInput{
 			EntryType: "namespace", Namespace: ns, PayloadRaw: nsPayload,
@@ -111,15 +141,6 @@ func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File)
 		out.Namespaces++
 	case err != nil:
 		return out, err
-	default:
-		if owner := mirrorOf(existing.PayloadRaw); owner != res.Domain {
-			// The interesting failure. Two publishers claiming one namespace is
-			// not something a crawler may resolve on its own — picking either
-			// one would silently answer lookups from a source the operator did
-			// not choose.
-			return out, fmt.Errorf("%w: %q is %s, not a mirror of %s",
-				ErrNamespaceOwned, ns, describeOwner(owner), res.Domain)
-		}
 	}
 
 	// The registry entry carries the publisher's own signed envelope alongside

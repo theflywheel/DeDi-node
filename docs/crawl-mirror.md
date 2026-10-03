@@ -40,10 +40,12 @@ For each domain, every check below runs before anything is ingested:
    accept a new key: the domain stays stopped until the pin is changed.
 
 Verification is all-or-nothing, because a partial crawl would leave a copy that
-disagrees with the manifest that vouched for it. Ingestion itself is not: files
-are appended one at a time, so if a later file is refused at ingest time (for
-example, it names a namespace this node owns), the files before it have already
-been written.
+disagrees with the manifest that vouched for it. Ingestion checks every file's
+namespace before it writes anything, so a manifest with one refused file (a
+`_` namespace, or one this node owns or mirrors from another domain) writes
+nothing. Files are still appended one at a time, so a write that fails partway,
+such as a lost database connection, can leave some files written; the next
+crawl appends the rest and skips what is already there.
 
 ## What gets stored
 
