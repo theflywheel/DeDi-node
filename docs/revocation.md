@@ -71,7 +71,7 @@ send it, so a concurrent change fails loudly rather than being clobbered:
 ```sh
 echo '{"payload":{"reason":"key compromised, reported by operator 2026-08-14"}}' > reason.json
 
-t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r .data.version_tag)
+t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r '.data.version_tag // empty')
 
 dedid sign -key publisher.key -kid op-1 \
   -method POST -path /admin/namespaces/$NS/registries/$REG/records/$NAME/revoke \

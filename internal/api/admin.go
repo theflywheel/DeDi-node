@@ -236,7 +236,12 @@ func versionData(e store.Entry, unchanged bool) map[string]any {
 		"namespace":   e.Namespace,
 		"registry":    e.Registry,
 		"record_name": e.RecordName,
-		"version":     fmt.Sprintf("%d", e.Seq),
+		// version_id is the name the read plane takes this value under
+		// (?version_id=); version is kept because existing callers read it
+		// (#68). version_num is a different quantity: the ordinal within this
+		// resource, not the log sequence a pin takes.
+		"version_id":  versionID(e.Seq),
+		"version":     versionID(e.Seq),
 		"version_num": e.VersionNum,
 		"state":       e.State,
 		"digest":      hex.EncodeToString(e.Digest),
