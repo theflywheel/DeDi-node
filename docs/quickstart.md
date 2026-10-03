@@ -21,6 +21,7 @@ docker run -d --name dedi-node --network dedi-net -p 8080:8080 \
   -e DATABASE_URL='postgres://dedi:dedi@dedi-pg:5432/dedi?sslmode=disable' \
   -e DEDI_ORIGIN=localhost/log \
   flywheelai/dedi-node:latest
+until curl -sf localhost:8080/healthz >/dev/null; do sleep 1; done
 ```
 
 `DATABASE_URL` and `DEDI_DB_URL` both work; `DEDI_DB_URL` wins if both are
@@ -58,13 +59,15 @@ Mint a publisher key for one namespace. The private half stays in a file you
 keep; the node is only ever given the public half.
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
-  flywheelai/dedi-node:latest pubkeygen -kid op-1 -namespace demo
+KEYS=$(docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
+  flywheelai/dedi-node:latest pubkeygen -kid op-1 -namespace demo \
+  | sed -n 's/^DEDI_PUBLISHER_KEYS=//p')
+echo "$KEYS"
 ```
 
-It writes `publisher.key` and prints a line like
-`DEDI_PUBLISHER_KEYS=op-1:demo:<base64>`. Restart the node with that line and
-an admin password:
+It writes `publisher.key` and prints a line `DEDI_PUBLISHER_KEYS=op-1:demo:<base64>`,
+which the command above keeps in `$KEYS`. Restart the node with it and an admin
+password:
 
 ```sh
 export DEDI_ADMIN_PASSWORD=change-me
@@ -72,9 +75,10 @@ docker rm -f dedi-node
 docker run -d --name dedi-node --network dedi-net -p 8080:8080 \
   -e DATABASE_URL='postgres://dedi:dedi@dedi-pg:5432/dedi?sslmode=disable' \
   -e DEDI_ORIGIN=localhost/log \
-  -e DEDI_PUBLISHER_KEYS='op-1:demo:<base64 from pubkeygen>' \
+  -e DEDI_PUBLISHER_KEYS="$KEYS" \
   -e DEDI_ADMIN_PASSWORD="$DEDI_ADMIN_PASSWORD" \
   flywheelai/dedi-node:latest
+until curl -sf localhost:8080/healthz >/dev/null; do sleep 1; done
 ```
 
 The identity key is in the database, so the node comes back as the same node.
@@ -87,8 +91,8 @@ is what the log records as `created_by: publisher:op-1`. Neither replaces the
 other.
 
 Set `DEDI_WILDCARD_NAMESPACES` only if this node serves the Beckn ONIX registry
-lookup; see [configuration](configuration.md). If your image refuses to start
-and asks for it, set it to `demo`.
+lookup; see [configuration](configuration.md). Without it the node starts with
+that lookup switched off.
 
 ## 4. Make a signed write
 
