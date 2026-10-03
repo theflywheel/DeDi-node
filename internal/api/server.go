@@ -59,8 +59,9 @@ type Server struct {
 	Cluster func() cluster.State
 
 	// WildcardNamespaces limits which namespaces may answer a Beckn wildcard
-	// lookup (design.md:256). nil means no restriction — permitted only while
-	// the write plane is closed; see serve().
+	// lookup and ?domain= discovery (design.md:256). nil means no restriction,
+	// which writePlaneConfig gives only to a node with no publisher keys; with
+	// keys and no allowlist it is empty, and nothing is eligible.
 	WildcardNamespaces []string
 
 	// AdminAuth gates the admin surface at the deployment level: the operator

@@ -23,6 +23,12 @@ import (
 // registry, and a publisher's own namespace scope does not grant it.
 func twoNamespaceServer(t *testing.T, writeNS, eligibleNS string) (*httptest.Server, ed25519.PrivateKey) {
 	t.Helper()
+	return eligibilityServer(t, writeNS, []string{eligibleNS})
+}
+
+// eligibilityServer opens the write plane for writeNS with the given allowlist.
+func eligibilityServer(t *testing.T, writeNS string, eligible []string) (*httptest.Server, ed25519.PrivateKey) {
+	t.Helper()
 	base, s, _ := testServer(t)
 	base.Close()
 
@@ -41,7 +47,7 @@ func twoNamespaceServer(t *testing.T, writeNS, eligibleNS string) (*httptest.Ser
 	cp := &checkpoint.Checkpointer{Store: s, SKey: skey, Origin: "eligibility.test/log", Interval: time.Hour}
 	srv := httptest.NewServer((&Server{
 		Store: s, CP: cp, TTL: 300,
-		WildcardNamespaces: []string{eligibleNS},
+		WildcardNamespaces: eligible,
 		Auth:               &publisher.Authenticator{Keys: keys},
 	}).Handler())
 	t.Cleanup(srv.Close)
@@ -159,6 +165,45 @@ func TestNoAllowlistRestrictsNothing(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("a node with no allowlist gated a lookup: %d", resp.StatusCode)
+	}
+}
+
+// A node with publisher keys and DEDI_WILDCARD_NAMESPACES unset boots with an
+// empty allowlist (writePlaneConfig, #80). Nothing may answer the Beckn
+// wildcard then, not even the subscriber's own namespace, and ?domain=
+// discovery lists nobody; ordinary lookups are unaffected.
+func TestAnEmptyAllowlistLeavesNothingEligible(t *testing.T) {
+	srv, priv := eligibilityServer(t, "crest", []string{})
+
+	mustWrite(t, srv, priv, "PUT", "/admin/namespaces/crest", []byte(`{"payload":{}}`))
+	for _, reg := range []string{"subscribers.beckn.one", "other.registry"} {
+		mustWrite(t, srv, priv, "PUT", "/admin/namespaces/crest/registries/"+reg, []byte(`{"payload":{}}`))
+	}
+	mustWrite(t, srv, priv, "POST",
+		"/admin/namespaces/crest/registries/subscribers.beckn.one/records/KEY-1/publish",
+		[]byte(`{"payload":{"subscriber_id":"bpp.crest.example","type":"BPP","url":"https://bpp.crest.example/beckn"}}`))
+	mustWrite(t, srv, priv, "POST",
+		"/admin/namespaces/crest/registries/other.registry/records/KEY-1/publish",
+		[]byte(`{"payload":{"subscriber_id":"bpp.crest.example","domain":"retail"}}`))
+
+	for path, want := range map[string]int{
+		// The exact hit in the record's own namespace, and the wildcard by
+		// subscriber_id.
+		"/dedi/lookup/crest/subscribers.beckn.one/KEY-1":             http.StatusNotFound,
+		"/dedi/lookup/bpp.crest.example/subscribers.beckn.one/KEY-1": http.StatusNotFound,
+		"/dedi/lookup/crest/other.registry/KEY-1":                    http.StatusOK,
+	} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("GET %s: %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+	if _, out := discover(t, srv, "/dedi/query/crest/other.registry?domain=retail"); out.Data.Total != 0 {
+		t.Errorf("?domain= discovery listed %d participants with nothing eligible", out.Data.Total)
 	}
 }
 

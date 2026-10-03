@@ -179,24 +179,26 @@ func TestCatalogueCoversEveryRole(t *testing.T) {
 // nothing for it.
 //
 // This is asserted because the note here previously said the opposite, and the
-// advice was not merely wrong but harmful: cmd/dedid refuses to start when
-// DEDI_PUBLISHER_KEYS is set without DEDI_WILDCARD_NAMESPACES, and a witness
-// has no namespace for the renderer to fill in — so an operator following it
-// turned a working config into one that would not boot.
+// advice was not merely wrong but harmful: cmd/dedid then refused to start when
+// DEDI_PUBLISHER_KEYS was set without DEDI_WILDCARD_NAMESPACES (it no longer
+// does, #80), and a witness has no namespace for the renderer to fill in — so
+// an operator following it turned a working config into one that would not
+// boot.
 func TestWitnessIsNotToldToSetAPublisherKey(t *testing.T) {
 	notes := strings.Join(commonNotes(Spec{Role: RoleWitness, NodeName: "w"}), " ")
 	if strings.Contains(notes, "set DEDI_PUBLISHER_KEYS") {
 		t.Error("a witness is told to set publisher keys, which authorises nothing for it and " +
-			"prevents the node from starting without DEDI_WILDCARD_NAMESPACES")
+			"opens a write plane it has no use for")
 	}
 	if !strings.Contains(notes, "NO publisher key") {
 		t.Error("a witness is not told it needs no publisher key")
 	}
 }
 
-// The renderer must not emit a config that cannot boot: publisher keys without
-// wildcard namespaces is refused by cmd/dedid, so no role may emit the first
-// without the second.
+// Publisher keys without wildcard namespaces boot with the Beckn wildcard and
+// ?domain= discovery answering nothing (#80). A renderer that knows the
+// namespace must not emit the first without the second, or the node it
+// configures quietly drops out of Beckn lookups.
 func TestNoRoleEmitsPublisherKeysWithoutWildcardNamespaces(t *testing.T) {
 	for _, r := range []Role{RoleStandalone, RoleMirror, RoleWitness, RoleReplica, RoleChild} {
 		env := map[string]string{}
@@ -206,7 +208,7 @@ func TestNoRoleEmitsPublisherKeysWithoutWildcardNamespaces(t *testing.T) {
 		}
 		if _, hasKeys := env["DEDI_PUBLISHER_KEYS"]; hasKeys {
 			if _, hasWild := env["DEDI_WILDCARD_NAMESPACES"]; !hasWild {
-				t.Errorf("%s emits publisher keys with no wildcard namespaces; the node refuses to start", r)
+				t.Errorf("%s emits publisher keys with no wildcard namespaces; the node would answer no Beckn wildcard lookup", r)
 			}
 		}
 	}

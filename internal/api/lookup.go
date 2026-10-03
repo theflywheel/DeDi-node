@@ -154,8 +154,9 @@ const becknWildcardRegistry = "subscribers.beckn.one"
 //
 // A nil allowlist is no restriction, which is the shape a node has when its
 // write plane is closed: with nobody able to publish, there is nothing to scope.
-// Configuring publisher keys makes DEDI_WILDCARD_NAMESPACES mandatory, so the
-// check only binds where it has something to protect against.
+// A node with publisher keys never has a nil one: writePlaneConfig turns an
+// unset DEDI_WILDCARD_NAMESPACES into an empty allowlist, so no namespace is
+// eligible (#80).
 //
 // This governs the unversioned read — what a subscriber binds to *now*, which
 // is what routing consumes. Asking for a specific version or a settled as-on

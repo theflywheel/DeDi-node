@@ -28,8 +28,9 @@ import (
 // anyone able to publish a record named {key_id} anywhere on the node can
 // answer for any subscriber_id, and the ONIX client does not check that the
 // returned subscriber_id is the one it asked for. A nil slice means no
-// restriction, which is safe only while writes are operator-only; serve()
-// refuses that combination once publisher keys are configured.
+// restriction, which is safe only while writes are operator-only; once
+// publisher keys are configured, writePlaneConfig passes a non-nil allowlist,
+// empty when none is set.
 //
 // The filter lives here rather than in the handler so no future caller can
 // reach the wildcard query without passing through it.
