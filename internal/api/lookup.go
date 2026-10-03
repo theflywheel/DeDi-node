@@ -234,13 +234,12 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 // becknSubscribed mirrors the status filter in store.FindBecknSubscriber:
-// SUBSCRIBED or no status at all.
+// SUBSCRIBED or no status at all. A map, not a struct, because struct decoding
+// matches keys case-insensitively and payload->>'status' does not.
 func becknSubscribed(payload []byte) bool {
-	var p struct {
-		Status any `json:"status"`
-	}
+	var p map[string]any
 	json.Unmarshal(payload, &p)
-	return p.Status == nil || p.Status == "SUBSCRIBED"
+	return p["status"] == nil || p["status"] == "SUBSCRIBED"
 }
 
 // revokedAndUnresolvable reports whether this read must not resolve because

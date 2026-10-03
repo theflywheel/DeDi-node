@@ -221,7 +221,8 @@ func mustWrite(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, meth
 //
 // ONIX treats any 200 as a usable participant, so an UNSUBSCRIBED exact hit in
 // an eligible namespace was still routed to and had its signatures accepted.
-// The console's own Unsubscribe button works by setting this status.
+// The status reaches a record through the console's onboarding form, a seed
+// file or a direct write; revocation was already gated separately.
 func TestAnUnsubscribedExactHitDoesNotResolve(t *testing.T) {
 	srv, priv := twoNamespaceServer(t, "beckn-testnet", "beckn-testnet")
 	const path = "/admin/namespaces/beckn-testnet/registries/subscribers.beckn.one/records/KEY-1/publish"
@@ -237,6 +238,8 @@ func TestAnUnsubscribedExactHitDoesNotResolve(t *testing.T) {
 		{`"INITIATED"`, http.StatusNotFound},
 		{`"SUBSCRIBED"`, http.StatusOK},
 		{`null`, http.StatusOK},
+		// Only the exact key counts, as in payload->>'status'.
+		{`"SUBSCRIBED","Status":"UNSUBSCRIBED"`, http.StatusOK},
 		{`"UNSUBSCRIBED"`, http.StatusNotFound},
 	} {
 		mustWrite(t, srv, priv, "POST", path,

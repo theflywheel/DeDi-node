@@ -63,7 +63,9 @@ the record the node chose to return rather than the one asked for.
 - **`proof=inclusion`** attaches `proof`: the leaf, its index, the audit path,
   and the signed checkpoint it verifies against. Any other value is a `400`.
 - **`include_revoked=true`** lets a record lookup return a revoked current
-  version (`state: revoked`) instead of `404`.
+  version (`state: revoked`) instead of `404`. On `subscribers.beckn.one` it
+  also returns a current version whose `status` is not `SUBSCRIBED`, which the
+  Beckn lookup otherwise skips.
 - **`internal=1`** makes `_`-prefixed bookkeeping namespaces (`_witness`,
   `_domains`, `_crawl`, …) visible; without it they `404`, so a crawler
   reading the standard's endpoints does not index them as directory data.
