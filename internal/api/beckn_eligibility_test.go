@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -213,5 +214,55 @@ func mustWrite(t *testing.T, srv *httptest.Server, priv ed25519.PrivateKey, meth
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("%s %s: %d %v", method, path, resp.StatusCode, bodyOf(t, resp))
+	}
+}
+
+// The exact path honours subscriber status the way the wildcard does (#89).
+//
+// ONIX treats any 200 as a usable participant, so an UNSUBSCRIBED exact hit in
+// an eligible namespace was still routed to and had its signatures accepted.
+// The console's own Unsubscribe button works by setting this status.
+func TestAnUnsubscribedExactHitDoesNotResolve(t *testing.T) {
+	srv, priv := twoNamespaceServer(t, "beckn-testnet", "beckn-testnet")
+	const path = "/admin/namespaces/beckn-testnet/registries/subscribers.beckn.one/records/KEY-1/publish"
+	mustWrite(t, srv, priv, "PUT", "/admin/namespaces/beckn-testnet", []byte(`{"payload":{}}`))
+	mustWrite(t, srv, priv, "PUT", "/admin/namespaces/beckn-testnet/registries/subscribers.beckn.one",
+		[]byte(`{"payload":{}}`))
+
+	for _, c := range []struct {
+		status string
+		want   int
+	}{
+		{`"UNSUBSCRIBED"`, http.StatusNotFound},
+		{`"INITIATED"`, http.StatusNotFound},
+		{`"SUBSCRIBED"`, http.StatusOK},
+		{`null`, http.StatusOK},
+		{`"UNSUBSCRIBED"`, http.StatusNotFound},
+	} {
+		mustWrite(t, srv, priv, "POST", path,
+			[]byte(`{"payload":{"subscriber_id":"bpp.acme.example","url":"https://bpp.acme.example/beckn","status":`+c.status+`}}`))
+		resp, err := http.Get(srv.URL + "/dedi/lookup/beckn-testnet/subscribers.beckn.one/KEY-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("status %s: exact lookup answered %d, want %d", c.status, resp.StatusCode, c.want)
+		}
+	}
+
+	// Reading history is not an identity claim, so a pinned version still
+	// answers; nor is the operator's include_revoked read, which the console
+	// uses to edit or re-subscribe the participant.
+	// version_id is a log seq: 3 is the first record write, UNSUBSCRIBED.
+	for _, q := range []string{"?version_id=3", "?include_revoked=true"} {
+		resp, err := http.Get(srv.URL + "/dedi/lookup/beckn-testnet/subscribers.beckn.one/KEY-1" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Errorf("%s of an unsubscribed participant: %d, want 200 %s", q, resp.StatusCode, b)
+		}
 	}
 }

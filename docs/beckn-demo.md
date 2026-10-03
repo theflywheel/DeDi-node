@@ -56,12 +56,11 @@ curl -s 'https://dedi.beckn.try-dough.com/dedi/lookup/bpp.example.com/subscriber
   lookup matches on it. The `{subscriber_id}` in the path must equal the
   payload's `subscriber_id` (or the name of the namespace). One subscriber with
   two keys is two records. See [onboarding](onboarding.md).
-- **`status: SUBSCRIBED`** or no status at all is required for the wildcard
-  search to return a participant. A revoked current version is a `404` on every
-  path. One exception: when the path's `{subscriber_id}` is the namespace name
-  itself, an exact hit is answered whatever its `status`, so set the record's
-  state with revocation rather than relying on `status` alone. ONIX treats any
-  non-`200` as an unknown sender.
+- **`status: SUBSCRIBED`** or no status at all is required for a lookup to
+  return a participant, on the exact path as well as the wildcard search. A
+  revoked current version is a `404` on every path. `?include_revoked=true` and
+  pinned versions still answer, for the operator and for history. ONIX treats
+  any non-`200` as an unknown sender.
 - **`network_memberships`** must include the network the adapter is configured
   for (`beckn.one/testnet` here), or the adapter rejects the sender.
 - **`ttl: 20`** on these records. ONIX caches keys for the `ttl` the registry
