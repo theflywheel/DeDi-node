@@ -34,6 +34,9 @@ func TestALookupRejectsAParameterItDoesNotRead(t *testing.T) {
 			fmt.Sprintf("proof=inclusion&versionId=%d;", rec1.Seq),
 			fmt.Sprintf("version_id=%d;proof=inclusion", rec1.Seq),
 			"versionId=%zz&proof=inclusion",
+			// Repeated: the first value would win, and here it is "unpinned".
+			fmt.Sprintf("version_id=&version_id=%d&proof=inclusion", rec1.Seq),
+			"as_on=&as_on=2000-01-01T00:00:00Z",
 		} {
 			getJSON(t, srv.URL+path+"?"+raw, http.StatusBadRequest)
 		}

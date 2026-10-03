@@ -43,7 +43,12 @@ func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("malformed query string: %v", err)
 	}
-	for k := range q {
+	for k, vs := range q {
+		// Every reader below takes the first value, so ?version_id=&version_id=2
+		// would unpin silently, the #65 failure reached through a duplicate.
+		if len(vs) > 1 && lookupParams[k] {
+			return nil, nil, fmt.Errorf("query parameter %q given more than once", k)
+		}
 		if !lookupParams[k] {
 			accepted := make([]string, 0, len(lookupParams))
 			for p := range lookupParams {
