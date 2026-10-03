@@ -56,12 +56,22 @@ The check runs every interval, but a consistent verdict is written at most once
 per `DEDI_WITNESS_RECORD_INTERVAL` (default `1h`; `0` writes every change). An
 alarm is written at once, whatever the interval. Without this a ring floods
 itself: each verdict grows the witness's own tree, its own watcher sees that as
-a change and writes a verdict, and so on round the ring every minute. Between
-written verdicts the witness proves each new checkpoint consistent with the
-last tree it *checked*, held in memory, so a rewrite inside the window is still
-caught. After a restart that memory is gone and it starts again from the last
-written verdict. Child witness loops (see [delegation](delegation.md)) use the
-same setting.
+a change and writes a verdict, and so on round the ring every minute.
+
+Every check proves the new checkpoint consistent with the newest written
+verdict, so each written "ok" is consistent with the one before it and the log
+alone is a checkable chain. Between written verdicts the witness also proves
+from the last tree it checked, held in memory, so a rewrite of entries it saw
+but had not yet written down is still caught. When that is how an alarm is
+found, the witness first writes the tree it saw as "ok" (it was proven
+consistent with the newest verdict), then the alarm, so the contradicting pair
+is in the log for anyone to re-check.
+
+The memory is not durable. After a restart, a crash or a cluster leader change,
+or once another loop writes a verdict for the same target, it is dropped: up
+to `DEDI_WITNESS_RECORD_INTERVAL` of checked but unwritten history is lost, and
+a rewrite confined to that span is not alarmed afterwards. Child witness loops
+(see [delegation](delegation.md)) use the same setting.
 
 ## The three failures it is built to catch
 
