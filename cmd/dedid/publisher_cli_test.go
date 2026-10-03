@@ -261,8 +261,10 @@ func TestSignWithNoPreconditionIsAcceptedByTheNode(t *testing.T) {
 	}
 }
 
-// Both flags would sign two contradictory preconditions, which the node
-// refuses (preconditionOf), so the CLI refuses to produce them.
+// Both flags would sign two contradictory preconditions: a write cannot be both
+// a create and a replace. The namespace, registry and record writes refuse the
+// pair (preconditionOf); the routes that take no precondition never read either
+// header and would accept it. So the CLI is the check that catches it.
 func TestSignRejectsBothPreconditions(t *testing.T) {
 	keyFile := filepath.Join(t.TempDir(), "publisher.key")
 	capture(t, func() error {
