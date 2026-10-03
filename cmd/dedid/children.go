@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -267,15 +268,25 @@ func (n notifyingAppender) Append(ctx context.Context, in store.AppendInput) (st
 	return e, err
 }
 
-// Webhook forwards subscription changes when the wrapped writer replicates
-// them. Without this the wrapper would silently hide the cluster's proposer
-// from the API, and every subscription would be written to the leader's own
-// database only — the exact failure replicating them was meant to fix.
+// Webhook forwards subscription changes to whatever the wrapped writer is.
+// Without this the wrapper would silently hide the cluster's proposer from the
+// API, and every subscription would be written to the leader's own database
+// only — the exact failure replicating them was meant to fix.
+//
+// On a standalone node the wrapped writer is the store itself, which applies
+// the change directly. This used to return nil for it, so on every unclustered
+// node a subscription was acknowledged and never written, and the handler's
+// read-back answered 500. Any other writer is refused rather than reported as
+// done: a subscription change that went nowhere must not look like success.
 func (n notifyingAppender) Webhook(ctx context.Context, c store.WebhookCommand) error {
-	if w, ok := n.inner.(interface {
+	switch w := n.inner.(type) {
+	case interface {
 		Webhook(context.Context, store.WebhookCommand) error
-	}); ok {
+	}:
 		return w.Webhook(ctx, c)
+	case *store.Store:
+		return w.ApplyWebhook(ctx, c)
+	default:
+		return fmt.Errorf("subscription change %q: this node's writer cannot apply it", c.Op)
 	}
-	return nil
 }
