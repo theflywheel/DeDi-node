@@ -277,6 +277,13 @@ func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.
 			conflict(w, err)
 			return
 		}
+		// A write under a namespace or registry that does not exist (#70). The
+		// store names the missing parent; a 500 told the caller nothing and
+		// paged whoever watches 5xx for a mistake that was not the node's.
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+			return
+		}
 		internal(w, err)
 		return
 	}
