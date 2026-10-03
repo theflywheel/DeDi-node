@@ -59,3 +59,44 @@ func TestDomainVerificationOnAFollowerRedirectsToTheLeader(t *testing.T) {
 		t.Errorf("redirected to %q, want %q", loc, leader+path)
 	}
 }
+
+// A follower that has not applied the namespace yet still redirects.
+//
+// The test above seeds the namespace into the follower, so it covers only a
+// follower that has caught up. One that has not would read the namespace as
+// missing and answer 404, or check DNS against a stale domain and answer 400,
+// for a request the leader would accept.
+func TestDomainWritesOnALaggingFollowerRedirectWithoutReadingTheReplica(t *testing.T) {
+	const ns, leader = "beckn-testnet", "https://leader.example"
+	base, s, _ := testServer(t)
+	base.Close() // nothing seeded: this replica has not seen the namespace
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	keys, err := publisher.ParseKeySet("op-1:" + ns + ":" + base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skey, _, _ := note.GenerateKey(rand.Reader, "domain.lag.test")
+	srv := httptest.NewServer((&Server{
+		Store: s, CP: &checkpoint.Checkpointer{Store: s, SKey: skey, Origin: "domain.lag.test/log", Interval: time.Hour},
+		TTL: 300, VerifierKey: domainTestNodeKey, WildcardNamespaces: []string{ns},
+		Auth: &publisher.Authenticator{Keys: keys}, DNSResolver: stubZone{},
+		Writer:  notLeaderWriter{},
+		Cluster: func() cluster.State { return cluster.State{Enabled: true, Role: "follower", LeaderURL: leader} },
+	}).Handler())
+	t.Cleanup(srv.Close)
+
+	http.DefaultClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	t.Cleanup(func() { http.DefaultClient.CheckRedirect = nil })
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/admin/namespaces/" + ns + "/domain/verify"},
+		{http.MethodDelete, "/admin/namespaces/" + ns + "/domain"},
+	} {
+		resp := signedDo(t, srv, priv, c.method, c.path, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusTemporaryRedirect || resp.Header.Get("Location") != leader+c.path {
+			t.Errorf("%s %s on a lagging follower: %d to %q, want 307 to the leader",
+				c.method, c.path, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+}
