@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -201,7 +202,14 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		// So an ineligible exact hit is not authoritative and does not short
 		// the search — the eligible namespaces still get their chance to answer,
 		// which is what FindBecknSubscriber is for.
-		if errors.Is(err, store.ErrNotFound) || !s.becknNamespaceEligible(ns) {
+		//
+		// The same goes for an exact hit whose status is not SUBSCRIBED: the
+		// wildcard has always skipped those, and without this the exact path
+		// kept answering 200 for an UNSUBSCRIBED participant (#89).
+		// ?include_revoked=true is the operator's read, as for revocation: the
+		// console reads the current version through it to edit or re-subscribe.
+		if errors.Is(err, store.ErrNotFound) || !s.becknNamespaceEligible(ns) ||
+			(err == nil && !becknSubscribed(e.PayloadRaw) && r.URL.Query().Get("include_revoked") != "true") {
 			e, err = s.Store.FindBecknSubscriber(r.Context(), ns, rec, s.WildcardNamespaces)
 		}
 	}
@@ -223,6 +231,15 @@ func (s *Server) lookupRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.respondLookup(w, r, "Record retrieved successfully", recordData(e, versions, s.TTL), e)
+}
+
+// becknSubscribed mirrors the status filter in store.FindBecknSubscriber:
+// SUBSCRIBED or no status at all. A map, not a struct, because struct decoding
+// matches keys case-insensitively and payload->>'status' does not.
+func becknSubscribed(payload []byte) bool {
+	var p map[string]any
+	json.Unmarshal(payload, &p)
+	return p["status"] == nil || p["status"] == "SUBSCRIBED"
 }
 
 // revokedAndUnresolvable reports whether this read must not resolve because
