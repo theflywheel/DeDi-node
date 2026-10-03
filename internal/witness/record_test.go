@@ -29,6 +29,10 @@ type fakeTarget struct {
 	skey   string
 	leaves [][]byte
 	olds   []int64 // the old size of every consistency proof asked for
+
+	// onProof, if set, runs as a proof is asked for, before it is served, so
+	// a test can make something happen in the middle of a check.
+	onProof func(old int64)
 }
 
 func (f *fakeTarget) grow(n int) {
@@ -95,9 +99,12 @@ func (f *fakeTarget) handler() http.Handler {
 		wr.Write([]byte(note))
 	})
 	mux.HandleFunc("GET /dedi/log/proof/consistency", func(wr http.ResponseWriter, r *http.Request) {
+		old, _ := strconv.ParseInt(r.URL.Query().Get("old"), 10, 64)
+		if f.onProof != nil {
+			f.onProof(old) // unlocked: the hook may itself call this target
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		old, _ := strconv.ParseInt(r.URL.Query().Get("old"), 10, 64)
 		n, _ := strconv.ParseInt(r.URL.Query().Get("new"), 10, 64)
 		f.olds = append(f.olds, old)
 		proof, err := tlog.ProveTree(n, old, f.reader())
@@ -462,6 +469,72 @@ func TestAWitnessNeverLogsOkForATreeTheNewestVerdictWasNotProvenAgainst(t *testi
 		if strings.Contains(v, `"size":5`) {
 			t.Fatalf("a logged the tree it saw before the other witness's verdict: %v", history(t, a))
 		}
+	}
+}
+
+// The same hazard, inside a single check. The newest verdict is confirmed
+// before the proof from the seen tree is fetched; if another witness logs while
+// that fetch is in flight, the "ok" the alarm path writes for the seen tree is
+// no longer proven against the newest verdict. Here it would be ok(5) after
+// ok(7): an ok that shrinks from the one before it.
+func TestAVerdictLoggedMidCheckStopsTheSeenTreeBeingLogged(t *testing.T) {
+	a, f, clk := recordingWitness(t)
+	b := twin(a)
+	ctx := context.Background()
+	f.grow(3)
+	a.check(ctx) // a logs ok(3)
+	clk.advance(time.Minute)
+	f.grow(2)
+	a.check(ctx) // a has seen 5
+	clk.advance(time.Minute)
+	f.rewrite(4) // a's 5 no longer holds; the logged 3 still does
+	f.grow(2)
+
+	var once sync.Once
+	f.onProof = func(old int64) {
+		if old == 5 { // a's proof from the seen tree is in flight
+			once.Do(func() {
+				if _, err := b.VerifyOnce(ctx); err != nil { // b logs ok(7) from 3
+					t.Errorf("the other witness: %v", err)
+				}
+			})
+		}
+	}
+	a.VerifyOnce(ctx) // an error is expected: the check was overtaken
+	f.onProof = nil
+
+	type v struct {
+		Size int64 `json:"size"`
+		OK   bool  `json:"consistency_ok"`
+	}
+	es, err := a.Store.Versions(ctx, "record", witnessNS, a.Origin, "checkpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last int64 = -1
+	for _, e := range es {
+		var p v
+		json.Unmarshal(e.PayloadRaw, &p)
+		if p.OK && p.Size < last {
+			t.Fatalf("an ok verdict shrinks from the one before it: %v", history(t, a))
+		}
+		if p.OK {
+			last = p.Size
+		}
+	}
+	if latestVerdict(t, a).Size != 7 {
+		t.Fatalf("the hook did not interleave as intended: %v", history(t, a))
+	}
+
+	// The next check proves from b's verdict, which the target still matches,
+	// and writes nothing. a's stale tree is dropped, not written later.
+	before := len(es)
+	clk.advance(time.Minute)
+	if _, err := a.VerifyOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h := history(t, a); len(h) != before {
+		t.Fatalf("the check after the race wrote something: %v", h)
 	}
 }
 

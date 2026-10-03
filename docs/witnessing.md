@@ -64,8 +64,11 @@ alone is a checkable chain. Between written verdicts the witness also proves
 from the last tree it checked, held in memory, so a rewrite of entries it saw
 but had not yet written down is still caught. When that is how an alarm is
 found, the witness first writes the tree it saw as "ok" (it was proven
-consistent with the newest verdict), then the alarm, so the contradicting pair
-is in the log for anyone to re-check.
+consistent with the verdict that was newest when it was seen), then the alarm,
+so the contradicting pair is in the log for anyone to re-check. Just before
+writing, it reads the log again and writes nothing if another verdict has
+landed meanwhile; that narrows the window for a concurrent writer to slip in
+between, but does not close it.
 
 The memory is not durable. After a restart, a crash or a cluster leader change,
 or once another loop writes a verdict for the same target, it is dropped: up

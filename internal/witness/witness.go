@@ -424,9 +424,18 @@ func (w *Witness) VerifyOnce(ctx context.Context) (Result, error) {
 		if bad {
 			// The tree this contradicts is not in the log, so an alarm alone
 			// could not be re-checked by anyone reading it. seen was proven
-			// consistent with the newest logged verdict, which is still the
-			// newest (unlogged checks that), so logging it as consistent is
-			// true, and puts the contradicting pair in the log.
+			// consistent with logT, so logging it as consistent puts the
+			// contradicting pair in the log, and is true only while logT is
+			// still the newest verdict. unlogged checked that before the
+			// proof was fetched; another writer may have logged since, so it
+			// is read again here and, if it moved, nothing is written and the
+			// next check proves from the new verdict. That narrows the window
+			// rather than closing it: a verdict logged between this read and
+			// the append below still races it, as any read-then-append on
+			// this log does.
+			if s, r, ok := w.lastWitnessed(ctx); ok != logged || (tree{s, r}) != logT {
+				return Result{}, errors.New("another verdict was logged during this check; the next check proves from it")
+			}
 			if err := w.appendVerdict(ctx, seen, true, ""); err != nil {
 				return Result{}, err
 			}
