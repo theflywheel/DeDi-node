@@ -41,6 +41,7 @@ syntax (`30s`, `5m`, `1h`).
 | `DEDI_WITNESS_TARGET_KEY` | — | The target's verifier key. Get it out of band. |
 | `DEDI_WITNESS_TARGET_ORIGIN` | `target` | Must equal the first line of the target's checkpoint. |
 | `DEDI_WITNESS_INTERVAL` | `60s` | How often to check the target. |
+| `DEDI_WITNESS_RECORD_INTERVAL` | `1h` | Write a consistent verdict at most this often per target; an alarm is written at once. `0` writes one for every change, the old behaviour. See [witnessing](witnessing.md). |
 | `DEDI_PEERS` | — | Other nodes to show in the network view: comma-separated `url` or `name=url`. Observation only (did it answer), never proof. |
 | `DEDI_PEER_INTERVAL` | `30s` | How often to poll peers. |
 | `DEDI_EXTERNAL_STATUS_URL` | — | Link to an external monitor watching this node, shown on `/status`. Empty by design: the node will not imply someone independent watches it. |
