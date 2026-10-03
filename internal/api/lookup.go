@@ -35,28 +35,43 @@ var lookupParams = map[string]bool{
 	"version_id": true, "as_on": true, "proof": true, "include_revoked": true, "internal": true,
 }
 
-func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
+// strictQuery parses the query string and refuses one that a read route would
+// otherwise answer by quietly ignoring part of it: unparseable, a key the
+// route does not read, or a key it reads given more than once.
+//
+// Each route passes the keys it reads. Lookup (#65) was first; query and
+// versions (#73) ignored unknown keys the same way, so ?asOn= on a query
+// listed today's records as an answer about 2020.
+func strictQuery(r *http.Request, accepted map[string]bool) (url.Values, error) {
 	// Not r.URL.Query(): it discards ParseQuery's error along with every
 	// segment that has a ';' or a bad %-escape, so ?versionId=2; never reached
 	// the check below and answered with the latest version all the same.
 	q, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		return nil, nil, fmt.Errorf("malformed query string: %v", err)
+		return nil, fmt.Errorf("malformed query string: %v", err)
 	}
 	for k, vs := range q {
-		// Every reader below takes the first value, so ?version_id=&version_id=2
-		// would unpin silently, the #65 failure reached through a duplicate.
-		if len(vs) > 1 && lookupParams[k] {
-			return nil, nil, fmt.Errorf("query parameter %q given more than once", k)
-		}
-		if !lookupParams[k] {
-			accepted := make([]string, 0, len(lookupParams))
-			for p := range lookupParams {
-				accepted = append(accepted, p)
+		if !accepted[k] {
+			keys := make([]string, 0, len(accepted))
+			for a := range accepted {
+				keys = append(keys, a)
 			}
-			sort.Strings(accepted)
-			return nil, nil, fmt.Errorf("unknown query parameter %q; lookups accept %s", k, strings.Join(accepted, ", "))
+			sort.Strings(keys)
+			return nil, fmt.Errorf("unknown query parameter %q; this route accepts %s", k, strings.Join(keys, ", "))
 		}
+		// Every reader takes the first value, so ?version_id=&version_id=2
+		// would unpin silently, the #65 failure reached through a duplicate.
+		if len(vs) > 1 {
+			return nil, fmt.Errorf("query parameter %q given more than once", k)
+		}
+	}
+	return q, nil
+}
+
+func parseLookupParams(r *http.Request) (*int64, *time.Time, error) {
+	q, err := strictQuery(r, lookupParams)
+	if err != nil {
+		return nil, nil, err
 	}
 	var versionID *int64
 	var asOn *time.Time

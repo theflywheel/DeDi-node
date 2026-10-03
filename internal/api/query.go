@@ -11,8 +11,25 @@ import (
 	"github.com/theflywheel/DeDi-node/internal/store"
 )
 
+// queryParams is every key a /dedi/query listing reads (#73). The spec gives
+// status to the namespace route and state to the registry route; both are read
+// on both, so both are accepted on both. internal is read by
+// internalNamespaceGuard.
+var queryParams = map[string]bool{
+	"name": true, "status": true, "state": true, "from": true, "to": true, "as_on": true,
+	"sort": true, "page": true, "page_size": true, "internal": true,
+}
+
+// domainQueryParams is what the discovery branch reads. It answers the domain
+// question alone, so a filter or page sent with it would be ignored rather
+// than applied.
+var domainQueryParams = map[string]bool{"domain": true, "internal": true}
+
 func parseQueryFilters(r *http.Request) (store.QueryFilters, error) {
-	q := r.URL.Query()
+	q, err := strictQuery(r, queryParams)
+	if err != nil {
+		return store.QueryFilters{}, err
+	}
 	var f store.QueryFilters
 	if v := q.Get("name"); v != "" {
 		f.Name = &v
@@ -146,6 +163,10 @@ func (s *Server) queryRegistry(w http.ResponseWriter, r *http.Request) {
 	// parameter, so /dedi/query without it behaves exactly as it always has and
 	// still never reaches into the payload.
 	if domain := r.URL.Query().Get("domain"); domain != "" {
+		if _, err := strictQuery(r, domainQueryParams); err != nil {
+			badRequest(w, err.Error())
+			return
+		}
 		s.queryByDomain(w, r, ns, reg, domain)
 		return
 	}
