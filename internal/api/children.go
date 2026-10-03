@@ -589,16 +589,28 @@ func (s *Server) writerAppend(r *http.Request, by string, in store.AppendInput) 
 	return s.writer().Append(r.Context(), in)
 }
 
-// writeFailure maps an append error onto the response, including the
-// follower-redirect case every write path needs.
+// writeFailure maps an append error onto the response. Every write path uses
+// it: appendAs kept its own copy and domain verification used neither, so a
+// case added to one (#70's ErrNotFound) was missing from the others, and a
+// write that reached the log another way answered a follower with 500 rather
+// than a redirect (#76).
 func (s *Server) writeFailure(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	// In a cluster only the leader appends. That is not a failure — this
+	// replica just is not the one that writes — so send the client there. 307
+	// preserves the method and body, which matters because the body carries
+	// the signature.
 	case errors.Is(err, cluster.ErrNotLeader):
 		s.redirectToLeader(w, r)
+	// The caller's fault, not the node's; only genuine failures read as 500.
 	case errors.Is(err, store.ErrInvalidWrite):
 		badRequest(w, err.Error())
 	case errors.Is(err, store.ErrVersionConflict):
 		conflict(w, err)
+	// A write under a namespace or registry that does not exist (#70). The
+	// store names the missing parent.
+	case errors.Is(err, store.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
 	default:
 		internal(w, err)
 	}

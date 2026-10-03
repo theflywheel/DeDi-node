@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/theflywheel/DeDi-node/internal/cluster"
 	"github.com/theflywheel/DeDi-node/internal/publisher"
 	"github.com/theflywheel/DeDi-node/internal/refschemas"
 	"github.com/theflywheel/DeDi-node/internal/store"
@@ -258,33 +257,7 @@ func (s *Server) appendAs(w http.ResponseWriter, r *http.Request, key publisher.
 	in.CreatedBy = "publisher:" + key.KID
 	e, err := s.writer().Append(r.Context(), in)
 	if err != nil {
-		// In a cluster only the leader appends. That is not a failure — the
-		// directory is up, this replica just is not the one that writes — so
-		// send the client to the leader rather than returning an error. 307
-		// preserves the method and body, which matters because the body carries
-		// the signature.
-		if errors.Is(err, cluster.ErrNotLeader) {
-			s.redirectToLeader(w, r)
-			return
-		}
-		// A malformed write is the caller's fault, not the node's; only
-		// genuine failures should read as 500.
-		if errors.Is(err, store.ErrInvalidWrite) {
-			badRequest(w, err.Error())
-			return
-		}
-		if errors.Is(err, store.ErrVersionConflict) {
-			conflict(w, err)
-			return
-		}
-		// A write under a namespace or registry that does not exist (#70). The
-		// store names the missing parent; a 500 told the caller nothing and
-		// paged whoever watches 5xx for a mistake that was not the node's.
-		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-			return
-		}
-		internal(w, err)
+		s.writeFailure(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Message: msg, Data: versionData(e, false)})

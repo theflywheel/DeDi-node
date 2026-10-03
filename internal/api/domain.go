@@ -170,7 +170,7 @@ func (s *Server) verifyDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.ensureDomainProofParents(r.Context(), key); err != nil {
-		internal(w, err)
+		s.writeFailure(w, r, err)
 		return
 	}
 	name, _ := domainproof.Challenge(ns, domain, s.VerifierKey)
