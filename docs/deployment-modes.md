@@ -52,32 +52,40 @@ plane retries.
 
 ## Mode 1 — Unwitnessed
 
-```sh
-make keygen && docker compose up -d
-```
-
-One binary, one Postgres. The transparency log, signed C2SP checkpoints, and
-in-browser verification are always on; they are the product, not a mode.
+One binary, one Postgres: the [quickstart](/docs/quickstart) is exactly this.
+The transparency log, signed C2SP checkpoints, and in-browser verification are
+always on; they are the product, not a mode.
 
 ## Mode 2 — Witnessed
 
 Any dedid node can witness any other — the flag goes on the **watcher**:
 
 ```sh
-DEDI_WITNESS_TARGET_URL=https://dedi.example.org   # node to watch
+DEDI_WITNESS_TARGET_URL=https://dedi.example.org/dedi   # node to watch, including /dedi
 DEDI_WITNESS_TARGET_KEY=<its verifier key>
+DEDI_WITNESS_TARGET_ORIGIN=dedi.example.org/log         # first line of its checkpoint
 DEDI_WITNESS_INTERVAL=60s
 ```
 
-The overlay `docker-compose.witness.yml` packages this flag-set as a second
-node beside the primary (own key, own Postgres):
+The source tree's `docker-compose.witness.yml` packages this as a second node
+beside the compose primary, with its own key and Postgres. Both nodes there
+read their keys from files, so make them first and give the witness the
+primary's verifier key:
 
 ```sh
+mkdir -p keys
+docker run --rm -v "$PWD/keys:/keys" flywheelai/dedi-node keygen -out /keys/dedid.key -name dev.dedi.local
+docker run --rm -v "$PWD/keys:/keys" flywheelai/dedi-node keygen -out /keys/witness.key -name witness.dedi.local
+export DEDI_PRIMARY_VERIFIER_KEY='<the verifier key printed for dedid.key>'
 docker compose -f docker-compose.yml -f docker-compose.witness.yml up -d
+curl -s localhost:8081/dedi/witness | jq .data
 ```
 
-Verdicts are browsable under the watcher's `_witness` namespace. Two operators
-witnessing each other is the honest minimum for decentralised trust.
+The first check runs at start-up and may fail while the primary is still
+booting; the next one, a minute later, records the verdict. Verdicts are
+published at the watcher's `/dedi/witness` ([witnessing](/docs/witnessing)).
+Two operators witnessing each other is the honest minimum for decentralised
+trust.
 
 **Rings.** A node witnesses exactly one target, so three or more nodes are
 arranged as a cycle — A → B → C → A. Every node is then watched by exactly one
@@ -86,8 +94,10 @@ unobserved. A star (everyone watches A) leaves A's watchers unwatched and A
 watching nobody, which is strictly weaker for the same number of nodes.
 
 Nodes in a ring do **not** replicate each other. Each keeps its own key, its own
-database and its own log; federation beyond witnessing is an explicit non-goal
-(design.md §3). What the ring distributes is *trust*, not data.
+database and its own log. What the ring distributes is *trust*, not data.
+Copying data is a different feature with a different trust claim: Raft
+[replication](/docs/replication) inside one operator, or a
+[mirror](/docs/crawl-mirror) crawling someone else's published files.
 
 **Seeing the network.** `DEDI_PEERS` lists the other nodes, as
 `name=url` pairs, and the node then polls each for its signed checkpoint and
@@ -150,7 +160,8 @@ the reader needs to be able to check:
 - A namespace someone else should govern: role *child*, and the parent
   witnesses it, so it arrives in mode 2 rather than being upgraded to it later.
 - Reach without authority: role *mirror*. It cannot write, and everything it
-  serves is still checkable against the origin's own checkpoint.
+  serves is still checkable against the original publisher's signature
+  ([crawler and mirror](/docs/crawl-mirror)).
 
 Add replicas when the cost of the directory being *unreachable* matters — for
 Beckn, an unresolvable subscriber key is a 401 NACK on every message in flight.

@@ -82,7 +82,12 @@ rather than defaulting one, because a default here is a silent fork.
 
 - A **deterministic rejection** (bad input, failed precondition, missing
   parent) is a state transition. Every replica reaches it identically, so it is
-  returned to the client as a 400 or 409 and the cluster stays in step.
+  returned to the client and the cluster stays in step. One mapper
+  (`writeFailure` in `internal/api/children.go`) turns it into the same answer
+  on every write route: `400` invalid write, `404` missing namespace or
+  registry (naming it), `412` failed precondition. The delegation routes add
+  `409` for a state that retrying will not change, such as a namespace already
+  delegated. See [API](/docs/api#errors).
 - An **infrastructure failure** (database unreachable, disk full) is local. If
   it were swallowed, this replica would skip an entry every other replica
   applied and serve a different tree from then on, while looking healthy. So
@@ -141,6 +146,18 @@ thing to bet a signing key on.
 Set `DEDI_CLUSTER_ID` to turn replication on. Leaving it unset keeps the node
 exactly as it was — an unreplicated node is unchanged by any of this.
 
+A cluster needs an explicit identity key: set the same `DEDI_KEY` (or
+`DEDI_KEY_FILE`) on every replica, minted once with `dedid keygen`. A node with
+`DEDI_CLUSTER_ID` and neither refuses to start, because a self-generated key is
+per-database and each replica would mint its own.
+
+Two ready-made layouts are in the source tree. `docker-compose.cluster.yml`
+runs three replicas on one machine, each in its own logical database on one
+Postgres (created by `scripts/cluster-databases.sql`); export
+`DEDI_CLUSTER_KEY` with a key from `dedid keygen` first, and the replicas
+answer on ports 8091–8093. `scripts/deploy_railway_cluster.py` deploys the same
+shape to Railway, given pre-created databases and a key.
+
 | Variable | Meaning |
 |---|---|
 | `DEDI_CLUSTER_ID` | this replica's stable ID; must appear in the peer list |
@@ -185,12 +202,18 @@ daemon logs a note if you configure one.
 
 ### Writes arriving at a follower
 
-A follower answers `307 Temporary Redirect` to the leader's public URL. 307
-rather than 308 or 302 because the method and body must survive — the body is
-what the publisher signed — and because leadership moves, so the redirect must
-not be cacheable as permanent. During an election there is briefly no leader,
-and a follower answers `503` with `Retry-After` and code `NO_LEADER`; that is a
-second or two, and it is not a node fault.
+A follower answers **every** write, domain verification and webhook
+subscriptions included, with `307 Temporary Redirect` to the same path on the
+leader's public URL. 307 rather than 308 or 302 because the method and body
+must survive — the body is what the publisher signed — and because leadership
+moves, so the redirect must not be cacheable as permanent. A follower never
+decides a write from its own replica, not even "unchanged" or "already
+revoked", because its copy may trail the leader.
+
+It answers `503` with `Retry-After: 2` and code `NO_LEADER` instead in two
+cases: during an election, when there is briefly no leader (a second or two,
+not a node fault), and when the leader's public URL is missing from
+`DEDI_CLUSTER_PEERS`. The second does not clear by itself: fix the peer list.
 
 ### Latency
 
@@ -264,10 +287,11 @@ and two of every three replicas would alarm.
 
 ## Deferred
 
-- **Read mirrors** — a verifying replica of a *different operator's* log,
+- **Log mirrors** — a verifying replica of a *different operator's* log,
   serving that operator's signed checkpoints. Availability across trust
   boundaries, where Raft only works inside one. Needs a bulk entry-range
-  endpoint, which does not exist yet.
+  endpoint, which does not exist yet. (The [mirror role](/docs/crawl-mirror)
+  that does exist copies published DeDi files, not the log.)
 - **Threshold signing (FROST)** — *t*-of-*n* replicas required to produce a
   checkpoint signature, so no single machine can ever sign a root. This is the
   one option here that would strengthen the *trust* story rather than only

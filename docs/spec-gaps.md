@@ -3,7 +3,7 @@
 Companion to [`conformance.md`](conformance.md), which records what we *do*
 implement. This file records what we do not, and what we implement wrongly.
 
-Measured against the spec submodule at [`spec/lfdt/`](spec/lfdt/), commit
+Measured against the [LFDT standard](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/tree/52e120d53b1b2df94aca9cf18c8a1aa47e8a4f18) at commit
 `52e120d`. Every claim here was checked by running code or reading the spec
 text, never inferred from our own docs — the entries marked **proven** carry the
 test that demonstrates them.
@@ -178,10 +178,10 @@ before: caching output that changes every second would be actively harmful.
 
 > Loosened, as the safer direction against a spec we do not control: an
 > unrecognizable `version_id` is now 404 ("no such version") rather than 400
-> ("your request is malformed"). `as_on` deliberately still answers 400, because
-> the spec gives it `format: date-time` and a bad value there really does
-> violate the contract. `conformance/`'s logging test is now a real assertion,
-> so a regression to 400 fails the suite.
+> ("your request is malformed"). A malformed `as_on` still answers 400, because
+> it really does violate the contract; since G10 a bare `YYYY-MM-DD` is no
+> longer malformed. `conformance/`'s logging test is now a real assertion, so a
+> regression to 400 fails the suite.
 
 The original finding:
 
@@ -293,3 +293,44 @@ no crawler.
 
 We already store `domain` on namespaces and query by it (`?domain=`), so the
 work is the verification step and a verified flag, not a data model change.
+
+---
+
+## G9 — Unknown query parameters were silently ignored — **fixed** (#65, #73)
+
+> Every lookup, query and versions route now parses its query string strictly
+> and answers `400` for a key it does not read, a key given twice, or a query
+> string that does not parse. `?domain=` discovery accepts only `domain` and
+> `internal`. Tests: `lookupparams_test.go`, `queryparams_test.go`.
+
+The original finding: `?versionId=2` (a camel-case typo of `version_id`) was
+ignored, so the lookup returned the **latest** version with a valid inclusion
+proof attached. Every check a careful client ran passed, because they were all
+about the record the node chose to return. A duplicate
+(`?version_id=&version_id=2`) unpinned the same way, and a stray `;` made Go's
+query parser drop the segment before anything could check it. Query and
+versions had the same hole: `?asOn=2020-01-01` on a query listed today's
+records as an answer about 2020.
+
+The spec does not say what a server must do with a parameter it does not
+define, so this is a choice. Refusing is the one that cannot return a
+plausible wrong answer.
+
+## G10 — `as_on`, `from` and `to` rejected a bare date — **fixed** (#69)
+
+> One parser serves lookup and query: RFC 3339 as before, or `YYYY-MM-DD` read
+> as a whole UTC day, the first instant for `from` and the last for `as_on`
+> and `to`. Test: `asondate_test.go`.
+
+The original finding: the dedi.global OpenAPI document gives these parameters
+`format: date`, the form a client is most likely to send, and
+`?as_on=2026-03-01` was a `400`. The LFDT spec says `date-time`, so both are
+accepted.
+
+Accepting dates exposed a second bug. Any `as_on` was treated as a read about
+the past, so `as_on=<today>` was cached as immutable for a year and skipped
+the revocation gate, though the next write changes its answer. Now only a
+pinned `version_id`, or an `as_on` more than a minute in the past, is
+**settled**; today, the future, and the last minute are reads about now, cached
+for the record's `ttl` and gated on revocation like a plain lookup. See
+[API](api.md#now-or-settled).

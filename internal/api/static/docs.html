@@ -44,9 +44,11 @@
 {{NAV}}
 
 <h1>DeDi Node</h1>
-<p>A self-hostable, tamper-evident public registry backed by a Merkle transparency log
-(signed checkpoints + inclusion proofs), <span class="mut">not</span> a blockchain. It is a
-drop-in for the Beckn ONIX registry, and any node can independently witness another.</p>
+<p>A self-hostable server for the <a href="https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/tree/52e120d53b1b2df94aca9cf18c8a1aa47e8a4f18">DeDi
+standard</a>, with an append-only Merkle log underneath: signed checkpoints, inclusion and
+consistency proofs, and other nodes witnessing that the log was never rewritten. It is a Merkle
+log, <span class="mut">not</span> a blockchain. New here? Start with the
+<a href="/docs/overview">overview</a>, then the <a href="/docs/quickstart">quickstart</a>.</p>
 
 <h2>All documentation</h2>
 <p class="mut">Served by this node, from the copy embedded in the binary it is
@@ -69,6 +71,8 @@ sequenceDiagram
     BAP->>D: lookup BPP key → verify ACK ✓
     Note over D: bad/absent key → 401 reject
 </pre>
+<p class="mut">ONIX's registry URL is a locked constant pointing at <code>fabric.nfh.global</code>,
+so an adapter needs a small patch to use this node; see <a href="/docs/beckn-demo">the Beckn use case</a>.</p>
 
 <h2>Decentralised trust: one node witnesses another</h2>
 <pre class="mermaid">
@@ -86,82 +90,81 @@ sequenceDiagram
 <h2>Test cases</h2>
 <table>
 <tr><th>#</th><th>Test</th><th>Result</th></tr>
-<tr><td>1</td><td>ONIX <code>dediregistry</code> client (v1.8.0) over the wire</td><td class="ok">6/6 pass</td></tr>
-<tr><td>2</td><td>Beckn starter-kit <code>select/init/confirm</code> vs dedid</td><td class="ok">ACK + on_* callbacks</td></tr>
-<tr><td>3</td><td>Tampered key in dedid → adapter validation</td><td class="ok">401 rejected</td></tr>
-<tr><td>4</td><td>Offline inclusion proof (browser, WebCrypto)</td><td class="ok">verified</td></tr>
-<tr><td>5</td><td>Witness verifies primary is append-only</td><td class="ok">recorded</td></tr>
-<tr><td>6</td><td>Witness detects a forked history</td><td class="ok">alarm</td></tr>
-<tr><td>7</td><td>Checkpoint anchored to a CORD chain (<code>DEDI_ANCHOR_*</code>, adapter-based)</td><td class="ok">receipt verified in-block</td></tr>
+<tr><td>1</td><td>Published <a href="https://github.com/theflywheel/dedi-conformance">dedi-conformance</a> suite v0.0.1 against the public node</td><td class="ok">22/22: core, versioning, publication, beckn</td></tr>
+<tr><td>2</td><td>In-process conformance module against the pinned <code>openapi.yaml</code></td><td class="ok">5 tests, 21 subtests pass</td></tr>
+<tr><td>3</td><td>ONIX <code>dediregistry</code> client (v1.8.0) over the wire</td><td class="ok">6/6 pass</td></tr>
+<tr><td>4</td><td>Live two-adapter Beckn network resolving keys against this node</td><td class="ok">running; see <a href="/docs/beckn-demo">use case</a></td></tr>
+<tr><td>5</td><td>Inclusion proof checked in the browser (WebCrypto)</td><td class="ok"><a href="/verify">/verify</a></td></tr>
+<tr><td>6</td><td>Witness verifies a target is append-only</td><td class="ok">verdicts at <a href="/dedi/witness">/dedi/witness</a></td></tr>
+<tr><td>7</td><td>Witness detects a forked history, and a rewrite at the same size</td><td class="ok">alarm (unit tests)</td></tr>
 </table>
-
-<p class="mut" style="margin-top:1.2em">Witnessed checkpoints are browsable in the
-<a href="/browse">directory browser</a> under the <code>_witness</code> namespace.</p>
+<p class="mut">Results measured 3 October 2026 on build <code>sha-69bffe0</code>; how to rerun them is in
+<a href="/docs/conformance">conformance</a>.</p>
 
 <h2>API</h2>
-<p>All read endpoints, relative to this node. Everything is a plain <code>GET</code>; no auth.</p>
+<p>The read routes, relative to this node. Plain <code>GET</code>, no auth. Every route, its
+parameters and its errors: <a href="/docs/api">API</a>.</p>
 <table>
 <tr><th>Endpoint</th><th>Returns</th></tr>
-<tr><td><code>/dedi/lookup/{namespace}/{registry}/{record}</code></td><td>latest live version of a record</td></tr>
-<tr><td><code>/dedi/lookup/{namespace}/{registry}</code></td><td>registry metadata</td></tr>
+<tr><td><code>/dedi/lookup/{namespace}/{registry}/{record}</code></td><td>the current version of a record</td></tr>
+<tr><td><code>/dedi/lookup/{namespace}/{registry}</code></td><td>registry metadata and schema</td></tr>
 <tr><td><code>/dedi/lookup/{namespace}</code></td><td>namespace metadata</td></tr>
-<tr><td><code>/dedi/query/{namespace}[/{registry}]</code></td><td>filtered search over records</td></tr>
+<tr><td><code>/dedi/query/{namespace}[/{registry}]</code></td><td>a filtered, paginated listing; <code>?domain=</code> for who serves a domain</td></tr>
 <tr><td><code>/dedi/versions/{namespace}[/{registry}[/{record}]]</code></td><td>full version history</td></tr>
 <tr><td><code>/dedi/log/checkpoint</code></td><td>signed tree head (C2SP checkpoint)</td></tr>
 <tr><td><code>/dedi/log/proof/consistency?old=&amp;new=</code></td><td>append-only proof between two tree sizes</td></tr>
+<tr><td><code>/dedi/log/history</code></td><td>checkpoints and writes over time</td></tr>
+<tr><td><code>/dedi/witness[/{origin}]</code></td><td>what this node has verified about other logs</td></tr>
+<tr><td><code>/dedi/delegations/{namespace}</code></td><td>child namespaces delegated, and their witness verdicts</td></tr>
+<tr><td><code>/dedi/network</code></td><td>peers, reachability, witness health, cluster state</td></tr>
 <tr><td><code>/dedi/stats</code></td><td>requests served, by status class, plus uptime</td></tr>
-<tr><td><code>/dedi/network</code></td><td>the nodes carrying this network, and whether each is answering</td></tr>
-<tr><td><code>/healthz</code></td><td>liveness for probes: <code>200</code> if the database is reachable, <code>503</code> if not</td></tr>
+<tr><td><code>/.well-known/dedi.index.json</code></td><td>signed DeDi manifest; files under <code>/dedi-files/</code></td></tr>
+<tr><td><code>/healthz</code>, <code>/metrics</code></td><td>liveness for probes; Prometheus metrics</td></tr>
 </table>
-<p><code>/healthz</code> answers a flat document rather than the usual envelope, so uptime monitors
-can assert on it directly. It also reports <code>tree_size</code> and
-<code>checkpoint_age_seconds</code>, but never fails on them: the checkpointer is idempotent and
-writes nothing while the tree is unchanged, so on a quiet registry the newest checkpoint is
-legitimately old. Neither <code>/healthz</code> nor <code>/dedi/stats</code> counts toward the
-served-request total, so polling them does not inflate the number they report.</p>
-<p><code>/dedi/network</code> lists the nodes an operator configured as peers (<code>DEDI_PEERS</code>)
-and reports whether each answered with a signed checkpoint. That is an <em>observation</em>, and it is
-deliberately weaker than witnessing: reachability says a node replied, while a witness verdict is a
-proof that a node has not rewritten its history. The explorer renders them separately for that
-reason. Nodes do not replicate each other's records — each keeps its own key, database and log, and
-federation beyond witnessing is an explicit non-goal (design.md &sect;3).</p>
 <p>Lookup modifiers: <code>?proof=inclusion</code> attaches a Merkle inclusion proof and the
 signed checkpoint it verifies against; <code>?version_id=</code> pins an exact version;
-<code>?as_on=</code> resolves the record as of a date (<code>YYYY-MM-DD</code>, the close of that day in UTC) or an RFC&nbsp;3339 timestamp. Example against the public
-reference node (seeded with Beckn identities; on your own node, use your host and a record you seeded):</p>
-<pre><code>curl -s "https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
+<code>?as_on=</code> resolves the record as of a date (<code>YYYY-MM-DD</code>, the close of that day in UTC) or an RFC&nbsp;3339 timestamp.
+Unknown or repeated parameters are a <code>400</code>, never silently ignored. Example against the public
+node (on your own node, use your host and a record you published):</p>
+<pre><code>curl -s "https://dedi.beckn.try-dough.com/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion"</code></pre>
+<p><code>/dedi/network</code> reports whether configured peers answered. That is an
+<em>observation</em>, deliberately weaker than witnessing: reachability says a node replied, while a
+witness verdict is evidence that a log has not been rewritten. Raft replicas of one node share its
+key and prove nothing about each other; see <a href="/docs/replication">replication</a>.
+Witness verdicts are published at <a href="/dedi/witness">/dedi/witness</a>; the
+<code>_witness</code> namespace that stores them is hidden from the directory browser and the
+standard's read routes.</p>
 
 <h2>Getting registered</h2>
 <p>Onboarding is <b>operator-gated</b>: there is no self-service registration, by design —
 who exists on a network is a governed decision, and every onboarding or revocation is an
 auditable entry in the transparency log. To register a participant on the networks served by
-this node, email <a href="mailto:contact@theflywheel.in">contact@theflywheel.in</a> with your
-subscriber id, role (BAP/BPP), namespace, and Ed25519 signing public key.
+the reference nodes, email contact@theflywheel.in with your
+subscriber id, type (BAP, BPP, BG or CDS), namespace, and Ed25519 signing public key.
 Details: <a href="/docs/governance">governance</a>.</p>
 
 <h2>Run your own node</h2>
-<p>dedid is self-hostable: one binary, one Postgres. Requires Docker and Go&nbsp;&ge;&nbsp;1.25.</p>
-<pre><code>git clone https://github.com/theflywheel/DeDi-node.git && cd DeDi-node
-make keygen                # writes keys/dedid.key, prints your public verifier key
-docker compose up -d       # postgres + dedid on http://localhost:8080
+<p>One container and one Postgres. Needs Docker; no source checkout and no Go toolchain.</p>
+<pre><code>docker network create dedi-net
+docker run -d --name dedi-pg --network dedi-net \
+  -e POSTGRES_USER=dedi -e POSTGRES_PASSWORD=dedi -e POSTGRES_DB=dedi postgres:16-alpine
+docker run -d --name dedi-node --network dedi-net -p 8080:8080 \
+  -e DATABASE_URL='postgres://dedi:dedi@dedi-pg:5432/dedi?sslmode=disable' \
+  -e DEDI_ORIGIN=localhost/log flywheelai/dedi-node:latest
 curl -s localhost:8080/dedi/log/checkpoint   # your own signed tree head</code></pre>
-<p class="mut">Load records with <code>go run ./cmd/dedid seed -file examples/beckn-seed.json</code>
-(set <code>DEDI_DB_URL=postgres://dedi:dedi@localhost:5433/dedi?sslmode=disable</code>).
-Distribute your verifier key; anyone, including another dedid node acting as a witness,
-can then verify your log independently. Trust planes are feature flags on one binary:
-standalone, witnessed (<code>DEDI_WITNESS_*</code>), and ledger-anchored
-(<code>DEDI_ANCHOR_*</code>, CORD adapter first). See
-<a href="/docs/deployment-modes">deployment modes</a>.</p>
-
-
+<p class="mut">The node mints its identity key on first start and prints the public verifier key
+in its log. Opening the write plane and making a first signed write: <a href="/docs/quickstart">quickstart</a>.
+Every setting: <a href="/docs/configuration">configuration</a>. Witnessing, anchoring and
+replication: <a href="/docs/deployment-modes">deployment modes</a>.</p>
 
 <h2>Protocol &amp; references</h2>
 <ul>
-<li><a href="https://github.com/LF-Decentralized-Trust-labs/DeDi">LFDT DeDi specification</a>: the Decentralized Directory protocol this node implements (<a href="https://dedi.global">dedi.global</a> is the hosted platform)</li>
+<li><a href="https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/tree/52e120d53b1b2df94aca9cf18c8a1aa47e8a4f18">LFDT DeDi specification</a>: the Decentralized Directory protocol this node implements, at the pinned commit (<a href="https://dedi.global">dedi.global</a> is the hosted platform)</li>
+<li><a href="https://github.com/theflywheel/dedi-conformance">dedi-conformance</a>: the conformance suite, runnable against any DeDi server</li>
 <li><a href="https://becknprotocol.io">Beckn protocol</a> · <a href="https://github.com/beckn-one/beckn-onix">beckn-onix</a>: the adapter whose <code>dediregistry</code> plugin (<code>pkg/plugin/implementation/dediregistry</code>) this node serves, proven over the wire</li>
 <li><a href="https://c2sp.org/tlog-checkpoint">C2SP tlog-checkpoint</a> · <a href="https://c2sp.org/signed-note">C2SP signed-note</a>: the checkpoint and signature formats</li>
 <li><a href="https://datatracker.ietf.org/doc/html/rfc6962">RFC 6962</a> (Certificate Transparency): the Merkle tree proofs; implemented via Go's <a href="https://pkg.go.dev/golang.org/x/mod/sumdb/tlog">golang.org/x/mod/sumdb/tlog</a></li>
-<li>Source: <a href="https://github.com/theflywheel/DeDi-node">theflywheel/DeDi-node</a></li>
+<li>Image: <a href="https://hub.docker.com/r/flywheelai/dedi-node">flywheelai/dedi-node</a> on Docker Hub</li>
 </ul>
 
 <script type="module">

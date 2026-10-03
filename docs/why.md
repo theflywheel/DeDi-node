@@ -2,8 +2,9 @@
 
 **Author:** Chakshu (FWAI Technologies / Flywheel)
 **Date:** July 2026
-**Status:** Narrative / rationale. The technical case is in [design.md](design.md); the
-proof it works is in [beckn-demo.md](beckn-demo.md). This is the *why* the other two assume.
+**Status:** Narrative / rationale. How it works is in [architecture](architecture.md); the
+proof it works is in [the Beckn use case](beckn-demo.md). This is the *why* the other two assume.
+The original plan is kept as [design](design.md).
 
 ---
 
@@ -20,7 +21,7 @@ DeDi Node is the box. It's a self-hostable registry that makes its own answers *
 every lookup can carry a cryptographic inclusion proof against a signed checkpoint, and an
 independent witness node continuously proves the log was never rewritten. It gets there with a
 **transparency log**, not a blockchain, which is what makes it a single Go binary you can
-`docker compose up` instead of a platform you have to join.
+`docker run` beside a Postgres instead of a platform you have to join.
 
 ## Where this actually started
 
@@ -86,21 +87,20 @@ registry, backed by a transparency log instead of a chain.* That's this repo.
 
 ## What I built
 
-- **`dedid`** — a single Go binary + Postgres. `docker compose up` to a working node. No chain
-  dependency. ([design.md](design.md))
+- **`dedid`** — a single Go binary + Postgres, published as the `flywheelai/dedi-node` image.
+  No chain dependency. ([quickstart](quickstart.md))
 - **Verifiability as a first-class feature.** Any lookup can return an inclusion proof against a
   signed checkpoint; relying parties verify offline. Consistency proofs between checkpoints make
   history-rewriting *detectable*, not just discouraged.
 - **An independent witness node** that continuously re-verifies the primary's log is append-only
   and records each verdict under its own namespace. That is the decentralised-trust property made
-  concrete: the primary cannot rewrite history without an independent party catching it. (Both
-  nodes are live — see the README's Live demo.)
+  concrete: the primary cannot rewrite history without an independent party catching it. (The
+  public node at https://dedi.beckn.try-dough.com publishes its verdicts at `/dedi/witness`.)
 - **Governance as an append-only log**, closed by default. Onboarding, rotation, and revocation
   are log entries — provable, ordered, witnessable — not opaque admin mutations. ([governance.md](governance.md))
 - **Proven from the outside in.** A contract test drives the *real* ONIX `dediregistry` client
-  against a live `dedid`; the full Beckn starter-kit `discover → select → init → confirm` flow
-  runs green with `dedid` serving every lookup and `fabric.nfh.global` entirely out of the loop,
-  including a negative test that proves there's no silent fallback. ([beckn-demo.md](beckn-demo.md))
+  against a live `dedid`, and a live two-adapter Beckn network resolves every signature against
+  `dedid` with `fabric.nfh.global` out of the loop. ([beckn-demo.md](beckn-demo.md))
 
 ## Why it matters
 
@@ -116,7 +116,8 @@ registry, backed by a transparency log instead of a chain.* That's this repo.
 
 A rationale that only lists wins is marketing. The real boundaries:
 
-- **Maturity.** The core node is M1, in progress. The stack it critiques, for all its pain,
+- **Maturity.** The node is young: it passes the published conformance suite and runs a live
+  network, but it has not had years of production. The stack it critiques, for all its pain,
   is battle-tested; this is newer.
 - **The locked registry URL.** A *stock* ONIX adapter pins the registry to `fabric.nfh.global`
   as a signed, embedded constant — pointing a full deployment at a self-hosted registry needs a

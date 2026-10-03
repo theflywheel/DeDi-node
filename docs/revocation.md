@@ -24,9 +24,13 @@ This is not squeamishness about data. It is the requirement:
   correct signature permanently unattributable.
 
 So a revoked record still resolves. `include_revoked=true` returns it with its
-state, and `as_on` answers what was true at any instant that is over. An
-`as_on` of today, or of a time still ahead, is a question about now: it gets
-the same 404 as a plain read unless it also sends `include_revoked=true`.
+state, `?version_id=` returns any earlier version, and `as_on` (an RFC 3339
+time, or a `YYYY-MM-DD` date meaning the end of that day in UTC) answers what
+was true at any instant that is over. An `as_on` of today, of a time still
+ahead, or less than a minute ago is a question about now: it gets the same 404
+as a plain read unless it also sends `include_revoked=true`. A misspelt
+parameter is a `400`, not a silently ignored one: `?includeRevoked=true` will
+not quietly return the live view. See [API](/docs/api#strict-query-parameters).
 
 ## What downstream actually does with it
 
@@ -71,14 +75,23 @@ The write is conditional, like every other. Read the current version tag and
 send it, so a concurrent change fails loudly rather than being clobbered:
 
 ```sh
-echo '{"payload":{"reason":"key compromised, reported by operator 2026-08-14"}}' > reason.json
+echo '{"reason":"key compromised, reported by operator 2026-08-14"}' > reason.json
 
 t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r '.data.version_tag // empty')
 
 dedid sign -key publisher.key -kid op-1 \
   -method POST -path /admin/namespaces/$NS/registries/$REG/records/$NAME/revoke \
-  -body reason.json -if-match "$t" -curl
+  -body reason.json -if-match "$t" > headers.txt
+
+curl -s -u "admin:$DEDI_ADMIN_PASSWORD" -X POST \
+  "$DEDI/admin/namespaces/$NS/registries/$REG/records/$NAME/revoke" \
+  -H @headers.txt -H 'Content-Type: application/json' --data-binary @reason.json
 ```
+
+The body is optional and is just `{"reason": "…"}`. The revoked version
+carries the previous payload forward with `revocation_reason` added, so the
+record stays inspectable at the version that withdrew it. Revoking an
+already-revoked record is a no-op.
 
 ### Write a real reason
 
@@ -94,9 +107,10 @@ A subscriber may hold several keys, each its own record
 
 That is correct behaviour and a real trap. On the demo network a participant
 existed twice — once under its key id, once under its `subscriber_id` — with
-identical payloads. Nothing failed, because lookup matches on the payload and
-never reads the record name. Revoking the key-named record left the other live
-and still being handed out as a destination.
+identical payloads. Signature validation only ever found the key-named record,
+but discovery matches on the payload and ignores the name, so it returned
+both. Revoking the key-named record left the other live and still being handed
+out as a destination.
 
 So before revoking, list what the subscriber actually holds:
 

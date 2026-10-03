@@ -1,9 +1,10 @@
 # Mode 2 overlay: run a witness node beside the primary.
+#   dedid keygen -out keys/dedid.key -name dev.dedi.local       # the primary's key (make keygen)
 #   dedid keygen -out keys/witness.key -name witness.dedi.local
-#   DEDI_PRIMARY_VERIFIER_KEY=<primary verifier key> \
+#   DEDI_PRIMARY_VERIFIER_KEY=<verifier key printed for keys/dedid.key> \
 #     docker compose -f docker-compose.yml -f docker-compose.witness.yml up -d
-# The witness has its own key and Postgres; verdicts appear under its
-# `_witness` namespace on :8081.
+# The witness has its own key and Postgres; its verdicts are served at
+# http://localhost:8081/dedi/witness (and kept in its `_witness` namespace).
 services:
   witness-postgres:
     image: postgres:16-alpine
@@ -28,7 +29,9 @@ services:
       DEDI_DB_URL: postgres://dedi:dedi@witness-postgres:5432/dedi?sslmode=disable
       DEDI_KEY_FILE: /keys/witness.key
       DEDI_ORIGIN: witness.dedi.local/log
-      DEDI_WITNESS_TARGET_URL: http://dedid:8080
+      # The target's API base, including /dedi: the witness appends
+      # /log/checkpoint and /log/proof/consistency to it.
+      DEDI_WITNESS_TARGET_URL: http://dedid:8080/dedi
       DEDI_WITNESS_TARGET_KEY: ${DEDI_PRIMARY_VERIFIER_KEY:?set to the primary node's verifier key}
       DEDI_WITNESS_TARGET_ORIGIN: dev.dedi.local/log
       DEDI_WITNESS_INTERVAL: 60s

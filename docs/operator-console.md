@@ -1,7 +1,7 @@
 # The operator console
 
-The write plane's user interface, at `/admin`. Four sections, each producing
-signed entries in the node's log — except the last, which only reads.
+The write plane's user interface, at `/admin`. Five tabs. Most of what they do
+is a signed entry in the node's log; *Domains* only reads.
 
 It used to be seven tabs, and that was the wrong count. Onboarding, key rotation
 and revocation are not three tasks: they are one participant at three points in
@@ -10,19 +10,20 @@ its life, and the console already knew it — the participants table offered
 selection, switched tab, and asked you to retype the record name the table had
 just shown you.
 
-| Section | What it is | Page |
+| Tab | What it is | Page |
 |---|---|---|
 | Participants | the table, and everything you do to a participant: onboard, rotate, revoke | [onboarding](/docs/onboarding), [key rotation](/docs/key-rotation), [revocation](/docs/revocation) |
-| Child nodes | a namespace delegated to a node someone else runs | [delegation](/docs/delegation) |
-| Push | consumers notified when a record changes | [push](/docs/push) |
-| Who serves | a read, not a write: who serves a domain | [discovery](/docs/discovery) |
+| Child nodes | the namespaces this node has delegated, with each child's witness verdict and health; revoke or discard from here | [delegation](/docs/delegation) |
+| Add a node | pick one of the five roles and get its configuration rendered; for a child, this also mints the enrolment offer | [deployment modes](/docs/deployment-modes) |
+| Push | webhook subscriptions: add one, see each queue, unsubscribe from its row | [push](/docs/push) |
+| Domains | a read, not a write: *who serves* a domain | [discovery](/docs/discovery) |
 
 Rotate and revoke now open against the participant already selected, showing
 its name rather than asking for it, and only one opens at a time — they are two
 things to do to the same record, and offering both invites filling in one and
 submitting the other.
 
-**"Who serves" searches every namespace this node will answer for**, not only
+**"Who serves" (the Domains tab) searches every namespace this node will answer for**, not only
 the one selected, and narrows by registry name. That is what discovery means: a
 caller asking who serves a domain has no namespace in mind. The console shows
 the namespace each result came from, because for a while it did not, and a
@@ -72,8 +73,10 @@ They are separate, and both apply:
 refuses, whatever else is true.
 
 **The operator gate** (`DEDI_ADMIN_USER` / `DEDI_ADMIN_PASSWORD`) controls who
-can *see* the console. It is HTTP basic auth in front of `/admin`, and it
-protects against nothing cryptographic — it keeps the page off the open web.
+can *reach* the admin surface: HTTP Basic auth in front of the console page
+**and every write route**, so a scripted write needs the password as well as
+the signature. It protects against nothing cryptographic and attributes
+nothing; it keeps the surface off the open web.
 
 A node with a publisher key and no gate serves the console to anyone and still
 accepts no writes from them. A node with a gate and no publisher key has no
@@ -105,18 +108,22 @@ sequence of keys it has had and when each stopped being valid.
 
 ## Everything here is a log entry
 
-There is no separate configuration store, no "settings" that live outside the
-log, and no operation that quietly edits state. Onboarding a participant,
-rotating a key, revoking someone, delegating a namespace, subscribing a webhook
-— each is an append, each is signed, each is permanent, and each carries its
-`created_by`.
+No operation quietly edits directory state. Onboarding a participant,
+rotating a key, revoking someone, delegating a namespace — each is an append,
+each is signed, each is permanent, and each carries its `created_by`.
+
+The one exception is deliberate: webhook subscriptions are operational
+settings, not directory facts. They are replicated with the log but kept in
+their own table, outside the Merkle tree. Unsubscribing marks the row deleted
+(it is kept, so its dead letters outlive it) rather than appending a version.
 
 That is the point of [governance](/docs/governance): the record of who was
 admitted and who was removed is not a side effect of administration, it is the
 product. An operator who wants to know what changed last Tuesday reads the log,
 and so can anybody else.
 
-Nothing is ever deleted. "Delete" is not an operation this node has. Withdrawal
+Nothing in the directory is ever deleted; "delete" is not an operation the log
+has. Withdrawal
 is [revocation](/docs/revocation) — a new entry saying the previous binding no
 longer holds — which is why a revoked record stays resolvable and stays
 distinguishable from one that never existed.
@@ -124,14 +131,26 @@ distinguishable from one that never existed.
 ## Operating it from a script instead
 
 The console signs requests; it is not the only thing that can. `dedid sign`
-produces the same signature from a shell, which is what the demo's seeding
-script uses:
+produces the same signature from a shell. A publish must say what it replaces:
+`-create` for a new record, or `-if-match` with the current `version_tag`:
 
 ```sh
+t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r '.data.version_tag // empty')
+[ -n "$t" ] && pre="-if-match $t" || pre="-create"
+
 dedid sign -key publisher.key -kid op-1 \
   -method POST -path /admin/namespaces/$NS/registries/$REG/records/$NAME/publish \
-  -body party.json -curl
+  -body party.json $pre > headers.txt
+
+curl -s -u "admin:$DEDI_ADMIN_PASSWORD" -X POST \
+  "$DEDI/admin/namespaces/$NS/registries/$REG/records/$NAME/publish" \
+  -H @headers.txt -H 'Content-Type: application/json' --data-binary @party.json
 ```
+
+No Go toolchain is needed: `dedid` is the entrypoint of the
+`flywheelai/dedi-node` image, so `docker run --rm -v "$PWD:/w" -w /w
+flywheelai/dedi-node sign …` runs the same command; the
+[quickstart](/docs/quickstart) wraps it in a function.
 
 Anything the console can do, a script can do, with the same key and the same
 verification on the node. Use the console to look and to make one-off changes;

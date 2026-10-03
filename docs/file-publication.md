@@ -1,7 +1,7 @@
 # File publication
 
 This node implements the producer half of the DeDi standard's file
-publication model (`docs/spec/lfdt/docs/publishing-dedi-files.md`): it signs
+publication model ([publishing-dedi-files.md](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/52e120d53b1b2df94aca9cf18c8a1aa47e8a4f18/docs/publishing-dedi-files.md)): it signs
 and serves a DeDi file per registry, plus a signed manifest, so a
 standard-conformant DeDi server can discover and ingest this node's data by
 crawling files instead of calling `/dedi/lookup` and `/dedi/query`.
@@ -9,12 +9,13 @@ crawling files instead of calling `/dedi/lookup` and `/dedi/query`.
 This is additive. The existing API (`/dedi/lookup`, `/dedi/query`,
 `/dedi/versions`) is unchanged and remains the primary way this node's own
 console, webhooks, and delegation flows read and write data. File publication
-is a second, static-file projection of the same underlying log, built fresh
-from the log on every request.
+is a second, static-file projection of the same underlying log, built from
+the log and byte-identical until the log or the freshness window moves.
 
-Consuming *other* publishers' files — a `domains.txt` discovery list, a
-crawler — is out of scope here; see `docs/conformance.md`, Surface 2, for what
-remains unimplemented.
+Consuming *other* publishers' files is the crawler's job, off unless
+`DEDI_CRAWL_DOMAINS` is set; see [crawler and mirror](crawl-mirror.md).
+Namespaces it mirrors are never re-published here, so crawled data is not
+re-signed under this node's key.
 
 ## Routes
 
@@ -40,11 +41,12 @@ are excluded from both the manifest and direct file requests — the same rule
 `internal/api/internal_ns.go` already applies to the read API.
 
 A record whose current state is `revoked` is omitted from its registry's
-file. The spec models per-record removal through registry state and negative
-registries (§9) rather than a per-record status field; omitting a revoked
-record from the live file is this node's way of expressing "no longer
-current" within that model, consistent with what an unversioned
-`/dedi/lookup` read already does by default.
+file, and listed instead in a per-namespace `revocations` registry (or
+`dedi-revocations`, if the operator already has one called `revocations`),
+as `{revoked_id, reason}` against the spec's `revoke.json` schema. The spec
+models per-record removal through negative registries (§5.1) rather than a
+per-record status field, so a revocation is published, not implied by a
+record's absence.
 
 ## Signing
 
@@ -86,7 +88,7 @@ without a reverse proxy in front of it.
 
 ## How a third party verifies our output
 
-Follow `docs/publishing-dedi-files.md` §7.3 exactly; nothing about this
+Follow [publishing-dedi-files.md](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/52e120d53b1b2df94aca9cf18c8a1aa47e8a4f18/docs/publishing-dedi-files.md) §7.3 exactly; nothing about this
 node's output requires special-casing:
 
 1. **Fetch** `GET https://<this-node>/.well-known/dedi.index.json`.
