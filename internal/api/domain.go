@@ -144,14 +144,6 @@ func (s *Server) verifyDomain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A follower's replica may trail the leader, so it must not decide this
-	// write from its own state: a namespace or proof it has not applied yet
-	// would read as missing, a 404 or a 400 for a request the leader accepts.
-	// Same rule as unchanged() and revoke; see onFollower.
-	if s.onFollower() {
-		s.redirectToLeader(w, r)
-		return
-	}
 	ns := r.PathValue("namespace")
 	domain, err := s.namespaceDomain(r.Context(), ns)
 	if errors.Is(err, store.ErrNotFound) {
@@ -206,14 +198,6 @@ func (s *Server) verifyDomain(w http.ResponseWriter, r *http.Request) {
 func (s *Server) unverifyDomain(w http.ResponseWriter, r *http.Request) {
 	key, ok := scoped(w, r)
 	if !ok {
-		return
-	}
-	// A follower's replica may trail the leader, so it must not decide this
-	// write from its own state: a namespace or proof it has not applied yet
-	// would read as missing, a 404 or a 400 for a request the leader accepts.
-	// Same rule as unchanged() and revoke; see onFollower.
-	if s.onFollower() {
-		s.redirectToLeader(w, r)
 		return
 	}
 	ns := r.PathValue("namespace")

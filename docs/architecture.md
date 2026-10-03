@@ -85,8 +85,8 @@ What it does not prove:
 `DEDI_CLUSTER_*` turns on Raft (hashicorp/raft). Replicas share one identity
 key and one origin; the leader alone appends and signs, and each replica
 applies the same command stream to its own database and computes the same
-tree. Every replica serves reads; most writes to a follower are redirected to the
-leader; the exceptions are listed in [replication](replication.md).
+tree. Every replica serves reads; every write to a follower is redirected to the
+leader (see [replication](replication.md)).
 
 Raft tolerates crashed machines, not lying ones. Three replicas run by one
 operator agree with that operator. Replication is availability, and it carries

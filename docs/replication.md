@@ -202,20 +202,15 @@ daemon logs a note if you configure one.
 
 ### Writes arriving at a follower
 
-A follower answers writes with `307 Temporary Redirect` to the same path on the
-leader's public URL, domain verification included. 307 rather than 308 or 302
+A follower answers every write that passes the admin gate and signature check
+with `307 Temporary Redirect` to the same path on the leader's public URL,
+enrolment included. Rendering a node configuration writes nothing and is
+answered locally. 307 rather than 308 or 302
 because the method and body must survive — the body is what the publisher
 signed — and because leadership moves, so the redirect must not be cacheable as
-permanent. The namespace, registry and record publish routes never decide from
-the follower's replica, not even "unchanged", because its copy may trail the
-leader.
-
-The exceptions today are writes that first look up existing state on the
-replica they reached: record revocation, creating or deleting a webhook
-subscription, minting or revoking a child delegation, and enrolment. On a
-follower that has not yet applied that state they answer from its own copy,
-typically `404` (`409` or `401` for the child and enrolment routes), rather
-than redirecting. Retrying against the leader works. This is tracked as a bug.
+permanent. The redirect happens before the handler runs, so no write is decided
+from the follower's replica, not even "unchanged" or "already revoked", because
+its copy may trail the leader.
 
 It answers `503` with `Retry-After: 2` and code `NO_LEADER` instead in two
 cases: during an election, when there is briefly no leader (a second or two,
