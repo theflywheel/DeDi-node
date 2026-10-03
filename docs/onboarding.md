@@ -22,33 +22,45 @@ getting a record in quickly.
 
 ## The fields
 
+These are the payload field names ONIX's `dediregistry` client reads, and the
+ones the console writes.
+
 | Field | Notes |
 |---|---|
 | `subscriber_id` | The identity as the network names it, e.g. `bpp.example.com`. |
-| `role` | `BAP`, `BPP`, `BG`, `DS`, `PROVIDER`. |
-| `status` | `SUBSCRIBED` for a live participant. The read plane's Beckn lookup filters on it. |
+| `type` | `BAP`, `BPP`, `BG` or `CDS`, the enum in the standard's `Beckn_subscriber` schema. The console offers the first three. |
+| `status` | `SUBSCRIBED` for a live participant. The Beckn lookup and discovery answer only for `SUBSCRIBED` or no status at all. |
 | `url` | Where the network reaches them. |
 | `domain` | What they serve, e.g. `retail`. Feeds [discovery](/docs/discovery). |
-| `network_memberships` | Which network this binding is valid on. |
-| `key id` | Names *this* key, so a later rotation can supersede exactly one. |
-| `signing_public_key` | The key signatures are checked against. |
-| `encryption_public_key` | Usually the same value in Beckn deployments. |
-| `valid from` / `valid until` | Optional; the binding's own lifetime. |
+| `network_memberships` | Which networks this binding is valid on. ONIX rejects a sender whose list does not include its own network. |
+| `signing_public_key` | The Ed25519 key signatures are checked against, standard base64. |
+| `encr_public_key` | The X25519 encryption key. |
+| `valid_from` / `valid_until` | Optional; the binding's own lifetime. A lookup reports `expired` / `not_yet_valid` against them, but still answers. |
+| `ttl` | Optional; seconds a client may cache this record. Overrides the node's `DEDI_TTL`. |
+
+The key id is not a field: it is the record's **name**.
 
 ### The record name is the key id, not the subscriber
 
 This trips people up, so it is worth stating plainly: records are named by **key
-id**. One subscriber may hold several keys, and each binding gets its own record
-so each can be revoked on its own. Revoking a compromised key should not remove
-a participant's other, uncompromised keys.
+id**, the id the participant's adapter sends with every signature. ONIX looks a
+sender up as
 
-Lookup never depends on the record name — the Beckn path matches
-`payload->>'subscriber_id'` at the top level — which is exactly why a record
-mistakenly named after the subscriber can sit alongside the correct one, serving
-the same participant twice, and nothing fails. Discovery returns the participant
-twice, and revoking one leaves the other live and still being handed out. We
-shipped that bug on the demo network; see
-[beckn-demo](/docs/beckn-demo).
+```
+GET /dedi/lookup/{subscriber_id}/subscribers.beckn.one/{key_id}
+```
+
+and the node answers it by finding the latest live record **named `{key_id}`**
+whose payload `subscriber_id` (or namespace) is `{subscriber_id}`, in a
+namespace allowed to answer it (`DEDI_WILDCARD_NAMESPACES`). A record named anything else is
+never found by that lookup. One subscriber may hold several keys, and each
+binding gets its own record so each can be revoked on its own.
+
+Discovery (`?domain=`), on the other hand, matches on the payload and ignores
+the name. So a record mistakenly named after the subscriber sits alongside the
+correct one, invisible to signature validation but returned by discovery: the
+participant is listed twice, and revoking the key-named record leaves the other
+still handed out as a destination. We shipped that bug on the demo network.
 
 ### The payload must be flat
 
@@ -60,10 +72,12 @@ shape you publish.
 
 ### Required by our own schema
 
-`countries` is required by `schemas/Beckn_subscriber.json`, which this node
-serves as a [built-in reference schema](/docs/reference-schemas). Omitting it
-publishes a record our own registry would reject — the conformance suite catches
-it, and it should not have taken the suite to notice. ISO 3166-1 alpha-3.
+`countries` is required by the standard's `Beckn_subscriber` schema, which this
+node ships as a [built-in reference schema](/docs/reference-schemas). A
+registry created with `"schema": "builtin:Beckn_subscriber"` rejects a record
+without it, and the conformance suite's beckn profile checks for it. The
+console's form does not ask for it, so add it when you publish into such a
+registry. ISO 3166-1 alpha-3.
 
 ## Doing it from a script
 
@@ -87,8 +101,15 @@ JSON
 dedid sign -key publisher.key -kid op-1 \
   -method POST \
   -path /admin/namespaces/$NS/registries/$REG/records/$KEY_ID/publish \
-  -body party.json -curl
+  -body party.json -create > headers.txt
+
+curl -s -u "admin:$DEDI_ADMIN_PASSWORD" -X POST \
+  "$DEDI/admin/namespaces/$NS/registries/$REG/records/$KEY_ID/publish" \
+  -H @headers.txt -H 'Content-Type: application/json' --data-binary @party.json
 ```
+
+`-create` says the record must not exist yet; re-publishing one that does needs
+`-if-match`, below.
 
 **Never hardcode the public key.** Read it from the participant, every run. Ours
 were literals in a seeding script; the adapters' keys were rotated; the script
@@ -102,7 +123,7 @@ The write is a conditional upsert. Read the record's current version tag and
 send it as `-if-match`; send `-create` when it does not exist yet:
 
 ```sh
-t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME?include_revoked=true" | jq -r '.data.version_tag // empty')
+t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$KEY_ID?include_revoked=true" | jq -r '.data.version_tag // empty')
 [ -n "$t" ] && pre="-if-match $t" || pre="-create"
 ```
 
@@ -116,7 +137,7 @@ A 200 means the write was signed correctly and appended. It does not mean the
 contents are right. Read the record back and check the field that matters:
 
 ```sh
-curl -s "$DEDI/dedi/lookup/$NS/$REG/$NAME" \
+curl -s "$DEDI/dedi/lookup/$NS/$REG/$KEY_ID" \
   | jq '.data.details | {subscriber_id, type, url, signing_public_key}'
 ```
 

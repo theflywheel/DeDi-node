@@ -1,8 +1,10 @@
 # Child nodes and namespace delegation
 
 **Status:** implemented (2026-08-08). Adds a third relationship between nodes,
-alongside the witness ring (`design.md` §4) and the Raft cluster
-(`replication.md`).
+alongside the witness ring ([witnessing](witnessing.md)) and the Raft cluster
+([replication](replication.md)). A child is one of the five node roles; the
+console's **Add a node** tab renders all five, and only a child is minted a
+delegation.
 
 ---
 
@@ -52,7 +54,7 @@ So enrolment is two steps:
      │                                                         │
      │─ apply config ─────────────────────────────────────────►│
      │                                            generates its own key
-     │                        │◄─ enrol {token, pubkey, url} ──│
+     │                        │◄─ POST /enrol {token, key, url}│
      │                        │─ append {state: active,        │
      │                        │          child_key} to log     │
      │                        │─ start witnessing the child ──►│
@@ -73,7 +75,7 @@ per child, versioned like any other.
 That is not filing preference. "Who granted this node authority over this
 namespace, and when?" is precisely the class of question the log exists to
 answer with evidence: a relying party can demand an inclusion proof against a
-signed checkpoint that witnesses have already countersigned. A side table would
+signed checkpoint that witnesses have already checked. A side table would
 answer the same question with the operator's word, which is the thing this
 project spends all its effort not requiring.
 
@@ -257,8 +259,14 @@ whoever wires it in.
 
 ## Operating it
 
-**On the parent**, nothing to configure. The Children tab appears in `/admin`
-wherever the write plane is open.
+**On the parent**, nothing to configure beyond `DEDI_PUBLIC_URL`. Wherever the
+write plane is open, `/admin` has two tabs for this: **Add a node** mints the
+offer and renders the child's configuration (as `env`, `compose`, `railway` or
+`pulumi`), and **Child nodes** lists what has been delegated, with each
+child's verdict, loop health and reachability, and the revoke or discard
+control. The API behind them is `POST /admin/namespaces/{ns}/children` and
+`…/children/{child}/revoke`; the child redeems its offer at `POST /enrol` on
+the parent (`POST /dedi/enrol` is a deprecated alias).
 
 | Variable | Meaning |
 |---|---|
@@ -336,13 +344,17 @@ child's identity in the root's log, and left the bottom link untouched.
 
 ## Known gaps
 
-- **Revocation does not notify anyone.** It is published, so a party that
-  re-checks sees it; a party holding a cached answer does not, until the cache
-  expires. Push is the open item tracked separately for record revocation.
-- **The child does not verify the parent.** `DEDI_PARENT_KEY` is rendered into
-  the child's config and currently unused; a child could and should witness that
-  its parent's log is append-only, notwithstanding the independence caveat above
-  — it is a weak check, but a cheap one.
+- **Revocation is not pushed to the child.** It is published, so a party that
+  re-checks sees it. [Push](push.md) can carry it to anyone who asks: grants
+  are records in the parent namespace's `_delegations` registry, so a webhook
+  subscription on that registry is notified of every grant, enrolment and
+  revocation. Nothing subscribes the child or its relying parties
+  automatically.
+- **The child does not verify the parent.** `DEDI_PARENT_KEY` is recorded in
+  the child's own namespace (`parent_key`) but never used to check the parent's
+  log; a child could and should witness that its parent's log is append-only,
+  notwithstanding the independence caveat above — it is a weak check, but a
+  cheap one.
 - **Nothing validates a chain end to end.** The console walks it a level at a
   time and an operator can see every link, but no code answers "is every link
   above this node still live?" — see the non-transitivity note above. That check

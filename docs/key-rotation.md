@@ -1,8 +1,10 @@
 # Key rotation
 
-Replacing the key a participant signs with, without removing the participant.
-The console's *Rotate a key* panel, which opens against the participant selected in the Participants table, and the reasoning about time that makes a
-rotation safe rather than an outage.
+Replacing the key a participant signs with, without removing the participant,
+and the reasoning about time that makes a rotation safe rather than an outage.
+
+There are two ways to do it, and they are not the same operation. Read
+[the console's Rotate panel](#what-the-rotate-panel-does) before using it.
 
 ## Rotation is two events, not one
 
@@ -22,10 +24,10 @@ retry logic.
 
 So: **publish, let it propagate, then revoke.** The overlap is the feature.
 
-## Why the record name is the key id
+## Rotating with an overlap: a new record per key id
 
 Records are named by key id ([onboarding](/docs/onboarding) says why), which is
-what makes rotation expressible at all. A rotation is:
+what makes an overlapping rotation expressible at all. A rotation is:
 
 - a new record, named for the new key id, live
 - the old record, named for the old key id, revoked when the window closes
@@ -53,6 +55,10 @@ load on every validator, on every message.
 
 ## The steps
 
+In the console: onboard the participant again with the **new key id** and new
+key (the *Onboard a participant* form), check it, then revoke the old key id's
+row. From a shell:
+
 ```sh
 # 1. the participant generates a new keypair and gives you the PUBLIC half
 #    (if you generated it for them, you now know their private key — do not)
@@ -60,7 +66,10 @@ load on every validator, on every message.
 # 2. publish the new binding, named for the new key id
 dedid sign -key publisher.key -kid op-1 \
   -method POST -path /admin/namespaces/$NS/registries/$REG/records/$NEW_KID/publish \
-  -body new-binding.json -create -curl
+  -body new-binding.json -create > headers.txt
+curl -s -u "admin:$DEDI_ADMIN_PASSWORD" -X POST \
+  "$DEDI/admin/namespaces/$NS/registries/$REG/records/$NEW_KID/publish" \
+  -H @headers.txt -H 'Content-Type: application/json' --data-binary @new-binding.json
 
 # 3. confirm it resolves before touching anything else
 curl -s "$DEDI/dedi/lookup/$NS/$REG/$NEW_KID" | jq '.data.details.signing_public_key'
@@ -69,9 +78,14 @@ curl -s "$DEDI/dedi/lookup/$NS/$REG/$NEW_KID" | jq '.data.details.signing_public
 #    and you verify a real message verifies against the registry
 
 # 5. only now, revoke the old binding
+echo '{"reason":"rotated to '"$NEW_KID"'"}' > reason.json
+t=$(curl -s "$DEDI/dedi/lookup/$NS/$REG/$OLD_KID" | jq -r .data.version_tag)
 dedid sign -key publisher.key -kid op-1 \
   -method POST -path /admin/namespaces/$NS/registries/$REG/records/$OLD_KID/revoke \
-  -body reason.json -if-match "$(...)" -curl
+  -body reason.json -if-match "$t" > headers.txt
+curl -s -u "admin:$DEDI_ADMIN_PASSWORD" -X POST \
+  "$DEDI/admin/namespaces/$NS/registries/$REG/records/$OLD_KID/revoke" \
+  -H @headers.txt -H 'Content-Type: application/json' --data-binary @reason.json
 ```
 
 Step 4 is not optional and is the one people skip. Publishing a key proves the
@@ -79,6 +93,28 @@ registry accepted bytes. It does not prove the participant is signing with the
 matching private half. Until one real message signed by the new key verifies
 against what the registry serves, you have not rotated anything — you have
 published a claim.
+
+## What the Rotate panel does
+
+The console's *Rotate a key* panel, opened from a selected participant, does
+**not** do the above. It publishes a new version of the **same record**: the
+current payload carried forward with a new `signing_public_key`, `valid_from`
+and `valid_until`. The record keeps its name, which is the old key id.
+
+That is correct in one case: the participant keeps sending the same key id and
+only the key behind it changes. Even then there is no overlap for an ONIX
+adapter. The lookup answers with the latest version, so messages in flight
+signed by the old key stop verifying as soon as caches expire. `valid_from` and
+`valid_until` do not change that; the node reports them (`expired`,
+`not_yet_valid`) but still answers, and ONIX does not read them. The old key is
+still in the history (`?version_id=`, `?as_on=`), which is what an audit needs,
+but not what a live validator reads.
+
+If the participant moves to a **new key id**, which is the usual case, the
+panel is the wrong tool: lookups for the new key id find no record, and the
+record named for the old key id now holds a key that does not match its name.
+Use the overlapping procedure above instead. Making the panel do that is an
+open issue in the console.
 
 ## Compromise is a different procedure
 
@@ -103,7 +139,12 @@ instant, using `as_on`:
 
 ```sh
 curl -s "$DEDI/dedi/lookup/$NS/$REG/$OLD_KID?as_on=2026-07-01T00:00:00Z"
+curl -s "$DEDI/dedi/lookup/$NS/$REG/$OLD_KID?as_on=2026-07-01"   # end of that day, UTC
 ```
+
+An `as_on` that is today, in the future, or less than a minute ago is a
+question about now, not history: a revoked record answers `404` to it, as to a
+plain lookup. See [API](/docs/api#now-or-settled).
 
 That is the property a rotation must not destroy, and the reason nothing is
 deleted. A registry that overwrote the key would make every historical signature

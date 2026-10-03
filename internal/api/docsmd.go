@@ -50,10 +50,10 @@ type section struct {
 }
 
 var sections = []section{
-	{"Start here", "What this is, and why it is not a blockchain.",
-		[]string{"why", "design"}},
-	{"Running a node", "Getting one up, and choosing what it does.",
-		[]string{"railway-template", "deployment-modes", "replication"}},
+	{"Start here", "What this is, how to run one, and why it is not a blockchain.",
+		[]string{"overview", "quickstart", "why", "architecture"}},
+	{"Running a node", "Getting one up, configuring it, and choosing what it does.",
+		[]string{"configuration", "api", "railway-template", "deployment-modes", "replication", "crawl-mirror"}},
 	// delegation stays here, against the design canvas, which files it beside
 	// replication as a topology choice. It is a write the console makes, like
 	// onboarding and revocation, and a reader looking for how to delegate looks
@@ -79,7 +79,15 @@ var sections = []section{
 	{"Proving it", "The parts that make a claim checkable by someone who does not trust you.",
 		[]string{"witnessing", "file-publication"}},
 	{"Against the standard", "Where this node and the specification agree, and where they do not.",
-		[]string{"conformance", "spec-gaps", "reference-schemas", "beckn-demo"}},
+		[]string{"conformance", "spec-gaps", "reference-schemas"}},
+	{"Use cases", "Deployments that depend on it, and what they check.",
+		[]string{"beckn-demo", "crest"}},
+	// The original design document stays readable, because the reasoning in it
+	// still explains most of the code, but it is filed last and labelled as a
+	// plan: several things it describes were never built, and a reader who met
+	// it under "Start here" took them for features.
+	{"History", "The original plan, superseded where the other pages say so.",
+		[]string{"design"}},
 }
 
 var (
@@ -218,6 +226,15 @@ func docPrevNext(current string, docs map[string]*doc) string {
 // mean a diagram renders or does not depending on which page it landed on.
 var mermaidFence = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
 
+// mdLink rewrites a link to a sibling document, `foo.md` or `foo.md#part`, to
+// the URL this node serves it at. The docs link each other the way a
+// repository browser needs; the node serves /docs/{slug} and nothing at
+// /docs/foo.md, so without this every cross-reference was a 404 on the one
+// surface most readers ever see. Only a bare sibling name is rewritten: a path
+// into docs/spec or ../ has no counterpart on the node, and is left to fail
+// TestEveryDocLinkResolves rather than be quietly pointed somewhere wrong.
+var mdLink = regexp.MustCompile(`href="(?:\./)?([a-z0-9-]+)\.md(#[^"]*)?"`)
+
 // The summary shown on the index is taken from the rendered HTML rather than
 // the source, so whatever markdown the author used — emphasis, links, code
 // spans — arrives as text instead of as syntax.
@@ -291,6 +308,7 @@ func buildDocs() {
 			return
 		}
 		body := mermaidFence.ReplaceAllString(out.String(), `<pre class="mermaid">$1</pre>`)
+		body = mdLink.ReplaceAllString(body, `href="/docs/$1$2"`)
 		// goldmark emits a bare <table>; give each one a scroll container so a
 		// wide one cannot push the whole page sideways on a phone.
 		body = strings.ReplaceAll(body, "<table>", `<div class="tw"><table>`)

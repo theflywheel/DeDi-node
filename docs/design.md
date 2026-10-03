@@ -1,5 +1,32 @@
 # DeDi Node — Design Document
 
+> **History.** This is the original plan, written in July 2026 before most of
+> the node existed. It is kept because its reasoning still explains the code,
+> but it describes intentions, not the node you are running. Where it and the
+> other pages disagree, they are right. In particular, none of these were built
+> as described here:
+>
+> - **A separate publisher listener on `:8443` with mTLS.** Writes are served on
+>   the same listener as reads, under `/admin`, gated by HTTP Basic auth and an
+>   Ed25519 signature per request ([API](api.md)).
+> - **A `dedi` CLI** (`publish`, `get --verify`, `watch`, `keys rotate`,
+>   `witness`). The binary is `dedid`, with `keygen`, `pubkey`, `pubkeygen`,
+>   `sign`, `seed` and `serve` ([configuration](configuration.md)).
+> - **`registrar-svc`** and the Beckn subscribe/on_subscribe state machine.
+>   Onboarding is an operator decision, made in the console or a signed script
+>   ([onboarding](onboarding.md)).
+> - **Witness cosigning** via C2SP `tlog-witness`. A witness records its verdict
+>   in its own log instead; nothing co-signs this node's checkpoints
+>   ([witnessing](witnessing.md)).
+> - **Publisher keys as a `<ns>/_keys` registry.** They are configured in
+>   `DEDI_PUBLISHER_KEYS`.
+> - **Records keyed by `subscriber_id`.** Beckn records are named by key id
+>   ([onboarding](onboarding.md)).
+> - **A webhook outbox table.** Delivery is a replicated cursor over the log
+>   ([push](push.md)).
+> - **"No federation beyond witnessing."** Replication, delegation and a crawler
+>   now exist ([architecture](architecture.md)).
+
 **Status:** Draft v0.3 (v0.2 + Addendum D: ledger-anchor plane revises the v1 non-goal)
 **Author:** Chakshu (FWAI Technologies / Flywheel)
 **Date:** July 2026

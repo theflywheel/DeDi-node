@@ -76,6 +76,14 @@ to `DEDI_WITNESS_RECORD_INTERVAL` of checked but unwritten history is lost, and
 a rewrite confined to that span is not alarmed afterwards. Child witness loops
 (see [delegation](delegation.md)) use the same setting.
 
+A verdict is **not a cosignature**. The witness does not sign the target's
+checkpoint (C2SP `tlog-witness` is not implemented), so nobody can hand you a
+checkpoint that carries the witness's signature. A verdict is useful when you
+compare it: the `size` and `root` it records against the checkpoint you were
+served, or by redoing the check ([below](#checking-it-yourself)). It also
+cannot see a split view: a target could show the witness one history and you
+another, and only a comparison catches that.
+
 ## The three failures it is built to catch
 
 **The tree shrank.** `size < last` is impossible for an append-only log. No
@@ -129,6 +137,20 @@ late. Monitor `checking` and `stale`, not the age of the newest verdict.
 A stalled witness should read as **degraded**, not down: reads are unaffected,
 and what has been lost is the freshness of a proof rather than the registry.
 
+## Why consistent verdicts are rate-limited
+
+A witness used to append a verdict whenever its target's tree moved. In a ring
+the target's tree moves *because* it appended a verdict about the next node, so
+every node appended a verdict round the ring every minute or so, forever, even
+when no directory data changed at all.
+
+On the public node that came to 22,005 of 22,047 log entries, about **99.8%**
+of the log. Every one was a real, valid check, but the log was mostly
+bookkeeping. `DEDI_WITNESS_RECORD_INTERVAL` (above) caps consistent verdicts at
+one per interval per target, which ends the cycle; checking still happens every
+`DEDI_WITNESS_INTERVAL`. The verdicts already written stay where they are: the
+log is append-only.
+
 ## Turning it on
 
 ```
@@ -146,8 +168,10 @@ checkpoint, exactly:
 curl -s https://node-b.example/dedi/log/checkpoint | head -1
 ```
 
-Get the key from the target operator, or from the target's own
-`/.well-known/dedi.index.json`. Verifying a checkpoint against a key the target
+Get the key from the target operator. The target shows it on its `/` page (and
+prints it in its boot log when it minted its own key), in the note format this variable takes (the
+manifest at `/.well-known/dedi.index.json` carries the same public key as a
+JWK, which is a different encoding). Verifying a checkpoint against a key the target
 handed you over the same connection proves nothing about the target; it proves
 the connection. The key should reach you by a path the target does not control
 — which in practice means out of band, once, and pinned thereafter.
@@ -249,7 +273,7 @@ from "this node witnesses nobody". Our own status page's witness monitors were
 built without it and sat amber, apparently reporting a broken ring, for as long
 as nobody asked why — and an earlier draft of this page concluded from the same
 404 that verdicts were unreadable, which was wrong. `/dedi/witness`
-([issue #27](https://github.com/theflywheel/DeDi-node/issues/27)) is the fix:
+(issue #27) is the fix:
 the claim is published under a name that says what it is, and the hiding rule is
 left exactly as it was.
 

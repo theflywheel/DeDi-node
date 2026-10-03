@@ -4,8 +4,7 @@ Answering "who serves domain X" rather than only "what key does this known
 subscriber use". The console's *Who serves* section, and the `?domain=`
 filter behind it.
 
-Status: implemented. This was
-[issue #14](https://github.com/theflywheel/DeDi-node/issues/14).
+Status: implemented (issue #14).
 
 ## Trust plane, then discovery plane
 
@@ -38,6 +37,15 @@ GET /dedi/query/{namespace}/{registry}?domain=retail
 It is strictly additive. Without the parameter the endpoint behaves exactly as
 before and still never reads the payload; only the presence of `?domain=` opts a
 caller into the extension. A spec-conformant client cannot be surprised by it.
+
+With `?domain=` the route accepts only `domain` and `internal`. Anything else,
+a `page_size` or a `state` filter included, is a `400`: this branch answers the
+domain question alone, so a filter or page sent with it would otherwise be
+ignored rather than applied. An empty `domain` is a `400` too.
+
+The answer is confined to the namespaces in `DEDI_WILDCARD_NAMESPACES` (on a
+node with no publisher keys and no list, every namespace), live records only,
+with `status` `SUBSCRIBED` or absent, newest first, at most 100.
 
 ## What comes back
 

@@ -1,240 +1,117 @@
-# Running Beckn against a self-hosted DeDi node
+# Use case: a Beckn network
 
-This is the runbook for demonstrating that **dedid** — an independent, self-hostable DeDi
-registry — is a drop-in for the registry that Beckn ONIX expects (normally `fabric.nfh.global`).
+Beckn is the first thing this node was built for. Every signed Beckn message is
+checked by the receiving ONIX adapter against the sender's key in a DeDi
+registry, so the registry is the trust root of the network. This page is the
+live deployment that shows it working: two ONIX adapters verifying each other's
+signatures against a self-hosted node instead of the hosted `fabric.nfh.global`.
 
-It has two levels:
+## The live network
 
-- **Level 1 — the contract test.** Verified and reproducible today: a real ONIX registry
-  client talks to a real `dedid` over HTTP and every call succeeds. This is the honest,
-  automated proof of compatibility. *(Green in CI.)*
-- **Level 2 — the full network E2E.** Standing up the Beckn starter kit's
-  `discover → select → init → confirm` flow with dedid serving every lookup. This is
-  **documented but not yet executed** — see the status banner on that section.
+The registry is the public node, **https://dedi.beckn.try-dough.com**. The
+participants are in namespace `beckn-testnet`, registry
+`subscribers.beckn.one`:
 
-Background on *what* ONIX asks the registry for (URL shapes, response fields, the
-`subscribers.beckn.one` wildcard, the network-membership check) is in
-[`design.md` Addendum C](design.md). This doc is the *how to run it*.
-
----
-
-## Level 1 — The contract test (works today)
-
-### What it proves
-The only real open-source DeDi client that exists is the `dediregistry` plugin inside
-[beckn-onix](https://github.com/beckn-one/beckn-onix) (MIT, `v1.8.0`). The contract test
-imports that exact client package, points it at a live `dedid`, and exercises the calls
-ONIX makes on every Beckn message:
-
-- **subscriber key lookup** (`Lookup`) — the signature-validation hot path,
-  `GET {base}/lookup/{subscriber_id}/subscribers.beckn.one/{key_id}`
-- **node lookup** (`LookupNode`) — `GET {base}/lookup/{ns}/{registry}/{record}`
-- **registry metadata** (`LookupRegistry`) — `GET {base}/lookup/{ns}/{registry}`
-- **network-membership enforcement** — accepted when `allowedNetworkIDs` intersects the
-  record's `network_memberships`, rejected (401) when it doesn't
-- **unknown participant** — any non-200 from the registry ⇒ the client errors ⇒ ONIX NACKs
-
-The node is exercised **only** through its own CLI (`dedid keygen|serve|seed`) and the ONIX
-client — no test reaches inside dedid. That is the whole point: if the wire is right, ONIX
-is happy.
-
-### Run it
-```bash
-# needs a throwaway Postgres — do NOT use a prod DB (the suite truncates)
-docker run -d --name dedi-test-pg -e POSTGRES_USER=dedi -e POSTGRES_PASSWORD=dedi \
-  -e POSTGRES_DB=dedi -p 15433:5432 postgres:16-alpine
-export TEST_DATABASE_URL='postgres://dedi:dedi@localhost:15433/dedi?sslmode=disable'
-
-make contract-test
-```
-Expected: all 6 subtests pass. The target builds `bin/dedid`, boots it, seeds it via
-`dedid seed`, and drives the ONIX client against it. Source: `test/onix-contract/`.
-
-### The identities
-The seed (`test/onix-contract/testdata/beckn-seed.json`) uses the **starter kit's own
-committed testnet identities**, so a demo and the real kit line up 1:1:
-
-| subscriber_id | role | key_id (= dedid record name) | signing key (base64 Ed25519) |
-|---|---|---|---|
-| `bap.example.com` | BAP | `76EU7LZ7gfqj13dWDKR1Uitnim11mCoxWBPdzLxUpAMBPVdANKgyFM` | `g/3swjI93IhZ0SScrVZapeLjU+W0AeiSid3LViYZJFo=` |
-| `bpp.example.com` | BPP | `76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy` | `CqVy97DW45bcZPPrWIYGe2ldl9C93NFeVciiAEYsvR0=` |
-
-All under namespace `beckn-testnet`, registry `subscribers.beckn.one`, with
-`network_memberships: ["beckn.one/testnet"]`. The ONIX `keyId` from the adapter config
-becomes the dedid **record name**; the lookup finds it by `(subscriber_id, key_id)`.
-
-### The live reference node
-A public instance is already running with exactly this data:
-
-- Explorer / registry browser: **https://dedi.proto.theflywheel.in/**
-- ONIX-shaped lookup:
-  `https://dedi.proto.theflywheel.in/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy`
-- Signed checkpoint: `https://dedi.proto.theflywheel.in/dedi/log/checkpoint`
-
-For an ONIX adapter, the registry **base URL** to configure is
-`https://dedi.proto.theflywheel.in/dedi` (the client appends `/lookup/...` itself).
-
----
-
-## Level 2 — Full Beckn network E2E (starter kit)
-
-> **STATUS: EXECUTED — works end to end (2026-07-16, on `mh-iterations`).** The Beckn
-> `select → init → confirm` flow runs green with **dedid serving every registry lookup** and
-> `fabric.nfh.global` entirely out of the loop; the negative test rejects a tampered key with
-> 401. Verified log evidence is in the Results block below. The steps here are the real
-> procedure that was run.
-
-### Results (verified transcript)
-- `select`/`init`/`confirm` → **200 ACK**, and `on_select`/`on_init`/`on_confirm` all landed
-  at `sandbox-bap` — the full async round-trip completed.
-- **dedid served every lookup, fabric served none:** `onix-bpp` looked up `bap.example.com`'s
-  key against `https://dedi.proto.theflywheel.in/dedi/...` to validate the BAP signature on each
-  message; `onix-bap` looked up `bpp.example.com`'s key against dedid to validate the ACK
-  signatures; **0** requests hit `fabric.nfh.global/registry`.
-- **Negative test:** appended a version of `bap.example.com`'s key record in dedid with a
-  *different* signing key, flushed the shared redis cache, reran `select` → **401 Unauthorized**,
-  `onix-bpp` logged `validateSign failed: signature verification failed`. Restored the correct
-  key → green again. Proves dedid *gates* trust with no fallback to fabric.
-- The lock bypass worked: `onix-bap`/`onix-bpp` boot logging
-  `BecknConstants: locked "dediregistry"."url" overridden via env (=https://dedi.proto.theflywheel.in/dedi)`.
-
-### Gotchas found during the run (save yourself the debugging)
-1. **`docker-compose-generic-local.yml` omits `beckn-router`** (the caddy proxy). The Postman
-   flow routes through `http://beckn-router:9000`, so on that compose `select` 502s at the
-   router. Fix: run the **full** `docker-compose-generic.yml` with an override that only swaps
-   the adapter image + adds the env (below), so the router and sandboxes are present.
-2. **The `dediregistry` lookup cache is redis-backed and shared** — restarting an adapter does
-   NOT invalidate it. To force a fresh lookup (e.g. for the negative test), run
-   `docker exec redis redis-cli FLUSHALL`, not a container restart.
-3. **The flow also looks up the gateway identity `fabric.nfh.global`** (type `DS`, for
-   `validateAckSign`). dedid must serve it too — mirror it from the real registry
-   (`curl https://fabric.nfh.global/registry/dedi/lookup/fabric.nfh.global/subscribers.beckn.one/<its-keyId>`)
-   and seed it, alongside `bap.example.com` and `bpp.example.com`.
-4. **`publish` NACKs on the kit's own schema drift** (`property "publishDirectives" is
-   unsupported`) — unrelated to the registry; a starter-kit payload bug.
-
-### The override that worked
-`starter-kit/generic-devkit/install/dedi-override.yml`, run as
-`docker compose -f docker-compose-generic.yml -f dedi-override.yml up -d`:
-```yaml
-services:
-  onix-bap:
-    image: beckn-onix:latest          # our patched build
-    environment:
-      ONIX_OVERRIDE_DEDIREGISTRY_URL: https://dedi.proto.theflywheel.in/dedi
-  onix-bpp:
-    image: beckn-onix:latest
-    environment:
-      ONIX_OVERRIDE_DEDIREGISTRY_URL: https://dedi.proto.theflywheel.in/dedi
+```sh
+curl -s 'https://dedi.beckn.try-dough.com/dedi/query/beckn-testnet/subscribers.beckn.one' \
+  | jq -r '.data.records[] | "\(.state)\t\(.record_name)"'
 ```
 
-### The patch that unlocks the registry URL
-`pkg/plugin/manager.go`, in `applyConstants`, inside the `locked` loop — an env escape hatch
-`ONIX_OVERRIDE_<PLUGINID>_<KEY>` that lets an operator point at a self-hosted registry (this is
-the upstream PR). Currently applied to the clone at `/opt/dedi-node/beckn/beckn-onix`
-(uncommitted — needs a fork + PR; the server's `gh` token is expired):
-```go
-if locked, ok := m.constants.Locked[pluginID]; ok {
-    for key, canonical := range locked {
-        if ov := os.Getenv("ONIX_OVERRIDE_" + strings.ToUpper(pluginID) + "_" + strings.ToUpper(key)); ov != "" {
-            log.Warnf(ctx, "BecknConstants: locked %q.%q overridden via env (=%q)", pluginID, key, ov)
-            cfg.Config[key] = ov
-            continue
-        }
-        if userVal, exists := cfg.Config[key]; exists && userVal != canonical {
-            return fmt.Errorf("plugin %q: key %q is a locked beckn constant ...", pluginID, key, canonical)
-        }
-        cfg.Config[key] = canonical
-    }
-}
+Around it runs a two-adapter Beckn network, described in this repository's
+`deploy/beckn`:
+
+```
+sandbox-bap ──> onix-bap ──signed──> onix-bpp ──> flywheel-bpp ──> schemes/weather/mandi/news providers
+                   │   <──signed on_discover──    │
+                   └──── key lookups ──> dedi.beckn.try-dough.com <──┘
 ```
 
-### The one hard blocker: the locked registry URL
-A **stock** ONIX adapter will not talk to a self-hosted registry by configuration alone.
-`dediregistry.url` is a *signed, embedded "locked Beckn constant"*
-(`pkg/beckndefaults/beckn-constants.yaml`, enforced by `pkg/plugin/manager.go` on the exact
-plugin id `dediregistry`) fixed to `https://fabric.nfh.global/registry/dedi`. Setting any
-other `url` **fails adapter startup**. The starter kit's YAML doesn't even expose a `url`
-key. So "change only the registry URL" (the naive drop-in story) is impossible unmodified.
-
-Bypass options, best first:
-1. **Fork/patch beckn-onix** — env-gate the locked constant (e.g. honor a
-   `DEDI_REGISTRY_URL_OVERRIDE`), or re-sign a `beckn-constants.yaml` pointing at dedid, then
-   build the adapter image locally. This is the clean, demonstrable path and the basis of the
-   upstream PR.
-2. **Differently-named plugin** — register `selfhostedregistry` implementing the identical
-   `RegistryLookup`/`RegistryMetadataLookup` interface. The lock matches only the literal id
-   `dediregistry`.
-3. **Network-level** (fallback, hacky) — make the ONIX container resolve `fabric.nfh.global`
-   to dedid with a matching TLS cert (DNS + CA trust inside the container).
-
-### Procedure (fork approach)
-Requires a Docker host. Repos are staged on `mh-iterations` at `/opt/dedi-node/beckn/`.
-
-1. **Fork beckn-onix, patch the URL lock** so it accepts
-   `https://dedi.proto.theflywheel.in/dedi` (or a local dedid). Verify whether the base
-   should include `/dedi` or `/registry/dedi` — the client builds `{url}/lookup/...`, and
-   dedid serves `/dedi/lookup/...`, so `.../dedi` is correct. (If you must keep the literal
-   `/registry/dedi` path, add an nginx rewrite `/registry/dedi/... → /dedi/...` in front of
-   dedid.)
-2. **Build the patched adapter image** locally as `beckn-onix:latest` (the kit's
-   `docker-compose-generic-local.yml` expects that tag).
-3. **Seed dedid** with the kit's identities. The public node is already seeded (see Level 1
-   table); for a local dedid, `dedid seed -file test/onix-contract/testdata/beckn-seed.json`.
-   Cross-check that the `keyId` values in
-   `beckn/starter-kit/generic-devkit/config/generic-{bap,bpp}.yaml` match the record names.
-4. **Stand up the starter kit**:
-   `beckn/starter-kit/generic-devkit/install/docker-compose-generic-local.yml` brings up the
-   caddy router, redis, `onix-bap` (:8081), `onix-bpp` (:8082), `sandbox-bap` (:3001),
-   `sandbox-bpp` (:3002). Config is bind-mounted from `generic-devkit/config/`.
-5. **Mind the two non-registry external deps** the kit hardcodes (swapping the registry does
-   NOT fix these): Catalog Service `https://fabric.nfh.global/beckn/catalog`
-   (`routing-BPPCaller.yaml`) and Discovery Service `https://34.93.165.42.sslip.io/beckn`
-   (`routing-BAPCaller.yaml`). `publish` needs the Catalog service; `discover` needs the
-   Discovery service. Keep the hosted ones, or stub them, for a self-contained demo.
-6. **Drive the flow** with the kit's Postman collections
-   (`generic-devkit/postman/`) via `newman` (`npm i -g newman`): BPP `publish`, then BAP
-   `discover → select → init → confirm`.
-
-### Pass criteria
-- Each action returns `ACK` and its `on_*` callback lands in the sandbox logs
-  (`docker logs -f sandbox-bap`).
-- Signature validation succeeds at every hop (no `validateSign` errors in the ONIX logs).
-- **dedid's access log shows the lookups** — proof dedid was actually in the loop
-  (`docker compose -f /opt/dedi-node/DeDi-node/docker-compose.prod.yml logs dedid`, or the
-  local node's logs).
-
-### Negative test (do this — it's the real proof)
-Revoke the BPP record in dedid, then rerun `confirm`. Revocation in dedid = append a new
-record version with `state: revoked` (the Beckn wildcard search returns **live records
-only**, so the lookup then 404s). ONIX must respond **401 NACK**. This proves there is no
-silent fallback to the real `fabric.nfh.global` — the demo is genuinely served by dedid.
-
----
-
-## Upstream contributions this unlocks
-
-- **beckn-onix:** propose making the locked registry URL overridable. The current lock makes
-  sovereign / self-hosted Beckn networks impossible with a stock adapter; the working dedid
-  demo is the evidence. (This is the strategically important PR.)
-- **beckn/starter-kit:** its two shipped READMEs contradict each other on the registry URL
-  (`fabric.nfh.global/registry/dedi` vs `api.dev.beckn.io/registry/dedi`) and neither matches
-  the actual YAML (which has no `url` key); the compose pulls an **untagged**
-  `fidedocker/onix-adapter`. Doc + version-pinning fixes.
-
----
-
-## Quick reference
-
-| Thing | Value |
+| Service | What it is |
 |---|---|
-| Registry base URL for ONIX | `https://dedi.proto.theflywheel.in/dedi` |
-| Lookup shape | `GET {base}/lookup/{subscriber_id}/subscribers.beckn.one/{key_id}` |
-| Response | `{message, data}`; `data.details.{signing_public_key, url, type, domain, subscriber_id, encr_public_key}`; `data.network_memberships[]`; optional `data.ttl` |
-| Keys | std-base64 raw Ed25519 |
-| Unknown participant | any non-200 ⇒ ONIX 401 NACK |
-| Revocation | append a `state: revoked` version; wildcard lookup returns live only |
-| Not used by ONIX | subscribe/on_subscribe, registry-based routing (uses `context.bpp_uri`), response signing |
-| Contract test | `make contract-test` (needs a throwaway `TEST_DATABASE_URL`) |
-| Wire-contract detail | [`design.md` Addendum C](design.md) |
-| Full E2E task list | this doc, Level 2 (+ server `/opt/dedi-node/HANDOFF.md`) |
+| `onix-bap`, `onix-bpp` | beckn-onix adapters, from a fork carrying three demo patches (below). They sign outbound messages and verify inbound ones. |
+| `sandbox-bap` | a minimal BAP application that triggers a search and collects callbacks. |
+| `flywheel-bpp` | the BPP application. It fronts the Flywheel demo's providers (schemes, weather, mandi prices, news) and returns their `on_discover` whole. |
+| `redis` | the adapters' cache. |
+
+Every arrow between the adapters is a signed message whose sender key is looked
+up here:
+
+```
+GET /dedi/lookup/{subscriber_id}/subscribers.beckn.one/{key_id}
+```
+
+That is ONIX's wildcard lookup. It resolves because the node runs with
+`DEDI_WILDCARD_NAMESPACES=beckn-testnet`: only that namespace may answer for a
+`subscriber_id`, so a publisher scoped to some other namespace on the node
+cannot impersonate a participant. Try it:
+
+```sh
+curl -s 'https://dedi.beckn.try-dough.com/dedi/lookup/bpp.example.com/subscribers.beckn.one/76EU7ofwRCF1aobQkShARrf1PAUsNpHqWUJoynPu9w45YFKmzqaPmy?proof=inclusion' \
+  | jq '{details: .data.details, ttl: .data.ttl, checkpoint: .proof.checkpoint}'
+```
+
+## How a participant is recorded
+
+- **The record name is the key id** the adapter sends, because the wildcard
+  lookup matches on it. The `{subscriber_id}` in the path must equal the
+  payload's `subscriber_id` (or the name of the namespace). One subscriber with
+  two keys is two records. See [onboarding](onboarding.md).
+- **`status: SUBSCRIBED`** or no status at all is required for the wildcard
+  search to return a participant. A revoked current version is a `404` on every
+  path. One exception: when the path's `{subscriber_id}` is the namespace name
+  itself, an exact hit is answered whatever its `status`, so set the record's
+  state with revocation rather than relying on `status` alone. ONIX treats any
+  non-`200` as an unknown sender.
+- **`network_memberships`** must include the network the adapter is configured
+  for (`beckn.one/testnet` here), or the adapter rejects the sender.
+- **`ttl: 20`** on these records. ONIX caches keys for the `ttl` the registry
+  returns; a short one makes a revocation bite in seconds. Measured: 15 s. See
+  [revocation](revocation.md).
+
+The participants are published through the signed write plane like any other
+record, and every version is in the log with an inclusion proof.
+
+## What ONIX needed changing
+
+A stock ONIX adapter cannot be pointed at a self-hosted registry by
+configuration. The registry URL is a signed, embedded "locked Beckn constant"
+fixed to `https://fabric.nfh.global/registry/dedi`, and setting any other URL
+fails adapter start-up. So this node is not a drop-in for an unmodified
+adapter.
+
+The fork used here adds an environment override for locked constants
+(`ONIX_OVERRIDE_<PLUGIN>_<KEY>`, so `ONIX_OVERRIDE_DEDIREGISTRY_URL` points the
+adapter at `https://dedi.beckn.try-dough.com/dedi`), a Redis logical-database
+index so both adapters share one Redis, and an image with its config baked in.
+The registry base URL ends in `/dedi`: the client appends `/lookup/…` itself.
+Upstreaming the override is the change that would make self-hosted Beckn
+registries possible with a stock adapter.
+
+## The contract test
+
+The source tree also carries an automated check that does not need the live
+network: `make contract-test` boots a real `dedid`, seeds it with the starter
+kit's testnet identities, and drives the real beckn-onix `dediregistry` client
+(v1.8.0) against it over HTTP. Six subtests: key lookup by subscriber and key
+id, network membership accepted and rejected, an unknown participant refused,
+node lookup by three-part id, and registry metadata. It needs a throwaway
+Postgres in `TEST_DATABASE_URL` and is run by hand; CI does not run it.
+
+## What this does not show
+
+- **Discovery routing.** ONIX takes the destination from the message
+  (`bpp_uri`); it never asks the registry who serves a domain, so
+  [discovery](discovery.md) is answered here and consulted by nothing in a
+  stock network.
+- **Push.** ONIX has no hook for a pushed revocation, so the adapters still
+  wait out the `ttl`. See [push](push.md).
+- **Interop with networks on `fabric.nfh.global`.** Participants registered
+  there are not in this registry, and the reverse.
+
+## Seeing the trust properties
+
+- The node's checkpoint: `https://dedi.beckn.try-dough.com/dedi/log/checkpoint`.
+- What it has verified about another node:
+  `https://dedi.beckn.try-dough.com/dedi/witness`.
+- Its pages: `/` for an overview, `/network` for who watches whom, `/verify`
+  to check a proof in your browser.

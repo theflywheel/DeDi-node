@@ -58,8 +58,8 @@ func TestDocsServed(t *testing.T) {
 		"/dedi/log/proof/consistency?old=",
 		"proof=inclusion",
 		"Run your own node",
-		"github.com/theflywheel/DeDi-node",
-		"https://github.com/LF-Decentralized-Trust-labs/DeDi",
+		"flywheelai/dedi-node",
+		"https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol",
 		"https://github.com/beckn-one/beckn-onix",
 		"https://c2sp.org/tlog-checkpoint",
 		"https://c2sp.org/signed-note",
@@ -68,6 +68,13 @@ func TestDocsServed(t *testing.T) {
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("docs page missing %q", want)
+		}
+	}
+	// The source repository is private, so a reader of /docs cannot follow a
+	// link into it or clone it: the page has to stand on what a reader can reach.
+	for _, never := range []string{"github.com/theflywheel/DeDi-node", "git clone"} {
+		if strings.Contains(string(body), never) {
+			t.Errorf("docs page still points readers at %q, which they cannot reach", never)
 		}
 	}
 }
