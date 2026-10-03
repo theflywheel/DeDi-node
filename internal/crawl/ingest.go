@@ -71,11 +71,17 @@ type Ingester struct {
 // checkpoint would advance on data that never changed.
 func (in *Ingester) Ingest(ctx context.Context, res Result) (Ingested, error) {
 	var out Ingested
-	// Every file's namespace is checked before the first append, so a manifest
-	// whose second file is refused does not leave its first file ingested (#90).
+	// Every file is checked before the first append, so a manifest whose
+	// second file is refused does not leave its first file ingested (#90).
+	// A deterministic refusal left that way would recur on every crawl: the
+	// files after it would never update and the domain would never be pinned.
 	// Fetch already verified every file; this is the other half of a crawl
-	// being all-or-nothing.
+	// being all-or-nothing. A transient write failure can still stop a crawl
+	// partway, and the next crawl completes it.
 	for _, f := range res.Files {
+		if err := checkFile(f); err != nil {
+			return out, err
+		}
 		if err := in.mayMirror(ctx, res, f.Namespace); err != nil {
 			return out, err
 		}
@@ -91,6 +97,33 @@ func (in *Ingester) Ingest(ctx context.Context, res Result) (Ingested, error) {
 		out.Revoked += n.Revoked
 	}
 	return out, nil
+}
+
+// checkFile refuses a file the store would refuse partway through ingesting
+// it: an empty name, or a record that does not satisfy the file's own registry
+// schema, which is the schema its records are validated against once stored.
+func checkFile(f dedifile.File) error {
+	if f.Namespace == "" || f.Registry.Name == "" {
+		return fmt.Errorf("refusing to mirror a file with no namespace or registry name (%s)", f.SourceURL)
+	}
+	// Round-tripped the way the stored registry payload is read back.
+	var schema map[string]any
+	if raw, err := json.Marshal(f.Registry.Schema); err == nil {
+		json.Unmarshal(raw, &schema)
+	}
+	for _, rec := range f.Records {
+		if rec.RecordName == "" {
+			return fmt.Errorf("refusing to mirror %s/%s: a record has no record_name", f.Namespace, f.Registry.Name)
+		}
+		payload := rec.Details
+		if len(payload) == 0 {
+			payload = []byte(`{}`)
+		}
+		if err := store.ValidateAgainstSchema(schema, payload); err != nil {
+			return fmt.Errorf("refusing to mirror %s/%s/%s: %w", f.Namespace, f.Registry.Name, rec.RecordName, err)
+		}
+	}
+	return nil
 }
 
 // mayMirror refuses a namespace a crawl of res must not write into.
@@ -119,10 +152,16 @@ func (in *Ingester) mayMirror(ctx context.Context, res Result, ns string) error 
 	return nil
 }
 
-// ingestFile writes one file. Its namespace has already passed mayMirror.
+// ingestFile writes one file. It has already passed checkFile and mayMirror.
 func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File) (Ingested, error) {
 	var out Ingested
 	ns, reg := f.Namespace, f.Registry.Name
+	// Checked again here as well as up front: the operator may have created
+	// this namespace while earlier files were being written, and crawled
+	// records in a namespace we publish would be re-signed as ours.
+	if err := in.mayMirror(ctx, res, ns); err != nil {
+		return out, err
+	}
 
 	nsPayload, err := json.Marshal(map[string]any{
 		"description": "mirrored from " + res.Domain,
@@ -135,6 +174,8 @@ func (in *Ingester) ingestFile(ctx context.Context, res Result, f dedifile.File)
 	case errors.Is(err, store.ErrNotFound):
 		if err := in.append(ctx, res, store.AppendInput{
 			EntryType: "namespace", Namespace: ns, PayloadRaw: nsPayload,
+			// Nor between this Resolve and the append.
+			ExpectedAbsent: true,
 		}); err != nil {
 			return out, err
 		}

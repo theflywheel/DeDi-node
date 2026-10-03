@@ -204,7 +204,15 @@ func TestIngestRefusesTheReservedPrefix(t *testing.T) {
 // TestIngestIsAllOrNothing: a manifest with one refused namespace writes
 // nothing, not the files that happened to come before it (#90).
 func TestIngestIsAllOrNothing(t *testing.T) {
-	for _, refused := range []string{"_witness", "partner.example"} {
+	for _, c := range []struct {
+		why, ns, record string
+		details         json.RawMessage
+	}{
+		{"reserved prefix", "_witness", "r", json.RawMessage(`{}`)},
+		{"namespace we own", "partner.example", "r", json.RawMessage(`{}`)},
+		{"record breaks the registry schema", "bbb.example", "r", json.RawMessage(`[1]`)},
+		{"record with no name", "bbb.example", "", json.RawMessage(`{}`)},
+	} {
 		s := testStore(t)
 		ctx := context.Background()
 		if _, err := s.Append(ctx, store.AppendInput{EntryType: "namespace", Namespace: "partner.example",
@@ -215,19 +223,19 @@ func TestIngestIsAllOrNothing(t *testing.T) {
 		// The stub lists files sorted by registry, so the good "a" file comes
 		// before the refused one, and "z" after it.
 		p.publish("aaa.example", "a", []dedifile.Record{{RecordName: "a", Details: json.RawMessage(`{}`)}}, testNextUpdate)
-		p.publish(refused, "r", []dedifile.Record{{RecordName: "r", Details: json.RawMessage(`{}`)}}, testNextUpdate)
+		p.publish(c.ns, "r", []dedifile.Record{{RecordName: c.record, Details: c.details}}, testNextUpdate)
 		p.publish("zzz.example", "z", []dedifile.Record{{RecordName: "z", Details: json.RawMessage(`{}`)}}, testNextUpdate)
 
 		res, err := fetcher().Fetch(ctx, "http://"+p.origin(), "")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: Fetch: %v", c.why, err)
 		}
 		if _, err := (&Ingester{Store: s, Writer: s}).Ingest(ctx, res); err == nil {
-			t.Fatalf("%s: a crawl with a refused namespace succeeded", refused)
+			t.Fatalf("%s: the crawl succeeded", c.why)
 		}
-		for _, ns := range []string{"aaa.example", "zzz.example"} {
+		for _, ns := range []string{"aaa.example", "bbb.example", "zzz.example"} {
 			if _, err := s.Resolve(ctx, "namespace", ns, "", "", nil, nil); !errors.Is(err, store.ErrNotFound) {
-				t.Errorf("%s refused, but %s was still ingested: %v", refused, ns, err)
+				t.Errorf("%s: refused, but %s was still ingested: %v", c.why, ns, err)
 			}
 		}
 	}
