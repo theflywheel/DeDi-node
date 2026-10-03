@@ -673,10 +673,6 @@ func serve() error {
 		return fmt.Errorf("DEDI_STATS_FLUSH_INTERVAL must be positive")
 	}
 
-	// A node that minted its own key already knows its verifier key, so the
-	// explorer can show it without the operator copying it back in by hand.
-	// An explicit DEDI_VERIFIER_KEY still wins, since only the operator knows
-	// the public half of a key they supplied themselves.
 	// The other nodes carrying this network. Observing them is a different and
 	// weaker thing than witnessing one of them: this only establishes that a
 	// peer answered, which is what a network overview should claim and no more.
